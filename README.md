@@ -2,10 +2,10 @@
 
 A macOS screen recorder built with [Exact](https://github.com/expo/exact). It records, edits and exports polished screen videos.
 
-- **Record** an area you drag out, a whole display, or one window.
+- **Record** an area you drag out, a whole display, or one window. A dragged area stays selected on the dimmed screen: move it, resize it from its handles, then press Record (or Return); Escape cancels.
 - **Simulators and emulators are cropped to the device bezel.** An iOS Simulator or Android emulator window is captured on its own with its alpha channel, and the device's opaque shape is detected in the first frame. The title bar, toolbar and desktop never reach the video. If the detection is off, trim each edge in the editor.
 - **Frame**: a gradient background, padding, rounded corners, a shadow, and an output shape (16:9, 9:16, 1:1, 4:3 or fit).
-- **Timeline**: a filmstrip with cuts over it, and a track each for zooms (in or out, following the cursor), speed (0.25× to 8×) and effects (spotlight on the cursor, cursor highlight, blur, black and white). Add a segment at the playhead, drag it or its edges, click it to change it in the inspector, split it at the playhead. Delete removes the selection, Space plays, the arrow keys step a frame (Shift: a second).
+- **Timeline**: a filmstrip with cuts over it, and as many effect lanes as you need. The Add menu puts a zoom in, zoom out, slow down, speed up, spotlight, cursor highlight, blur, black and white, or cut at the playhead. Effects overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Drag a segment to move it (below the last lane for a new one) or its edges to resize; click it to change it in the inspector; split it at the playhead. Delete removes the selection, Space plays, the arrow keys step a frame (Shift: a second).
 - **Zoom on clicks**: a new recording starts with a zoom around each group of clicks; the button regenerates them.
 - **Export** an MP4 to `~/Movies/Exact Studio/`.
 

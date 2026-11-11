@@ -1,38 +1,45 @@
 // `<studio-timeline clip=…>`: the recording's timeline, in source time.
-// A ruler; the clip as a filmstrip, its cuts hatched over it; then a track
-// each for zooms, speed and effects. Click to seek, click a segment to
-// select it, drag it to move, drag an edge to resize; Delete removes the
-// selection, Space plays.
+// A ruler; the clip as a filmstrip with its cuts hatched over it; then as
+// many lanes as the effects need. Any effect sits on any lane, and effects
+// may overlap in time across lanes unless they clash (two zooms, two speed
+// changes, two of one visual effect). Click to seek, click a segment to
+// select it, drag it to move it (across lanes too: below the last opens a
+// new one), drag an edge to resize; Delete removes the selection, Space
+// plays, the arrow keys step a frame (Shift: a second).
 #if os(macOS)
 import AppKit
 import AVFoundation
 
 final class TimelineView: NSView {
     weak var editor: Editor?
+    var onHeight: (CGFloat) -> Void = { _ in }
     private var thumbs: [CGImage] = []
     private var thumbsFor = ""
     private var timeObserver: Any?
     private weak var observedPlayer: AVPlayer?
+    private var lastHeight: CGFloat = 0
 
-    private enum Drag { case scrub, move(String, String, Double, Double, Double), left(String, String, Double, Double), right(String, String, Double, Double) }
+    private enum Drag { case scrub, move(String, Double, Double, Double), left(String, Double, Double, Int), right(String, Double, Double, Int) }
     private var drag: Drag?
     private var moved = false
 
     // Geometry, top-down (the view is flipped).
-    private let labelWidth: CGFloat = 86, pad: CGFloat = 14
-    private let rulerTop: CGFloat = 10, rulerHeight: CGFloat = 20
-    private let clipTop: CGFloat = 34, clipHeight: CGFloat = 56
-    private let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
-    private static let lanes: [(track: String, label: String, symbol: String, color: NSColor)] = [
-        ("zoom", "Zoom", "plus.magnifyingglass", .systemBlue),
-        ("speed", "Speed", "gauge.with.dots.needle.67percent", .systemOrange),
-        ("effect", "Effects", "sparkles", .systemPurple),
-    ]
-    static var height: CGFloat { 34 + 56 + 8 + CGFloat(lanes.count) * (28 + 8) + 8 }
+    private static let labelWidth: CGFloat = 86, pad: CGFloat = 14
+    private static let rulerTop: CGFloat = 10, rulerHeight: CGFloat = 20
+    private static let clipTop: CGFloat = 34, clipHeight: CGFloat = 56
+    private static let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
+    static func height(lanes: Int) -> CGFloat { clipTop + clipHeight + laneGap + CGFloat(lanes) * (laneHeight + laneGap) + 8 }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// Lanes shown: those in use, and while a segment is dragged, one more to drop it on.
+    private var lanesShown: Int {
+        guard let editor else { return 1 }
+        if case .move = drag { return editor.edits.lanes + 1 }
+        return editor.edits.lanes
+    }
 
     func attach(_ editor: Editor?) {
         if let old = self.editor, old !== editor { old.unlisten(self) }
@@ -40,16 +47,22 @@ final class TimelineView: NSView {
         timeObserver = nil
         self.editor = editor
         guard let editor else { needsDisplay = true; return }
-        editor.listen(self) { [weak self] in self?.needsDisplay = true }
+        editor.listen(self) { [weak self] in self?.changed() }
         observedPlayer = editor.player
         timeObserver = editor.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in
             self?.needsDisplay = true
         }
         loadThumbs(editor)
-        needsDisplay = true
+        changed()
     }
 
     func detach() { attach(nil) }
+
+    private func changed() {
+        needsDisplay = true
+        let h = Self.height(lanes: editor?.edits.lanes ?? 1)
+        if h != lastHeight { lastHeight = h; onHeight(h) }
+    }
 
     private func loadThumbs(_ editor: Editor) {
         guard thumbsFor != editor.id else { return }
@@ -78,7 +91,7 @@ final class TimelineView: NSView {
 
     // MARK: Mapping
 
-    private var trackRect: CGRect { CGRect(x: labelWidth, y: 0, width: max(1, bounds.width - labelWidth - pad), height: bounds.height) }
+    private var trackRect: CGRect { CGRect(x: Self.labelWidth, y: 0, width: max(1, bounds.width - Self.labelWidth - Self.pad), height: bounds.height) }
     private func x(_ t: Double) -> CGFloat {
         guard let d = editor?.duration, d > 0 else { return trackRect.minX }
         return trackRect.minX + CGFloat(t / d) * trackRect.width
@@ -87,7 +100,21 @@ final class TimelineView: NSView {
         guard let d = editor?.duration, d > 0 else { return 0 }
         return Double(min(max((x - trackRect.minX) / trackRect.width, 0), 1)) * d
     }
-    private func laneY(_ i: Int) -> CGFloat { clipTop + clipHeight + laneGap + CGFloat(i) * (laneHeight + laneGap) }
+    private func laneY(_ i: Int) -> CGFloat { Self.clipTop + Self.clipHeight + Self.laneGap + CGFloat(i) * (Self.laneHeight + Self.laneGap) }
+    private func lane(at y: CGFloat) -> Int { max(0, Int((y - laneY(0)) / (Self.laneHeight + Self.laneGap))) }
+
+    static func color(_ s: Segment) -> NSColor {
+        switch s.kind {
+        case "cut": return .systemRed
+        case "zoom": return (s.level ?? 2) < 1 ? .systemTeal : .systemBlue
+        case "speed": return .systemOrange
+        case "spotlight": return .systemPurple
+        case "highlight": return .systemYellow
+        case "blur": return .systemIndigo
+        case "mono": return .systemGray
+        default: return .systemPink
+        }
+    }
 
     // MARK: Drawing
 
@@ -96,8 +123,9 @@ final class TimelineView: NSView {
         NSBezierPath(roundedRect: bounds, xRadius: 14, yRadius: 14).fill()
         guard let editor else { return }
         let d = editor.duration
+        let rulerTop = Self.rulerTop, rulerHeight = Self.rulerHeight, clipTop = Self.clipTop, clipHeight = Self.clipHeight
 
-        // The ruler: a tick a second (or every 5 or 10 on long clips), labelled.
+        // The ruler: a tick a second (or every 2, 5 or 10 on long clips), labelled.
         let step: Double = d > 120 ? 10 : d > 40 ? 5 : d > 12 ? 2 : 1
         let small: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium), .foregroundColor: NSColor(white: 1, alpha: 0.45)]
         var s = 0.0
@@ -109,12 +137,8 @@ final class TimelineView: NSView {
             s += step
         }
 
-        // Track labels.
         let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor(white: 1, alpha: 0.7)]
         drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7))
-        for (i, lane) in Self.lanes.enumerated() {
-            drawLabel(lane.label, symbol: lane.symbol, y: laneY(i), height: laneHeight, attrs: label, tint: lane.color)
-        }
 
         // The clip: a filmstrip.
         let clipRect = CGRect(x: trackRect.minX, y: clipTop, width: trackRect.width, height: clipHeight)
@@ -145,8 +169,7 @@ final class TimelineView: NSView {
         for c in editor.edits.cuts {
             let r = CGRect(x: x(c.start), y: clipTop, width: max(2, x(c.end) - x(c.start)), height: clipHeight)
             NSGraphicsContext.saveGraphicsState()
-            let path = NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6)
-            path.addClip()
+            NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).addClip()
             NSColor.systemRed.withAlphaComponent(0.42).setFill()
             r.fill()
             NSColor(white: 0, alpha: 0.3).setStroke()
@@ -159,28 +182,33 @@ final class TimelineView: NSView {
                 hx += 10
             }
             NSGraphicsContext.restoreGraphicsState()
-            stroke(r, selected: editor.selected == ("cut", c.id), color: .systemRed)
+            stroke(r, selected: editor.selected == c.id)
             title("Cut", in: r)
         }
 
-        // The lanes and their segments.
-        for (i, lane) in Self.lanes.enumerated() {
+        // The lanes.
+        let effects = editor.edits.segments.filter { $0.kind != "cut" }
+        for i in 0..<lanesShown {
             let y = laneY(i)
-            NSColor(white: 1, alpha: 0.05).setFill()
-            NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: y, width: trackRect.width, height: laneHeight), xRadius: 7, yRadius: 7).fill()
-            for seg in editor.edits[lane.track] {
-                let r = CGRect(x: x(seg.start), y: y + 2, width: max(4, x(seg.end) - x(seg.start)), height: laneHeight - 4)
-                let selected = editor.selected == (lane.track, seg.id)
-                lane.color.withAlphaComponent(selected ? 0.95 : 0.75).setFill()
-                NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
-                stroke(r, selected: selected, color: lane.color)
-                title(Self.caption(lane.track, seg), in: r)
-                // Grips at the edges.
-                NSColor(white: 1, alpha: 0.55).setFill()
-                if r.width > 24 {
-                    NSBezierPath(roundedRect: CGRect(x: r.minX + 3, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
-                    NSBezierPath(roundedRect: CGRect(x: r.maxX - 5, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
-                }
+            if i == 0 { drawLabel("Effects", symbol: "sparkles", y: y, height: Self.laneHeight, attrs: label, tint: .systemPurple) }
+            NSColor(white: 1, alpha: i < editor.edits.lanes ? 0.05 : 0.025).setFill()
+            NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: y, width: trackRect.width, height: Self.laneHeight), xRadius: 7, yRadius: 7).fill()
+        }
+        if effects.isEmpty {
+            let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(white: 1, alpha: 0.35)]
+            ("No effects yet. Add one with the Add menu above." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: laneY(0) + 7), withAttributes: hint)
+        }
+        for seg in effects {
+            let r = CGRect(x: x(seg.start), y: laneY(seg.lane) + 2, width: max(4, x(seg.end) - x(seg.start)), height: Self.laneHeight - 4)
+            let selected = editor.selected == seg.id
+            Self.color(seg).withAlphaComponent(selected ? 0.95 : 0.78).setFill()
+            NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
+            stroke(r, selected: selected)
+            title(Self.caption(seg), in: r, dark: seg.kind == "highlight")
+            NSColor(white: 1, alpha: 0.55).setFill()
+            if r.width > 24 {
+                NSBezierPath(roundedRect: CGRect(x: r.minX + 3, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
+                NSBezierPath(roundedRect: CGRect(x: r.maxX - 5, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
             }
         }
 
@@ -204,13 +232,13 @@ final class TimelineView: NSView {
             tint.set()
             CGRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop)
             tinted.unlockFocus()
-            tinted.draw(in: CGRect(x: pad, y: y + height / 2 - tinted.size.height / 2, width: tinted.size.width, height: tinted.size.height),
+            tinted.draw(in: CGRect(x: Self.pad, y: y + height / 2 - tinted.size.height / 2, width: tinted.size.width, height: tinted.size.height),
                         from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }
-        (text as NSString).draw(at: CGPoint(x: pad + 20, y: y + height / 2 - 7), withAttributes: attrs)
+        (text as NSString).draw(at: CGPoint(x: Self.pad + 20, y: y + height / 2 - 7), withAttributes: attrs)
     }
 
-    private func stroke(_ r: CGRect, selected: Bool, color: NSColor) {
+    private func stroke(_ r: CGRect, selected: Bool) {
         guard selected else { return }
         NSColor.white.setStroke()
         let p = NSBezierPath(roundedRect: r.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
@@ -218,26 +246,27 @@ final class TimelineView: NSView {
         p.stroke()
     }
 
-    private func title(_ text: String, in r: CGRect) {
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.white]
+    private func title(_ text: String, in r: CGRect, dark: Bool = false) {
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: dark ? NSColor.black : NSColor.white]
         let s = text as NSString
         let size = s.size(withAttributes: attrs)
         guard r.width > size.width + 16 else { return }
         s.draw(at: CGPoint(x: r.minX + 10, y: r.midY - size.height / 2), withAttributes: attrs)
     }
 
-    static func caption(_ track: String, _ s: Segment) -> String {
-        switch track {
+    static func caption(_ s: Segment) -> String {
+        switch s.kind {
         case "zoom":
             let l = s.level ?? 2
-            return l < 1 ? "Zoom out \(trim(l))×" : "Zoom \(trim(l))×"
+            return l < 1 ? "Zoom out \(trim(l))×" : "Zoom in \(trim(l))×"
         case "speed":
             let r = s.rate ?? 1
             return r < 1 ? "Slow \(trim(r))×" : "Fast \(trim(r))×"
-        case "effect":
-            return ["blur": "Blur", "mono": "Black & white", "spotlight": "Spotlight", "highlight": "Cursor highlight"][s.kind ?? ""] ?? "Effect"
-        default:
-            return "Cut"
+        case "spotlight": return "Spotlight"
+        case "highlight": return "Cursor highlight"
+        case "blur": return "Blur"
+        case "mono": return "Black & white"
+        default: return "Cut"
         }
     }
 
@@ -250,16 +279,14 @@ final class TimelineView: NSView {
 
     // MARK: Interaction
 
-    private func hit(_ p: CGPoint) -> (String, Segment)? {
+    private func hit(_ p: CGPoint) -> Segment? {
         guard let editor else { return nil }
-        if p.y >= clipTop, p.y <= clipTop + clipHeight {
-            if let c = editor.edits.cuts.last(where: { p.x >= x($0.start) - 3 && p.x <= x($0.end) + 3 }) { return ("cut", c) }
-            return nil
-        }
-        for (i, lane) in Self.lanes.enumerated() where p.y >= laneY(i) && p.y <= laneY(i) + laneHeight {
-            if let s = editor.edits[lane.track].last(where: { p.x >= x($0.start) - 3 && p.x <= x($0.end) + 3 }) { return (lane.track, s) }
-        }
-        return nil
+        let near = { (s: Segment) in p.x >= self.x(s.start) - 3 && p.x <= self.x(s.end) + 3 }
+        if p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight { return editor.edits.cuts.last(where: near) }
+        guard p.y >= laneY(0) else { return nil }
+        let l = lane(at: p.y)
+        guard p.y <= laneY(l) + Self.laneHeight else { return nil }
+        return editor.edits.segments.last { $0.kind != "cut" && $0.lane == l && near($0) }
     }
 
     override func mouseDown(with e: NSEvent) {
@@ -267,14 +294,14 @@ final class TimelineView: NSView {
         guard let editor else { return }
         let p = convert(e.locationInWindow, from: nil)
         moved = false
-        if let (track, s) = hit(p) {
-            editor.select(track, s.id)
-            let edge: CGFloat = 7
-            if p.x - x(s.start) < edge && x(s.end) - x(s.start) > edge * 2 { drag = .left(track, s.id, s.start, s.end) }
-            else if x(s.end) - p.x < edge && x(s.end) - x(s.start) > edge * 2 { drag = .right(track, s.id, s.start, s.end) }
-            else { drag = .move(track, s.id, s.start, s.end, t(p.x)) }
+        if let s = hit(p) {
+            editor.select(s.id)
+            let edge: CGFloat = 7, wide = x(s.end) - x(s.start) > edge * 2
+            if wide && p.x - x(s.start) < edge { drag = .left(s.id, s.start, s.end, s.lane) }
+            else if wide && x(s.end) - p.x < edge { drag = .right(s.id, s.start, s.end, s.lane) }
+            else { drag = .move(s.id, s.start, s.end, t(p.x)) }
         } else {
-            if p.y > clipTop { editor.select("", "") }
+            if p.y > Self.clipTop { editor.select("") }
             drag = .scrub
             editor.seek(source: t(p.x))
         }
@@ -288,27 +315,24 @@ final class TimelineView: NSView {
         switch drag {
         case .scrub:
             editor.seek(source: now)
-        case let .move(track, id, s, end, grab):
+        case let .move(id, s, end, grab):
             let len = end - s
             let start = min(max(s + now - grab, 0), editor.duration - len)
-            editor.set(track, id, start: start, end: start + len, commit: false)
-        case let .left(track, id, _, end):
-            editor.set(track, id, start: min(now, end - 0.1), end: end, commit: false)
-        case let .right(track, id, s, _):
-            editor.set(track, id, start: s, end: max(now, s + 0.1), commit: false)
+            editor.drag(id, start: start, end: start + len, lane: min(lane(at: p.y), editor.edits.lanes))
+        case let .left(id, _, end, l):
+            editor.drag(id, start: min(now, end - 0.1), end: end, lane: l)
+        case let .right(id, s, _, l):
+            editor.drag(id, start: s, end: max(now, s + 0.1), lane: l)
         }
         needsDisplay = true
     }
 
     override func mouseUp(with e: NSEvent) {
         if let drag, moved, let editor {
-            if case .scrub = drag {} else { editor.commitDrag() }
+            if case .scrub = drag {} else { editor.endDrag() }
         }
         drag = nil
-    }
-
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .arrow)
+        changed()
     }
 
     override func keyDown(with e: NSEvent) {
@@ -323,7 +347,7 @@ final class TimelineView: NSView {
     }
 }
 
-/// The view Exact places.
+/// The view Exact places; its height follows the lanes.
 final class Timeline: ExactNativeInstance {
     private let strip = TimelineView()
     private let studio: Studio
@@ -332,8 +356,9 @@ final class Timeline: ExactNativeInstance {
     init(_ studio: Studio, _ props: [String: String], _ events: ExactNativeEvents) {
         self.studio = studio
         super.init(events: events)
+        strip.onHeight = { h in events.intrinsicSize(CGSize(width: 800, height: h)) }
+        events.intrinsicSize(CGSize(width: 800, height: TimelineView.height(lanes: 1)))
         try? setProps(props)
-        events.intrinsicSize(CGSize(width: 800, height: TimelineView.height))
     }
 
     override var view: ExactNativeView { strip }

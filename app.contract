@@ -29,19 +29,18 @@ shape RecordingList
   items: Recording[]
 
 shape SegmentInfo
-  track: string
   id: string
+  kind: string
   level: number
   rate: number
-  kind: string
   start: number
   end: number
+  problem: string
 
 shape Summary
   cuts: number
-  zooms: number
-  speeds: number
   effects: number
+  lanes: number
   length: number
   source: number
 
@@ -66,8 +65,9 @@ fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn trackLabel(track: string): string = track == "cut" ? "Cut" : track == "zoom" ? "Zoom" : track == "speed" ? "Speed" : "Effect"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "cut" ? "Cut" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
+fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
 fn countLine(n: number, one: string, many: string): string = n == 1 ? `1 ${one}` : `${n} ${many}`
 
 routes nav
@@ -203,7 +203,7 @@ component ExactStudio
                             column width=34 height=34 border-radius=9 background-color="-exact-system-blue" align-items="center" justify-content="center"
                               image "symbol:sf/iphone" color="white" aria-hidden=true
                             column min-width=0 flex=1 align-items="flex-start"
-                              text s.name line-clamp=1 font-weight=500
+                              text s.name line-clamp=1 font-weight=500 text-align="left" align-self="stretch"
                               text `${s.app} · fits the bezel` font="-exact-caption1" color="-exact-system-teal" line-clamp=1
                             image "symbol:sf/record.circle" color="-exact-system-red" aria-hidden=true
                   column gap=4
@@ -241,8 +241,8 @@ component ExactStudio
                         column width=34 height=34 border-radius=9 background-color=(r.id == selected ? "-exact-system-blue" : "-exact-tertiary-fill") align-items="center" justify-content="center"
                           image kindSymbol(r.kind) color=(r.id == selected ? "white" : "-exact-secondary-label") aria-hidden=true
                         column min-width=0 flex=1 align-items="flex-start"
-                          text r.name line-clamp=1 font-weight=(r.id == selected ? 600 : 400)
-                          text `${kindLabel(r.kind)} · ${mmss(r.duration)}` font="-exact-caption1" color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          text r.name line-clamp=1 font-weight=(r.id == selected ? 600 : 400) text-align="left" align-self="stretch"
+                          text `${kindLabel(r.kind)} · ${mmss(r.duration)}` font="-exact-caption1" color="-exact-secondary-label" font-variant-numeric="tabular-nums" text-align="left" align-self="stretch"
 
             // ── The stage: the framed preview, the edit bar and the timeline.
             match current
@@ -259,27 +259,49 @@ component ExactStudio
                     button press=editDo("play") aria-label="Play or pause" buttonStyle="filled" testId="play"
                       image "symbol:play-fill"
                     column width=1 height=22 background-color="-exact-separator"
-                    button press=add("cut") buttonStyle="bordered" testId="add-cut"
-                      image "symbol:sf/scissors"
-                      text "Cut"
-                    button press=add("zoom") buttonStyle="bordered" testId="add-zoom"
-                      image "symbol:sf/plus.magnifyingglass"
-                      text "Zoom"
-                    button press=add("speed") buttonStyle="bordered" testId="add-speed"
-                      image "symbol:sf/gauge.with.dots.needle.67percent"
-                      text "Speed"
-                    button press=add("effect") buttonStyle="bordered" testId="add-effect"
-                      image "symbol:sparkles"
-                      text "Effect"
+                    button popovertarget="add-menu" buttonStyle="bordered" testId="add"
+                      image "symbol:add"
+                      text "Add"
+                    column id="add-menu" popover="auto" role="menu" aria-label="Add at the playhead"
+                      button press=add("zoom-in") popovertarget="add-menu" popovertargetaction="hide" testId="add-zoom-in"
+                        image "symbol:sf/plus.magnifyingglass"
+                        text "Zoom In"
+                      button press=add("zoom-out") popovertarget="add-menu" popovertargetaction="hide" testId="add-zoom-out"
+                        image "symbol:sf/minus.magnifyingglass"
+                        text "Zoom Out"
+                      hr
+                      button press=add("slow") popovertarget="add-menu" popovertargetaction="hide" testId="add-slow"
+                        image "symbol:sf/tortoise"
+                        text "Slow Down"
+                      button press=add("fast") popovertarget="add-menu" popovertargetaction="hide" testId="add-fast"
+                        image "symbol:sf/hare"
+                        text "Speed Up"
+                      hr
+                      button press=add("spotlight") popovertarget="add-menu" popovertargetaction="hide" testId="add-spotlight"
+                        image "symbol:sf/flashlight.on.fill"
+                        text "Spotlight"
+                      button press=add("highlight") popovertarget="add-menu" popovertargetaction="hide" testId="add-highlight"
+                        image "symbol:sf/cursorarrow.rays"
+                        text "Cursor Highlight"
+                      button press=add("blur") popovertarget="add-menu" popovertargetaction="hide" testId="add-blur"
+                        image "symbol:sf/drop"
+                        text "Blur"
+                      button press=add("mono") popovertarget="add-menu" popovertargetaction="hide" testId="add-mono"
+                        image "symbol:sf/circle.lefthalf.filled"
+                        text "Black & White"
+                      hr
+                      button press=add("cut") popovertarget="add-menu" popovertargetaction="hide" destructive=true testId="add-cut"
+                        image "symbol:sf/scissors"
+                        text "Cut"
                     column width=1 height=22 background-color="-exact-separator"
-                    button press=editDo("split") buttonStyle="bordered" disabled=(sel.track == "") testId="split"
+                    button press=editDo("split") buttonStyle="bordered" disabled=(sel.id == "") testId="split"
                       image "symbol:sf/square.split.1x2"
                       text "Split"
                     button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
                       image "symbol:sf/cursorarrow.click.2"
                       text "Zoom on Clicks"
                     text `${mmss(summary.length)} of ${mmss(summary.source)}` flex=1 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
-                  studio-timeline clip=rec.id aria-label="Timeline" height=214 testId="timeline"
+                  studio-timeline clip=rec.id aria-label="Timeline" testId="timeline"
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
@@ -296,23 +318,27 @@ component ExactStudio
                           button press=reveal testId="reveal"
                             text "Show" font="-exact-footnote"
 
-                  if sel.track != ""
+                  if sel.problem != ""
+                    row gap=8 padding=12 border-radius=12 background-color="-exact-tertiary-background" align-items="flex-start" testId="problem"
+                      image "symbol:alert" color="-exact-system-orange" aria-hidden=true
+                      text sel.problem font="-exact-footnote" flex=1
+                  if sel.id != ""
                     column gap=12 padding=14 border-radius=14 background-color="-exact-tertiary-background" testId="segment"
                       row align-items="center" gap=8
-                        text trackLabel(sel.track) font="-exact-headline" flex=1
+                        text kindTitle(sel.kind, sel.level, sel.rate) font="-exact-headline" flex=1 testId="segment-title"
                         text `${mmss(sel.start)}–${mmss(sel.end)}` font="-exact-footnote" font-variant-numeric="tabular-nums" color="-exact-secondary-label"
-                      if sel.track == "zoom"
-                        text "In" font="-exact-caption1" color="-exact-secondary-label"
+                      if sel.kind == "zoom"
+                        text "Zoom in" font="-exact-caption1" color="-exact-secondary-label"
                         row role="radiogroup" aria-label="Zoom in"
                           for z in [1.5, 2, 2.5, 3] key=z
                             button role="radio" aria-checked=(sel.level == z) press=setNumber(z) testId=`level-${z}` flex=1
                               text `${z}×`
-                        text "Out" font="-exact-caption1" color="-exact-secondary-label"
+                        text "Zoom out" font="-exact-caption1" color="-exact-secondary-label"
                         row role="radiogroup" aria-label="Zoom out"
                           for z in [0.5, 0.7, 0.85] key=z
                             button role="radio" aria-checked=(sel.level == z) press=setNumber(z) testId=`level-${z}` flex=1
                               text `${z}×`
-                      if sel.track == "speed"
+                      if sel.kind == "speed"
                         text "Slow down" font="-exact-caption1" color="-exact-secondary-label"
                         row role="radiogroup" aria-label="Slow down"
                           for r in [0.25, 0.5, 0.75] key=r
@@ -323,12 +349,15 @@ component ExactStudio
                           for r in [1.5, 2, 4, 8] key=r
                             button role="radio" aria-checked=(sel.rate == r) press=setNumber(r) testId=`rate-${r}` flex=1
                               text `${r}×`
-                      if sel.track == "effect"
-                        row role="radiogroup" aria-label="Effect"
-                          for k in ["spotlight", "highlight", "blur", "mono"] key=k
-                            button role="radio" aria-checked=(sel.kind == k) press=setKind(k) testId=`effect-${k}` flex=1
-                              text effectLabel(k)
-                      if sel.track == "cut"
+                      if isVisual(sel.kind)
+                        row align-items="center" gap=8
+                          text "Effect" flex=1
+                          select value=sel.kind change=setKind aria-label="Effect" testId="effect-kind"
+                            option "Spotlight" value="spotlight"
+                            option "Cursor highlight" value="highlight"
+                            option "Blur" value="blur"
+                            option "Black & white" value="mono"
+                      if sel.kind == "cut"
                         text "This part is left out of the video. Drag its edges on the timeline." font="-exact-footnote" color="-exact-secondary-label"
                       row gap=8
                         button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
@@ -338,8 +367,8 @@ component ExactStudio
                   else
                     column gap=6 padding=14 border-radius=14 background-color="-exact-tertiary-background"
                       text "Timeline" font="-exact-headline"
-                      text `${countLine(summary.cuts, "cut", "cuts")} · ${countLine(summary.zooms, "zoom", "zooms")} · ${countLine(summary.speeds, "speed change", "speed changes")} · ${countLine(summary.effects, "effect", "effects")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
-                      text "Add a segment at the playhead from the bar above, then drag it or its edges. Click one to change it; Delete removes it, Space plays." font="-exact-footnote" color="-exact-tertiary-label"
+                      text `${countLine(summary.cuts, "cut", "cuts")} · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
+                      text "Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Drag a segment to move it, or below the last lane for a new one. Delete removes the selected segment; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
 
                   column gap=12
                     text "BACKGROUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6

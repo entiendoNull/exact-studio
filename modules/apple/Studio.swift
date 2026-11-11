@@ -4,14 +4,15 @@
 // and "edits" (a recording's edits or selection changed).
 //
 //   call   {op: "status"}                       → {recording, name, kind}
-//          {op: "selection", id}                → {track, id, level, rate, kind, start, end}
-//          {op: "summary", id}                  → {cuts, zooms, speeds, effects, length, source}
+//          {op: "selection", id}                → {id, kind, level, rate, start, end, problem}
+//          {op: "summary", id}                  → {cuts, effects, lanes, length, source}
 //   later  {op: "sources"}                      → {items: [{id, name, app, kind}], allowed}
 //          {op: "start", source}                → {ok, error}   source "area" opens the picker
 //          {op: "stop"}                         → {ok, error, id}
 //          {op: "recordings"}                   → {items: [{id, name, kind, created, duration}]}
 //          {op: "edit", id, do, track?, number?, kind?}  → {ok}
-//                 do: add (track), set (number | kind), delete, split, auto, clear, play
+//                 do: add (track: a kind, or zoom-in, zoom-out, slow, fast), set (number | kind),
+//                     delete, split, auto, clear, play
 //          {op: "export", id, look}             → {ok, error, path}
 //          {op: "delete", id}                   → {ok, error}
 //          {op: "reveal", path}                 → {ok}
@@ -36,6 +37,11 @@ final class Studio: ExactModule {
     private var statusItem: NSStatusItem?
     private var editors: [String: Editor] = [:]
 
+    required init(context: ExactModuleContext) {
+        super.init(context: context)
+        if context.agent { Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true) }
+    }
+
     /// The open recording's editor, made on first use.
     func editor(_ id: String) -> Editor? {
         guard !id.isEmpty, !id.contains("/") else { return nil }
@@ -46,7 +52,7 @@ final class Studio: ExactModule {
         return e
     }
 
-    private static let emptySelection: [String: Any] = ["track": "", "id": "", "level": 0, "rate": 0, "kind": "", "start": 0, "end": 0]
+    private static let emptySelection: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "problem": ""]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {
         switch request["op"] as? String {
@@ -55,7 +61,7 @@ final class Studio: ExactModule {
         case "selection":
             return editor(request["id"] as? String ?? "")?.selection ?? Self.emptySelection
         case "summary":
-            return editor(request["id"] as? String ?? "")?.summary ?? ["cuts": 0, "zooms": 0, "speeds": 0, "effects": 0, "length": 0, "source": 0]
+            return editor(request["id"] as? String ?? "")?.summary ?? ["cuts": 0, "effects": 0, "lanes": 1, "length": 0, "source": 0]
         default:
             throw ExactNativeRefusal("studio answers status, selection and summary")
         }
@@ -106,7 +112,7 @@ final class Studio: ExactModule {
     private func edit(_ r: [String: Any]) {
         guard let e = editor(r["id"] as? String ?? "") else { return }
         switch r["do"] as? String {
-        case "add": e.add(r["track"] as? String ?? "zoom")
+        case "add": e.add(r["track"] as? String ?? "zoom-in")
         case "set": e.setValue(number: r["number"] as? Double, kind: r["kind"] as? String)
         case "delete": e.deleteSelected()
         case "split": e.splitSelected()

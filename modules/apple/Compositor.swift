@@ -39,42 +39,48 @@ struct Look: Codable, Equatable {
     }
 }
 
-/// One span on a track. `level` is a zoom's, `rate` a speed's, `kind` an effect's.
+/// One span on the timeline. `kind` is "cut", "zoom", "speed", or a visual
+/// effect ("spotlight", "highlight", "blur", "mono"); `level` is a zoom's
+/// (below 1 zooms out), `rate` a speed's. Cuts sit on the clip; everything
+/// else on a lane, any lane, as many lanes as the person makes.
 struct Segment: Codable, Equatable {
     var id: String
+    var kind: String
     var start: Double
     var end: Double
+    var lane: Int = 0
     var level: Double?
     var rate: Double?
-    var kind: String?
+
+    static let visual = ["spotlight", "highlight", "blur", "mono"]
+    static let kinds = ["cut", "zoom", "speed"] + visual
+
+    /// Two segments may overlap in time unless they share a group: one zoom at
+    /// a time, one speed at a time, one of each visual effect at a time.
+    var group: String { kind }
+
+    func overlaps(_ o: Segment) -> Bool { start < o.end - 0.0001 && o.start < end - 0.0001 }
 }
 
 /// A recording's edits, all in source seconds.
 struct Edits: Codable, Equatable {
-    var cuts: [Segment] = []
-    var zooms: [Segment] = []
-    var speeds: [Segment] = []
-    var effects: [Segment] = []
+    var segments: [Segment] = []
 
-    static let tracks = ["cut", "zoom", "speed", "effect"]
+    var cuts: [Segment] { segments.filter { $0.kind == "cut" } }
+    var zooms: [Segment] { segments.filter { $0.kind == "zoom" } }
+    var speeds: [Segment] { segments.filter { $0.kind == "speed" } }
+    var effects: [Segment] { segments.filter { Segment.visual.contains($0.kind) } }
+    /// The lanes in use, at least one.
+    var lanes: Int { max(1, (segments.filter { $0.kind != "cut" }.map(\.lane).max() ?? -1) + 1) }
 
-    subscript(track: String) -> [Segment] {
-        get {
-            switch track {
-            case "cut": return cuts
-            case "zoom": return zooms
-            case "speed": return speeds
-            default: return effects
-            }
+    /// Why `s` cannot sit where it is, or nil when it can: a same-group
+    /// segment overlapping it anywhere, or any segment overlapping it on its lane.
+    func conflict(_ s: Segment) -> String? {
+        for o in segments where o.id != s.id && o.overlaps(s) {
+            if o.group == s.group && s.kind != "cut" { return "Two \(Segment.noun(s.kind)) can’t overlap." }
+            if s.kind != "cut" && o.kind != "cut" && o.lane == s.lane { return "That lane is taken there; drop it on another lane." }
         }
-        set {
-            switch track {
-            case "cut": cuts = newValue
-            case "zoom": zooms = newValue
-            case "speed": speeds = newValue
-            default: effects = newValue
-            }
-        }
+        return nil
     }
 
     /// Zooms where the clicks are: clicks less than 3 s apart share one,
@@ -86,10 +92,17 @@ struct Edits: Codable, Equatable {
             if let last = out.last, s - last.end < 1.0 {
                 out[out.count - 1].end = e
             } else {
-                out.append(Segment(id: "z\(out.count)-\(Int(c.t * 1000))", start: s, end: e, level: level))
+                out.append(Segment(id: "z\(out.count)-\(Int(c.t * 1000))", kind: "zoom", start: s, end: e, lane: 0, level: level))
             }
         }
         return out.filter { $0.end - $0.start > 0.3 }
+    }
+}
+
+extension Segment {
+    static func noun(_ kind: String) -> String {
+        ["cut": "cuts", "zoom": "zooms", "speed": "speed changes", "spotlight": "spotlights",
+         "highlight": "cursor highlights", "blur": "blurs", "mono": "black-and-white effects"][kind] ?? "effects"
     }
 }
 
@@ -210,7 +223,7 @@ struct Framing {
         for fx in edits.effects {
             let a = presence(fx, at: t, ramp: 0.25)
             guard a > 0.001 else { continue }
-            switch fx.kind ?? "blur" {
+            switch fx.kind {
             case "blur":
                 subjectImage = subjectImage.clampedToExtent().applyingGaussianBlur(sigma: 24 * a).cropped(to: subject)
             case "mono":

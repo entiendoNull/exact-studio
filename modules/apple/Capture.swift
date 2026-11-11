@@ -44,38 +44,41 @@ enum Sources {
     }
 }
 
-/// A full-screen overlay where the person drags out the area to record.
-/// Escape cancels. The rectangle comes back in the display's points, origin top-left.
+/// A full-screen overlay where the person drags out the area to record. The
+/// selection stays: drag inside it to move it, drag a handle to resize it,
+/// drag elsewhere for a new one. A bar beside it starts the recording
+/// (Return) or cancels (Escape). The rest of the screen is dimmed.
+/// The rectangle comes back in the display's points, origin top-left.
 final class AreaPicker: NSObject {
     private var windows: [NSWindow] = []
     private var done: ((NSScreen, CGRect)?) -> Void = { _ in }
 
     func pick(_ done: @escaping ((NSScreen, CGRect)?) -> Void) {
         self.done = done
+        let mouse = NSEvent.mouseLocation
         for screen in NSScreen.screens {
             let w = PickerWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
             w.level = .screenSaver
             w.isOpaque = false
             w.backgroundColor = .clear
-            w.ignoresMouseEvents = false
             w.acceptsMouseMovedEvents = true
             w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             let view = PickerView(frame: CGRect(origin: .zero, size: screen.frame.size))
             view.finish = { [weak self] rect in self?.finish(rect.map { (screen, $0) }) }
+            view.began = { [weak self, weak view] in
+                // One selection at a time: starting one on this screen clears the others.
+                self?.windows.compactMap { $0.contentView as? PickerView }.filter { $0 !== view }.forEach { $0.clear() }
+            }
             w.contentView = view
             w.setFrame(screen.frame, display: true)
-            w.makeKeyAndOrderFront(nil)
+            w.orderFrontRegardless()
+            if NSMouseInRect(mouse, screen.frame, false) { w.makeKey() }
             windows.append(w)
         }
         NSApp.activate(ignoringOtherApps: true)
-        if let first = windows.first(where: { $0.screen == NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }) }) ?? windows.first {
-            first.makeKey()
-        }
-        NSCursor.crosshair.push()
     }
 
     private func finish(_ result: (NSScreen, CGRect)?) {
-        NSCursor.pop()
         windows.forEach { $0.orderOut(nil) }
         windows = []
         let done = self.done
@@ -90,47 +93,168 @@ private final class PickerWindow: NSWindow {
 
 private final class PickerView: NSView {
     var finish: (CGRect?) -> Void = { _ in }
-    private var start: CGPoint?
-    private var current: CGPoint?
+    var began: () -> Void = {}
+
+    /// The selection, in this view's coordinates (origin bottom-left).
+    private var selection: CGRect?
+    private enum Mode { case new(CGPoint), move(CGPoint, CGRect), resize(Int, CGRect) }
+    private var mode: Mode?
+    private let bar = NSVisualEffectView()
+    private let size = NSTextField(labelWithString: "")
+    private let record = NSButton(title: "Record", target: nil, action: nil)
+    private let cancel = NSButton(title: "Cancel", target: nil, action: nil)
+    private static let handle: CGFloat = 10, minimum: CGFloat = 40
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        bar.material = .hudWindow
+        bar.state = .active
+        bar.blendingMode = .withinWindow
+        bar.wantsLayer = true
+        bar.layer?.cornerRadius = 12
+        bar.isHidden = true
+        size.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        size.textColor = .secondaryLabelColor
+        record.bezelStyle = .rounded
+        record.bezelColor = .systemRed
+        record.keyEquivalent = "\r"
+        record.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: nil)
+        record.imagePosition = .imageLeading
+        record.target = self
+        record.action = #selector(start)
+        cancel.bezelStyle = .rounded
+        cancel.keyEquivalent = "\u{1b}"
+        cancel.target = self
+        cancel.action = #selector(stop)
+        let stack = NSStackView(views: [size, cancel, record])
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 8)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: bar.leadingAnchor), stack.trailingAnchor.constraint(equalTo: bar.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: bar.topAnchor), stack.bottomAnchor.constraint(equalTo: bar.bottomAnchor),
+        ])
+        addSubview(bar)
+    }
+    required init?(coder: NSCoder) { fatalError() }
 
     override var acceptsFirstResponder: Bool { true }
     override func viewDidMoveToWindow() { window?.makeFirstResponder(self) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    private var selection: CGRect? {
-        guard let a = start, let b = current else { return nil }
-        return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y)).integral
-    }
+    func clear() { selection = nil; mode = nil; placeBar(); needsDisplay = true }
 
-    override func draw(_ dirty: NSRect) {
-        NSColor(white: 0, alpha: 0.35).setFill()
-        bounds.fill()
-        if let r = selection {
-            NSColor.clear.setFill()
-            r.fill(using: .copy)
-            NSColor.white.setStroke()
-            let path = NSBezierPath(rect: r.insetBy(dx: -1, dy: -1))
-            path.lineWidth = 2
-            path.stroke()
-            let label = "\(Int(r.width)) × \(Int(r.height))" as NSString
-            label.draw(at: CGPoint(x: r.minX + 6, y: r.maxY + 6), withAttributes: [.foregroundColor: NSColor.white, .font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .medium)])
-        } else {
-            let hint = "Drag to choose an area to record. Press Escape to cancel." as NSString
-            let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 18, weight: .medium)]
-            let size = hint.size(withAttributes: attrs)
-            hint.draw(at: CGPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2), withAttributes: attrs)
-        }
-    }
-
-    override func mouseDown(with e: NSEvent) { start = convert(e.locationInWindow, from: nil); current = start; needsDisplay = true }
-    override func mouseDragged(with e: NSEvent) { current = convert(e.locationInWindow, from: nil); needsDisplay = true }
-    override func mouseUp(with e: NSEvent) {
-        current = convert(e.locationInWindow, from: nil)
-        guard let r = selection, r.width >= 40, r.height >= 40 else { start = nil; current = nil; needsDisplay = true; return }
+    @objc private func start() {
+        guard let r = selection else { return }
         // AppKit's origin is bottom-left; ScreenCaptureKit's source rectangle is top-left.
         finish(CGRect(x: r.minX, y: bounds.height - r.maxY, width: r.width, height: r.height))
     }
-    override func keyDown(with e: NSEvent) { if e.keyCode == 53 { finish(nil) } else { super.keyDown(with: e) } }
+    @objc private func stop() { finish(nil) }
+
+    // The eight handles: corners 0–3, edges 4–7.
+    private func handles(_ r: CGRect) -> [CGPoint] {
+        [CGPoint(x: r.minX, y: r.minY), CGPoint(x: r.maxX, y: r.minY), CGPoint(x: r.maxX, y: r.maxY), CGPoint(x: r.minX, y: r.maxY),
+         CGPoint(x: r.midX, y: r.minY), CGPoint(x: r.maxX, y: r.midY), CGPoint(x: r.midX, y: r.maxY), CGPoint(x: r.minX, y: r.midY)]
+    }
+
+    override func draw(_ dirty: NSRect) {
+        NSColor(white: 0, alpha: 0.5).setFill()
+        bounds.fill()
+        guard let r = selection else {
+            let hint = "Drag to choose an area to record. Press Escape to cancel." as NSString
+            let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 18, weight: .medium)]
+            let s = hint.size(withAttributes: attrs)
+            hint.draw(at: CGPoint(x: bounds.midX - s.width / 2, y: bounds.midY - s.height / 2), withAttributes: attrs)
+            return
+        }
+        NSColor.clear.setFill()
+        r.fill(using: .copy)
+        NSColor.white.setStroke()
+        let border = NSBezierPath(rect: r.insetBy(dx: -0.5, dy: -0.5))
+        border.lineWidth = 1.5
+        border.setLineDash([6, 4], count: 2, phase: 0)
+        border.stroke()
+        for p in handles(r) {
+            let h = CGRect(x: p.x - 5, y: p.y - 5, width: 10, height: 10)
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: h).fill()
+            NSColor(white: 0, alpha: 0.4).setStroke()
+            NSBezierPath(ovalIn: h).stroke()
+        }
+    }
+
+    private func placeBar() {
+        guard let r = selection, r.width >= Self.minimum, r.height >= Self.minimum, mode == nil else { bar.isHidden = true; return }
+        size.stringValue = "\(Int(r.width)) × \(Int(r.height))"
+        bar.isHidden = false
+        let s = bar.fittingSize
+        var origin = CGPoint(x: r.midX - s.width / 2, y: r.minY - s.height - 14)
+        if origin.y < 12 { origin.y = r.maxY + 14 }
+        if origin.y + s.height > bounds.height - 12 { origin.y = r.minY + 14 }
+        origin.x = min(max(origin.x, 12), bounds.width - s.width - 12)
+        bar.frame = CGRect(origin: origin, size: s)
+    }
+
+    override func mouseDown(with e: NSEvent) {
+        let p = convert(e.locationInWindow, from: nil)
+        if let r = selection {
+            if let i = handles(r).firstIndex(where: { hypot($0.x - p.x, $0.y - p.y) <= Self.handle }) { mode = .resize(i, r) }
+            else if r.contains(p) { mode = .move(p, r) }
+            else { mode = .new(p); selection = nil; began() }
+        } else {
+            mode = .new(p)
+            began()
+        }
+        placeBar()
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with e: NSEvent) {
+        let p = convert(e.locationInWindow, from: nil)
+        switch mode {
+        case let .new(a):
+            selection = CGRect(x: min(a.x, p.x), y: min(a.y, p.y), width: abs(a.x - p.x), height: abs(a.y - p.y)).integral
+        case let .move(a, r):
+            var m = r.offsetBy(dx: p.x - a.x, dy: p.y - a.y)
+            m.origin.x = min(max(m.minX, 0), bounds.width - m.width)
+            m.origin.y = min(max(m.minY, 0), bounds.height - m.height)
+            selection = m.integral
+        case let .resize(i, r):
+            var x0 = r.minX, x1 = r.maxX, y0 = r.minY, y1 = r.maxY
+            switch i {
+            case 0: x0 = p.x; y0 = p.y
+            case 1: x1 = p.x; y0 = p.y
+            case 2: x1 = p.x; y1 = p.y
+            case 3: x0 = p.x; y1 = p.y
+            case 4: y0 = p.y
+            case 5: x1 = p.x
+            case 6: y1 = p.y
+            default: x0 = p.x
+            }
+            selection = CGRect(x: min(x0, x1), y: min(y0, y1), width: abs(x1 - x0), height: abs(y1 - y0)).integral
+        case nil:
+            break
+        }
+        needsDisplay = true
+    }
+
+    override func mouseUp(with e: NSEvent) {
+        mode = nil
+        if let r = selection, r.width < Self.minimum || r.height < Self.minimum { selection = nil }
+        placeBar()
+        needsDisplay = true
+    }
+
+    override func keyDown(with e: NSEvent) {
+        switch e.keyCode {
+        case 53: stop()                        // Escape
+        case 36, 76: start()                   // Return, Enter
+        default: super.keyDown(with: e)
+        }
+    }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
 }
 
 /// One recording in progress.
@@ -317,8 +441,10 @@ struct ExactStudioError: Error, CustomStringConvertible {
 /// Recordings live in ~/Movies/Exact Studio/Recordings/<id>/: capture.mov,
 /// meta.json and cursor.json. Exports go to ~/Movies/Exact Studio/.
 enum Library {
+    /// Under the agent, the session's scratch data folder, so a drive never sees or touches the person's recordings.
+    static var scratch: URL?
     static var root: URL {
-        FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0].appendingPathComponent("Exact Studio", isDirectory: true)
+        scratch ?? FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0].appendingPathComponent("Exact Studio", isDirectory: true)
     }
     static var recordings: URL { root.appendingPathComponent("Recordings", isDirectory: true) }
 

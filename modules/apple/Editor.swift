@@ -15,8 +15,10 @@ final class Editor {
     private(set) var edits: Edits
     private(set) var look = Look()
     private(set) var map: TimeMap
-    /// The selected segment, by track and id; empty for none.
-    private(set) var selected: (track: String, id: String) = ("", "")
+    /// The selected segment's id; empty for none.
+    private(set) var selected = ""
+    /// Why the last edit was refused; cleared by the next one that lands.
+    private(set) var problem = ""
     private var listeners: [ObjectIdentifier: () -> Void] = [:]
     /// Said when the selection or a segment changes: the module turns it into a watched topic.
     var onChange: () -> Void = {}
@@ -35,8 +37,7 @@ final class Editor {
             edits = saved
         } else {
             // A first open: the clicks become zooms, ready to adjust.
-            edits = Edits()
-            edits.zooms = Edits.autoZooms(meta.clicks, duration: meta.duration)
+            edits = Edits(segments: Edits.autoZooms(meta.clicks, duration: meta.duration))
         }
         map = TimeMap(duration: meta.duration, edits: edits)
         player.actionAtItemEnd = .pause
@@ -100,122 +101,176 @@ final class Editor {
         try? JSONEncoder().encode(edits).write(to: folder.appendingPathComponent("edits.json"))
     }
 
-    /// Apply a change to the edits; rebuild the playback only when cuts or speed moved,
-    /// since zooms and effects are read per frame from the composition's captured edits.
-    func change(_ body: (inout Edits) -> Void) {
-        var next = edits
-        body(&next)
-        guard next != edits else { return }
+    /// Land `next` if every segment in it may sit where it is; else keep the
+    /// edits as they were and say why.
+    @discardableResult
+    private func apply(_ next: Edits) -> Bool {
+        if let why = next.segments.lazy.compactMap({ next.conflict($0) }).first {
+            problem = why
+            listeners.values.forEach { $0() }
+            onChange()
+            return false
+        }
+        problem = ""
+        guard next != edits else { notify(); return true }
         edits = next
         save()
         rebuild(keepTime: true)
         notify()
+        return true
     }
 
-    func select(_ track: String, _ id: String) {
-        guard selected != (track, id) else { return }
-        selected = (track, id)
+    func select(_ id: String) {
+        guard selected != id else { return }
+        selected = id
+        problem = ""
         notify()
     }
 
-    var selectedSegment: Segment? {
-        guard !selected.track.isEmpty else { return nil }
-        return edits[selected.track].first { $0.id == selected.id }
-    }
+    var selectedSegment: Segment? { edits.segments.first { $0.id == selected } }
 
-    /// A new segment on `track` at the playhead, selected.
-    func add(_ track: String) {
-        let t = playhead
-        let length: Double = track == "cut" ? 1 : track == "zoom" ? 3 : 2
-        var start = min(t, max(0, duration - length))
-        let end = min(duration, start + length)
-        start = max(0, end - length)
-        var s = Segment(id: "\(track.prefix(1))\(Int(Date().timeIntervalSince1970 * 1000) % 100_000_000)", start: start, end: end)
-        switch track {
-        case "zoom": s.level = 2
-        case "speed": s.rate = 2
-        case "effect": s.kind = "spotlight"
+    /// A new segment of `choice` at the playhead, on the first lane with room, selected.
+    /// `choice` is a kind, or "zoom-in", "zoom-out", "slow" or "fast".
+    func add(_ choice: String) {
+        var s = Segment(id: "s\(Int(Date().timeIntervalSince1970 * 1000) % 100_000_000)", kind: choice, start: 0, end: 0)
+        switch choice {
+        case "zoom-in": s.kind = "zoom"; s.level = 2
+        case "zoom-out": s.kind = "zoom"; s.level = 0.7
+        case "slow": s.kind = "speed"; s.rate = 0.5
+        case "fast": s.kind = "speed"; s.rate = 2
         default: break
         }
-        let new = s
-        change { $0[track].append(new) }
-        select(track, new.id)
+        guard Segment.kinds.contains(s.kind) else { return }
+        let length: Double = s.kind == "cut" ? 1 : s.kind == "zoom" ? 3 : 2
+        let t = min(playhead, max(0, duration - 0.3))
+        // Same-group segments bound it: it fills the room between them, up to its length.
+        let before = edits.segments.filter { $0.group == s.group && $0.end <= t + 0.0001 }.map(\.end).max() ?? 0
+        let after = edits.segments.filter { $0.group == s.group && $0.start >= t - 0.0001 }.map(\.start).min() ?? duration
+        if edits.segments.contains(where: { $0.group == s.group && $0.start < t && $0.end > t }) || after - max(before, t) < 0.3 {
+            problem = "There’s already \(Segment.article(s.kind)) at the playhead. Move the playhead to a free spot."
+            notify()
+            return
+        }
+        s.start = max(before, t)
+        s.end = min(after, s.start + length)
+        if s.kind != "cut" {
+            var lane = 0
+            while edits.segments.contains(where: { $0.kind != "cut" && $0.lane == lane && $0.overlaps(s) }) { lane += 1 }
+            s.lane = lane
+        }
+        var next = edits
+        next.segments.append(s)
+        if apply(next) { select(s.id) }
     }
 
-    /// Set the selected segment's value: a zoom's level, a speed's rate, an effect's kind.
+    /// Set the selected segment's value: a zoom's level, a speed's rate, or (for
+    /// a visual effect) another visual kind.
     func setValue(number: Double?, kind: String?) {
-        let (track, id) = selected
-        change { e in
-            e[track] = e[track].map { s in
-                guard s.id == id else { return s }
-                var s = s
-                if track == "zoom", let n = number { s.level = n }
-                if track == "speed", let n = number { s.rate = n }
-                if track == "effect", let k = kind { s.kind = k }
-                return s
-            }
-        }
+        guard var s = selectedSegment else { return }
+        if s.kind == "zoom", let n = number { s.level = n }
+        if s.kind == "speed", let n = number { s.rate = n }
+        if Segment.visual.contains(s.kind), let k = kind, Segment.visual.contains(k) { s.kind = k }
+        replace(s)
+    }
+
+    private func replace(_ s: Segment) {
+        var next = edits
+        next.segments = next.segments.map { $0.id == s.id ? s : $0 }
+        apply(next)
     }
 
     func deleteSelected() {
-        let (track, id) = selected
-        guard !track.isEmpty else { return }
-        change { $0[track].removeAll { $0.id == id } }
-        select("", "")
+        guard !selected.isEmpty else { return }
+        var next = edits
+        next.segments.removeAll { $0.id == selected }
+        apply(next)
+        select("")
     }
 
-    /// Cut out what lies between the playhead and the nearest cut boundary is too fiddly;
-    /// a split instead trims the selected segment at the playhead into two.
+    /// Split the selected segment in two at the playhead.
     func splitSelected() {
-        let (track, id) = selected, t = playhead
+        let t = playhead
         guard let s = selectedSegment, t > s.start + 0.1, t < s.end - 0.1 else { return }
-        var right = s
+        var left = s, right = s
+        left.end = t
         right.id = s.id + "b"
         right.start = t
-        change { e in
-            e[track] = e[track].map { $0.id == id ? Segment(id: s.id, start: s.start, end: t, level: s.level, rate: s.rate, kind: s.kind) : $0 } + [right]
-        }
+        var next = edits
+        next.segments = next.segments.map { $0.id == s.id ? left : $0 } + [right]
+        apply(next)
     }
 
     func autoZoom() {
-        change { $0.zooms = Edits.autoZooms(meta.clicks, duration: meta.duration) }
-        select("", "")
+        var next = edits
+        next.segments.removeAll { $0.kind == "zoom" }
+        // The new zooms take the first lane where none of them collides.
+        var zooms = Edits.autoZooms(meta.clicks, duration: meta.duration)
+        var lane = 0
+        while zooms.contains(where: { z in next.segments.contains { $0.kind != "cut" && $0.lane == lane && $0.overlaps(z) } }) { lane += 1 }
+        zooms = zooms.map { var z = $0; z.lane = lane; return z }
+        next.segments += zooms
+        apply(next)
+        select("")
     }
 
     func clearAll() {
-        change { $0 = Edits() }
-        select("", "")
+        apply(Edits())
+        select("")
     }
 
-    /// Move or resize a segment (the timeline's drag), kept inside the recording.
-    func set(_ track: String, _ id: String, start: Double, end: Double, commit: Bool) {
+    // MARK: Dragging (the timeline's)
+
+    private var dragOrigin: Edits?
+
+    /// Move or resize a segment while dragging: drawn at once, checked on drop.
+    func drag(_ id: String, start: Double, end: Double, lane: Int) {
+        if dragOrigin == nil { dragOrigin = edits }
         let s = max(0, min(start, duration - 0.1)), e = min(duration, max(end, s + 0.1))
-        if commit {
-            change { ed in ed[track] = ed[track].map { $0.id == id ? Segment(id: $0.id, start: s, end: e, level: $0.level, rate: $0.rate, kind: $0.kind) : $0 } }
-        } else {
-            // While dragging: the timeline draws it; the playback waits for the drop.
-            edits[track] = edits[track].map { $0.id == id ? Segment(id: $0.id, start: s, end: e, level: $0.level, rate: $0.rate, kind: $0.kind) : $0 }
-            listeners.values.forEach { $0() }
+        edits.segments = edits.segments.map {
+            guard $0.id == id else { return $0 }
+            var m = $0
+            m.start = s; m.end = e
+            if m.kind != "cut" { m.lane = max(0, lane) }
+            return m
         }
+        listeners.values.forEach { $0() }
     }
 
-    /// The edits as dropped mid-drag need the playback rebuilt once: `set(commit: true)` with the same
-    /// values would compare equal, so a drop forces it.
-    func commitDrag() {
-        save()
-        rebuild(keepTime: true)
-        notify()
+    /// The drop: keep the move if it fits, else put the segment back.
+    func endDrag() {
+        guard let origin = dragOrigin else { return }
+        dragOrigin = nil
+        let moved = edits
+        edits = origin
+        if !apply(compacted(moved)) { listeners.values.forEach { $0() } }
+    }
+
+    /// Lanes renumbered so none is left empty between others.
+    private func compacted(_ e: Edits) -> Edits {
+        let used = Set(e.segments.filter { $0.kind != "cut" }.map(\.lane)).sorted()
+        var next = e
+        next.segments = e.segments.map { var s = $0; if s.kind != "cut", let i = used.firstIndex(of: s.lane) { s.lane = i }; return s }
+        return next
     }
 
     /// What the inspector shows.
     var selection: [String: Any] {
-        guard let s = selectedSegment else { return ["track": "", "id": "", "level": 0, "rate": 0, "kind": "", "start": 0, "end": 0] }
-        return ["track": selected.track, "id": s.id, "level": s.level ?? 0, "rate": s.rate ?? 0, "kind": s.kind ?? "", "start": s.start, "end": s.end]
+        guard let s = selectedSegment else {
+            return ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "problem": problem]
+        }
+        return ["id": s.id, "kind": s.kind, "level": s.level ?? 0, "rate": s.rate ?? 0, "start": s.start, "end": s.end, "problem": problem]
     }
 
     var summary: [String: Any] {
-        ["cuts": edits.cuts.count, "zooms": edits.zooms.count, "speeds": edits.speeds.count, "effects": edits.effects.count,
+        ["cuts": edits.cuts.count, "effects": edits.segments.count - edits.cuts.count, "lanes": edits.lanes,
          "length": map.outputDuration, "source": duration]
+    }
+}
+
+extension Segment {
+    static func article(_ kind: String) -> String {
+        ["cut": "a cut", "zoom": "a zoom", "speed": "a speed change", "spotlight": "a spotlight",
+         "highlight": "a cursor highlight", "blur": "a blur", "mono": "a black-and-white effect"][kind] ?? "an effect"
     }
 }
 #endif
