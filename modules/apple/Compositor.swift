@@ -145,10 +145,12 @@ struct Edits: Codable, Equatable {
     /// Where the subject sits before any move.
     var base = Placement()
     var moves: [Move] = []
+    /// The subject in 3D, when on.
+    var three = ThreeD()
 
     init(segments: [Segment] = []) { self.segments = segments }
 
-    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, base, moves }
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, base, moves, three }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
@@ -158,6 +160,7 @@ struct Edits: Codable, Equatable {
         lanes = try c.decodeIfPresent(Int.self, forKey: .lanes) ?? 1
         base = try c.decodeIfPresent(Placement.self, forKey: .base) ?? Placement()
         moves = try c.decodeIfPresent([Move].self, forKey: .moves) ?? []
+        three = try c.decodeIfPresent(ThreeD.self, forKey: .three) ?? ThreeD()
         // Cuts were once segments: each becomes two splits and a removed part.
         for cut in segments where cut.kind == "cut" {
             splits += [cut.start, cut.end]
@@ -747,6 +750,10 @@ struct Framing {
     private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool, source: CIImage) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let minSide = min(canvas.width, canvas.height)
+        // In 3D the subject is a slab drawn by SceneKit; the rest is the flat path's.
+        if edits.three.on, let body = Stage3D.shared.render(face: subjectImage, rect: subject, outline: outline, canvas: canvas, three: edits.three) {
+            return place(body, shadowFrom: body, lift: (abs(edits.three.tilt) + abs(edits.three.turn)) / 90, at: t, opacity: opacity, texts: texts, source: source)
+        }
         // The subject and its shadow are one layer; placement and zoom move it over a still background.
         var layer = subjectImage
         if look.shadow {
@@ -768,6 +775,50 @@ struct Framing {
         layer = layer.transformed(by: place).opacity(pose.opacity * opacity)
 
         let (s, c) = camera(at: t, place: place)
+        if abs(s - 1) > 0.0005 {
+            let mid = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
+            layer = layer.transformed(by: CGAffineTransform(translationX: -c.x, y: -c.y)
+                .concatenating(CGAffineTransform(scaleX: s, y: s))
+                .concatenating(CGAffineTransform(translationX: mid.x, y: mid.y)))
+        }
+        let ground = look.background == "video" ? blurred(source) : background
+        let scene = layer.composited(over: ground).cropped(to: canvasRect)
+        return texts ? overlay(scene, at: t) : scene
+    }
+
+    /// The slab's outline on the canvas: the device's rounded body, or the frame's rounded rectangle.
+    private var outline: CGPath {
+        let r: CGFloat
+        if meta.isDevice { r = CGFloat(meta.cornerRadius ?? 0.16) * subject.width }
+        else { r = CGFloat(look.radius) }
+        let radius = min(r, min(subject.width, subject.height) / 2 - 0.5)
+        return CGPath(roundedRect: subject, cornerWidth: max(0.5, radius), cornerHeight: max(0.5, radius), transform: nil)
+    }
+
+    /// A drawn subject (the 3D slab, transparent around it, the canvas's size) with a shadow
+    /// from its own shape, placed and zoomed over the background, with the texts.
+    private func place(_ body: CIImage, shadowFrom shape: CIImage, lift: Double, at t: Double, opacity: Double, texts: Bool, source: CIImage) -> CIImage {
+        let canvasRect = CGRect(origin: .zero, size: canvas)
+        let minSide = min(canvas.width, canvas.height)
+        var layer = body
+        if look.shadow {
+            // A turned subject throws its shadow further and softer.
+            let blur = minSide * (0.025 + 0.02 * lift)
+            let silhouette = CIFilter.colorMatrix()
+            silhouette.inputImage = shape
+            silhouette.rVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            silhouette.gVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            silhouette.bVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            silhouette.aVector = CIVector(x: 0, y: 0, z: 0, w: 0.45)
+            let shadow = silhouette.outputImage!
+                .applyingGaussianBlur(sigma: blur)
+                .transformed(by: CGAffineTransform(translationX: 0, y: -blur * (0.5 + lift)))
+            layer = body.composited(over: shadow)
+        }
+        let pose = pose(at: t)
+        let placed = placement(pose)
+        layer = layer.transformed(by: placed).opacity(pose.opacity * opacity)
+        let (s, c) = camera(at: t, place: placed)
         if abs(s - 1) > 0.0005 {
             let mid = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
             layer = layer.transformed(by: CGAffineTransform(translationX: -c.x, y: -c.y)

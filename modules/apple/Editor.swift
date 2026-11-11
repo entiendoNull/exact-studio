@@ -198,9 +198,13 @@ final class Editor {
     /// The framing swapped and the frame drawn again; the timing stays.
     private func redraw() {
         state.update(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
-        // A fresh copy of the same composition makes the player ask for the frame again.
+        // A fresh copy of the same composition makes the player ask for frames again; while
+        // paused, a seek to where it stands makes it draw this one now.
         if let c = composition?.mutableCopy() as? AVMutableVideoComposition {
             player.currentItem?.videoComposition = c
+        }
+        if !isPlaying, let item = player.currentItem {
+            item.seek(to: item.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
         }
         redrawViews()
     }
@@ -480,6 +484,37 @@ final class Editor {
         select("")
     }
 
+    // MARK: 3D
+
+    /// Set one 3D setting: "on", an angle ("tilt", "turn", "roll"), "thickness" (percent),
+    /// "edge", or "preset" (a named pose). `live` draws it without saving (a drag).
+    func setThree(_ field: String, _ value: String, live: Bool = false) {
+        var next = edits
+        var t = next.three
+        let n = Double(value)
+        switch field {
+        case "on": t.on = value == "true"
+        case "tilt": if let n { t.tilt = min(max(n, -80), 80) }
+        case "turn": if let n { t.turn = min(max(n, -80), 80) }
+        case "roll": if let n { t.roll = min(max(n, -180), 180) }
+        case "thickness": if let n { t.thickness = min(max(n / 100, 0.01), 0.3) }
+        case "edge": t.edge = value
+        case "preset":
+            t.on = true
+            switch value {
+            case "hero": (t.tilt, t.turn, t.roll) = (12, -28, 0)
+            case "lean-left": (t.tilt, t.turn, t.roll) = (0, -38, 0)
+            case "lean-right": (t.tilt, t.turn, t.roll) = (0, 38, 0)
+            case "lay-back": (t.tilt, t.turn, t.roll) = (48, 0, 0)
+            case "tumble": (t.tilt, t.turn, t.roll) = (22, 32, -12)
+            default: (t.tilt, t.turn, t.roll) = (0, 0, 0)
+            }
+        default: return
+        }
+        next.three = t
+        if live { edits = next; redraw() } else { apply(next) }
+    }
+
     // MARK: Placement and moves
 
     /// Where the subject is at the playhead.
@@ -737,7 +772,9 @@ final class Editor {
         return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes,
                 "moves": edits.moves.count, "length": map.outputDuration, "source": duration, "playing": isPlaying,
                 "device": meta.isDevice, "found": meta.device == true, "cursorDrawn": meta.drawsCursor,
-                "baseScale": (edits.base.scale * 100).rounded()]
+                "baseScale": (edits.base.scale * 100).rounded(),
+                "threeOn": edits.three.on, "tilt": edits.three.tilt.rounded(), "turn": edits.three.turn.rounded(),
+                "roll": edits.three.roll.rounded(), "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge]
     }
 }
 

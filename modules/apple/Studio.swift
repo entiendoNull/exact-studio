@@ -66,6 +66,7 @@ final class Studio: ExactModule {
     private static let emptySummary: [String: Any] = [
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "moves": 0, "length": 0, "source": 0, "playing": false,
         "device": false, "found": false, "cursorDrawn": false, "baseScale": 100,
+        "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "thickness": 5, "edge": "metal",
     ]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {
@@ -150,6 +151,7 @@ final class Studio: ExactModule {
         case "text": e.setText(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "move": e.setMoveField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "place": e.placePreset(r["kind"] as? String ?? "")
+        case "three": e.setThree(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "add-move": e.addMove()
         case "pattern": e.pattern(r["kind"] as? String ?? "")
         case "find-device": e.findDevice()
@@ -332,7 +334,7 @@ final class PlayerHost: NSView {
     private let outline = CAShapeLayer()
     private let guides = CAShapeLayer()
     private weak var editor: Editor?
-    private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint) }
+    private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint), turn(CGPoint, Double, Double) }
     private var drag: Drag?
 
     override init(frame: NSRect) {
@@ -438,7 +440,13 @@ final class PlayerHost: NSView {
             drag = .text(s.id, u, CGPoint(x: s.x ?? 0.5, y: s.y ?? 0.5))
         } else if contains(f.subjectFrame(at: t), u) {
             if editor.selectedSegment?.kind == "text" { editor.select("") }
-            drag = .subject(u, editor.placementNow)
+            // ⌥-drag turns it in 3D (switching 3D on); a plain drag moves it.
+            if e.modifierFlags.contains(.option) {
+                if !editor.edits.three.on { editor.setThree("on", "true", live: true) }
+                drag = .turn(u, editor.edits.three.tilt, editor.edits.three.turn)
+            } else {
+                drag = .subject(u, editor.placementNow)
+            }
         } else {
             editor.select("")
             drag = nil
@@ -464,6 +472,13 @@ final class PlayerHost: NSView {
         case let .text(id, from, start):
             let x = snapped(start.x + u.x - from.x, &lines), y = snapped(start.y + u.y - from.y, &rows)
             editor.dragText(id, x: x, y: y, live: true)
+        case let .turn(from, tilt, turn):
+            // Like turning an object in the hand: drag right and the right side comes toward you; drag down and the top leans away.
+            var nt = turn - Double(u.x - from.x) * 160, nl = tilt + Double(u.y - from.y) * 160
+            if abs(nt) < 2 { nt = 0 }
+            if abs(nl) < 2 { nl = 0 }
+            editor.setThree("turn", String(nt), live: true)
+            editor.setThree("tilt", String(nl), live: true)
         }
         let path = CGMutablePath()
         for x in lines { path.move(to: CGPoint(x: video.minX + x * video.width, y: video.minY)); path.addLine(to: CGPoint(x: video.minX + x * video.width, y: video.maxY)) }
@@ -476,6 +491,7 @@ final class PlayerHost: NSView {
         guard let editor, let drag else { return }
         switch drag {
         case .subject: editor.endPlace()
+        case .turn: editor.setThree("turn", String(editor.edits.three.turn))
         case let .text(id, _, _):
             if let s = editor.edits.texts.first(where: { $0.id == id }) { editor.dragText(id, x: s.x ?? 0.5, y: s.y ?? 0.5, live: false) }
         }

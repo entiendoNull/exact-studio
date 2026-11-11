@@ -68,6 +68,12 @@ shape Summary
   found: bool
   cursorDrawn: bool
   baseScale: number
+  threeOn: bool
+  tilt: number
+  turn: number
+  roll: number
+  thickness: number
+  edge: string
 
 shape Reply
   ok: bool
@@ -93,6 +99,7 @@ fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kin
 fn kindTitle(kind: string, level: number, rate: number): string = kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
+fn poseLabel(p: string): string = p == "hero" ? "Hero" : p == "lean-left" ? "Lean Left" : p == "lean-right" ? "Lean Right" : p == "lay-back" ? "Lay Back" : p == "tumble" ? "Tumble" : "Face On"
 fn countLine(n: number, one: string, many: string): string = n == 1 ? `1 ${one}` : `${n} ${many}`
 
 routes nav
@@ -119,6 +126,7 @@ component ExactStudio
   state openFrame = true persist
   state openCursor = false persist
   state openDevice = true persist
+  state open3d = true persist
   state startedAt = 0
   state now = 0
   state listed = 0
@@ -211,6 +219,8 @@ component ExactStudio
       openCursor = not openCursor
     if name == "device"
       openDevice = not openDevice
+    if name == "3d"
+      open3d = not open3d
   action setCustomA(v: string)
     customA = v
     background = "custom"
@@ -240,6 +250,12 @@ component ExactStudio
     send edited = editClip(selected, "move", field, 0, v)
   action moveNumber(field: string, v: number)
     send edited = editClip(selected, "move", field, 0, `${v}`)
+  action threeField(field: string, v: string)
+    send edited = editClip(selected, "three", field, 0, v)
+  action threeNumber(field: string, v: number)
+    send edited = editClip(selected, "three", field, 0, `${round(v)}`)
+  action threeOn(v: bool)
+    send edited = editClip(selected, "three", "on", 0, `${v}`)
   action placeAt(name: string)
     send edited = editClip(selected, "place", "", 0, name)
   action pattern(name: string)
@@ -679,6 +695,49 @@ component ExactStudio
                       row align-items="center"
                         text "Shadow" flex=1
                         input type="checkbox" switch checked=shadow change=setShadow aria-label="Shadow" testId="shadow"
+
+                  column gap=10
+                    button press=toggleSection("3d") appearance="none" aria-expanded=open3d testId="sec-3d" padding-top=2 padding-bottom=2
+                      row align-items="center" gap=6 flex=1
+                        text "3D" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
+                        image (open3d ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                    if open3d
+                      row align-items="center"
+                        text "Show in 3D" flex=1
+                        input type="checkbox" switch checked=summary.threeOn change=threeOn aria-label="Show in 3D" testId="three-on"
+                      row gap=6 flex-wrap="wrap"
+                        for p in ["hero", "lean-left", "lean-right", "lay-back", "tumble", "face"] key=p
+                          button press=threeField("preset", p) buttonStyle=(summary.threeOn and p == "face" and summary.tilt == 0 and summary.turn == 0 ? "filled" : "bordered") testId=`three-${p}`
+                            text poseLabel(p)
+                      if summary.threeOn
+                        column gap=4
+                          row
+                            text "Tilt" flex=1
+                            text `${summary.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-80 max=80 step=1 value=summary.tilt input=threeNumber("tilt") aria-label="Tilt" testId="three-tilt"
+                        column gap=4
+                          row
+                            text "Turn" flex=1
+                            text `${summary.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-80 max=80 step=1 value=summary.turn input=threeNumber("turn") aria-label="Turn" testId="three-turn"
+                        column gap=4
+                          row
+                            text "Roll" flex=1
+                            text `${summary.roll}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-45 max=45 step=1 value=summary.roll input=threeNumber("roll") aria-label="Roll" testId="three-roll"
+                        column gap=4
+                          row
+                            text "Thickness" flex=1
+                            text `${summary.thickness}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=1 max=15 step=0.5 value=summary.thickness change=threeNumber("thickness") aria-label="Thickness" testId="three-thickness"
+                        row align-items="center" gap=8
+                          text "Edge" flex=1
+                          select value=summary.edge change=threeField("edge") aria-label="Edge" testId="three-edge"
+                            option "Polished metal" value="metal"
+                            option "Aluminum" value="aluminum"
+                            option "Glass" value="glass"
+                            option "Matte" value="matte"
+                      text "⌥-drag the video in the preview to turn it in your hand." font="-exact-caption1" color="-exact-tertiary-label"
 
                   column gap=10
                     button press=toggleSection("cursor") appearance="none" aria-expanded=openCursor testId="sec-cursor" padding-top=2 padding-bottom=2
