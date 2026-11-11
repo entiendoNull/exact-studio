@@ -334,7 +334,7 @@ component ExactStudio
     main testId="root" navigationKey=`${top(nav).id}` width="100%" height="100%"
       for e in stack(nav) key=e.id
         column navigationKey=`${e.id}` navigationScroll="sidebar" position="absolute" inset=0 display="flex" flex-direction="column"
-          header display="flex" align-items="center"
+          header display="flex" align-items="center" gap=4 padding="6px 12px 6px 18px"
             text "Exact Studio" role="heading" aria-level=1 flex=1
             button press=toggleLeft aria-label=(leftOpen ? "Hide the sidebar" : "Show the sidebar") testId="toggle-left"
               image "symbol:sf/sidebar.left"
@@ -348,12 +348,12 @@ component ExactStudio
               image "symbol:sf/sidebar.right"
           row flex=1 min-height=0
             // ── The sidebar: what to record, and what has been recorded.
-            scroll id="sidebar" width=(leftShown ? "21rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
+            scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
               if cardLeft
-                column padding=16 width="21rem"
+                column padding=16 width="23rem" box-sizing="border-box"
                   SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
               else
-                column gap=22 padding=16 width="21rem" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
+                column gap=22 padding=16 width="23rem" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
                   if status.recording
                     column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background" testId="recording"
                       row gap=10 align-items="center"
@@ -562,7 +562,7 @@ component ExactStudio
                         column padding=12
                           SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
                   if sel.id != "" and panelMode == "float"
-                    column position="absolute" left=panelX top=panelY width="22rem" max-height="80%" border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
+                    column position="absolute" left=panelX top=panelY width="24rem" max-height="80%" border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0
@@ -571,8 +571,8 @@ component ExactStudio
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
-              scroll width=(rightOpen ? "22rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="inspector"
-                column gap=20 padding=16 width="22rem" opacity=(rightOpen ? 1 : 0) transition="opacity 200ms ease"
+              scroll width=(rightOpen ? "25rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="inspector"
+                column gap=20 padding=16 width="25rem" box-sizing="border-box" opacity=(rightOpen ? 1 : 0) transition="opacity 200ms ease"
                   column gap=8
                     button press=exportIt buttonStyle="filled" disabled=pending(exported) testId="export"
                       image "symbol:sf/square.and.arrow.up"
