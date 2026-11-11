@@ -75,11 +75,11 @@ final class Studio: ExactModule {
     private static let emptySelection: [String: Any] = [
         "id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "", "removed": false, "first": false,
         "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
-        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "problem": "",
+        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": "",
     ]
     private static let emptySummary: [String: Any] = [
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "moves": 0, "length": 0, "source": 0, "playing": false,
-        "device": false, "found": false, "cursorDrawn": false, "baseScale": 100,
+        "device": false, "found": false, "cursorDrawn": false, "baseScale": 100, "canUndoTemplate": false,
         "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "angleMove": "", "thickness": 5, "edge": "metal",
     ]
 
@@ -165,6 +165,9 @@ final class Studio: ExactModule {
         case "text": e.setText(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "move": e.setMoveField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "place": e.placePreset(r["kind"] as? String ?? "")
+        case "seg": e.setSegment(r["track"] as? String ?? "", r["kind"] as? String ?? "")
+        case "template": e.applyTemplate(r["kind"] as? String ?? "")
+        case "undo-template": e.undoTemplate()
         case "three": e.setThree(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "add-move": e.addMove()
         case "pattern": e.pattern(r["kind"] as? String ?? "")

@@ -57,6 +57,7 @@ shape SegmentInfo
   turn: number
   roll: number
   hasAngles: bool
+  scope: string
   problem: string
 
 shape Summary
@@ -72,6 +73,7 @@ shape Summary
   found: bool
   cursorDrawn: bool
   baseScale: number
+  canUndoTemplate: bool
   threeOn: bool
   tilt: number
   turn: number
@@ -101,7 +103,7 @@ fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn kindTitle(kind: string, level: number, rate: number): string = kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
 fn poseLabel(p: string): string = p == "hero" ? "Hero" : p == "lean-left" ? "Lean Left" : p == "lean-right" ? "Lean Right" : p == "lay-back" ? "Lay Back" : p == "tumble" ? "Tumble" : "Face On"
@@ -261,6 +263,12 @@ component ExactStudio
     send edited = editClip(selected, "three", field, 0, `${round(v)}`)
   action threeOn(v: bool)
     send edited = editClip(selected, "three", "on", 0, `${v}`)
+  action segField(field: string, v: string)
+    send edited = editClip(selected, "seg", field, 0, v)
+  action segNumber(field: string, v: number)
+    send edited = editClip(selected, "seg", field, 0, `${round(v)}`)
+  action template(name: string)
+    send edited = editClip(selected, "template", "", 0, name)
   action placeAt(name: string)
     send edited = editClip(selected, "place", "", 0, name)
   action pattern(name: string)
@@ -406,6 +414,11 @@ component ExactStudio
                       button press=add("mono") popovertarget="add-menu" popovertargetaction="hide" testId="add-mono"
                         image "symbol:sf/circle.lefthalf.filled"
                         text "Black & White"
+                      hr
+                      button press=add("3d") popovertarget="add-menu" popovertargetaction="hide" testId="add-3d"
+                        image "symbol:sf/rotate.3d"
+                        text "3D Turn"
+                        text "Turns in 3D for a while, then back"
                     column width=1 height=22 background-color="-exact-separator"
                     button press=editDo("split-clip") buttonStyle="bordered" testId="split-clip"
                       image "symbol:sf/scissors"
@@ -450,6 +463,26 @@ component ExactStudio
                       button press=pattern("float") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-float"
                         text "3D Float"
                         text "Drifts between gentle angles"
+                    button popovertarget="template-menu" buttonStyle="bordered" testId="templates"
+                      image "symbol:sf/wand.and.stars"
+                      text "Templates"
+                    column id="template-menu" popover="auto" role="menu" aria-label="Templates: replace the texts, effects and moves"
+                      button press=template("launch") popovertarget="template-menu" popovertargetaction="hide" testId="template-launch"
+                        text "Clean Launch"
+                        text "Blurred title card, zooms on clicks, an end line"
+                      button press=template("hero") popovertarget="template-menu" popovertargetaction="hide" testId="template-hero"
+                        text "Product Hero"
+                        text "A 3D hero angle, a feature line, an orbit"
+                      button press=template("tour") popovertarget="template-menu" popovertargetaction="hide" testId="template-tour"
+                        text "Feature Tour"
+                        text "Three captions, moving between sides"
+                      button press=template("teaser") popovertarget="template-menu" popovertargetaction="hide" testId="template-teaser"
+                        text "Social Teaser"
+                        text "A blurred hook, pops, a 3D tumble, a call to action"
+                      if summary.canUndoTemplate
+                        hr
+                        button press=editDo("undo-template") popovertarget="template-menu" popovertargetaction="hide" testId="template-undo"
+                          text "Undo Template"
                     button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
                       image "symbol:sf/cursorarrow.click.2"
                       text "Zoom on Clicks"
@@ -519,6 +552,34 @@ component ExactStudio
                             option "Cursor highlight" value="highlight"
                             option "Blur" value="blur"
                             option "Black & white" value="mono"
+                        if sel.kind == "blur" or sel.kind == "mono"
+                          text "Covers" font="-exact-caption1" color="-exact-secondary-label"
+                          row role="radiogroup" aria-label="Covers"
+                            button role="radio" aria-checked=(sel.scope != "frame") press=segField("scope", "video") flex=1 testId="scope-video"
+                              text "Video"
+                            button role="radio" aria-checked=(sel.scope == "frame") press=segField("scope", "frame") flex=1 testId="scope-frame"
+                              text "Whole Frame"
+                      if sel.kind == "3d"
+                        text "Turns in 3D over its span and back, even with Show in 3D off." font="-exact-caption1" color="-exact-tertiary-label"
+                        row role="radiogroup" aria-label="Turn style"
+                          button role="radio" aria-checked=(sel.style != "orbit") press=segField("style", "hold") flex=1 testId="turn-hold"
+                            text "Hold a Pose"
+                          button role="radio" aria-checked=(sel.style == "orbit") press=segField("style", "orbit") flex=1 testId="turn-orbit"
+                            text "Full Orbit"
+                        row gap=6 flex-wrap="wrap"
+                          for p in ["hero", "lean-left", "lean-right", "lay-back", "tumble"] key=p
+                            button press=segField("pose", p) buttonStyle="bordered" testId=`turn-${p}`
+                              text poseLabel(p)
+                        column gap=4
+                          row
+                            text "Tilt" flex=1
+                            text `${sel.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-80 max=80 step=1 value=sel.tilt change=segNumber("tilt") aria-label="Tilt" testId="turn-tilt"
+                        column gap=4
+                          row
+                            text "Turn" flex=1
+                            text `${sel.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-80 max=80 step=1 value=sel.turn change=segNumber("turn") aria-label="Turn" testId="turn-turn"
                       if sel.kind == "text"
                         column gap=4
                           text "Words" font="-exact-caption1" color="-exact-secondary-label"

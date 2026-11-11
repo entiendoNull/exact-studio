@@ -59,10 +59,36 @@ final class TimelineView: NSView {
 
     func detach() { attach(nil) }
 
+    /// How much taller (or, negative, shorter) than its content the person made the timeline,
+    /// by dragging its top edge; kept between launches. Shorter than its content, it scrolls.
+    private var extra = CGFloat(UserDefaults.standard.double(forKey: "ExactStudio.timelineExtra"))
+    private var scrollY: CGFloat = 0
+    private static let minimum: CGFloat = 120, grip: CGFloat = 8
+    private var contentHeight: CGFloat { Self.height(lanes: editor?.edits.lanes ?? 1) }
+    private var resizing: (start: CGFloat, extra: CGFloat)?
+
     private func changed() {
         needsDisplay = true
-        let h = Self.height(lanes: editor?.edits.lanes ?? 1)
+        let h = max(Self.minimum, contentHeight + extra)
+        scrollY = min(max(scrollY, 0), max(0, contentHeight - h))
         if h != lastHeight { lastHeight = h; onHeight(h) }
+    }
+
+    /// A mouse event's point in the content, which scrolls under the view.
+    private func local(_ e: NSEvent) -> CGPoint {
+        let p = convert(e.locationInWindow, from: nil)
+        return CGPoint(x: p.x, y: p.y + scrollY)
+    }
+
+    override func scrollWheel(with e: NSEvent) {
+        let room = contentHeight - bounds.height
+        guard room > 0 else { return super.scrollWheel(with: e) }
+        scrollY = min(max(scrollY - e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 1 : 8), 0), room)
+        needsDisplay = true
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(CGRect(x: 0, y: 0, width: bounds.width, height: Self.grip), cursor: .resizeUpDown)
     }
 
     private func loadThumbs(_ editor: Editor) {
@@ -116,6 +142,7 @@ final class TimelineView: NSView {
         case "blur": return .systemIndigo
         case "mono": return .systemGray
         case "text": return .systemPink
+        case "3d": return .systemMint
         default: return .systemPink
         }
     }
@@ -125,7 +152,19 @@ final class TimelineView: NSView {
     override func draw(_ dirty: NSRect) {
         NSColor(calibratedWhite: 0.085, alpha: 1).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 14, yRadius: 14).fill()
+        // The grip on the top edge, drawn over the content after it.
+        defer {
+            NSColor(white: 1, alpha: resizing == nil ? 0.22 : 0.5).setFill()
+            NSBezierPath(roundedRect: CGRect(x: bounds.midX - 22, y: 3, width: 44, height: 4), xRadius: 2, yRadius: 2).fill()
+            if bounds.height > 40, contentHeight > bounds.height + 1 {
+                // How far down the lanes are scrolled.
+                let track = bounds.height - 24, k = bounds.height / contentHeight
+                NSColor(white: 1, alpha: 0.2).setFill()
+                NSBezierPath(roundedRect: CGRect(x: bounds.maxX - 6, y: 12 + scrollY * k * track / bounds.height, width: 3, height: max(16, track * k)), xRadius: 1.5, yRadius: 1.5).fill()
+            }
+        }
         guard let editor else { return }
+        NSGraphicsContext.current?.cgContext.translateBy(x: 0, y: -scrollY)
         let d = editor.duration
         let rulerTop = Self.rulerTop, rulerHeight = Self.rulerHeight, clipTop = Self.clipTop, clipHeight = Self.clipHeight
 
@@ -357,8 +396,9 @@ final class TimelineView: NSView {
             return r < 1 ? "Slow \(trim(r))×" : "Fast \(trim(r))×"
         case "spotlight": return "Spotlight"
         case "highlight": return "Cursor highlight"
-        case "blur": return "Blur"
-        case "mono": return "Black & white"
+        case "blur": return s.scope == "frame" ? "Blur · whole frame" : "Blur"
+        case "mono": return s.scope == "frame" ? "Black & white · whole frame" : "Black & white"
+        case "3d": return s.style == "orbit" ? "3D orbit" : "3D turn"
         case "text": return "“\(s.text ?? "")”"
         default: return "Effect"
         }
@@ -396,7 +436,13 @@ final class TimelineView: NSView {
     override func mouseDown(with e: NSEvent) {
         window?.makeFirstResponder(self)
         guard let editor else { return }
-        let p = convert(e.locationInWindow, from: nil)
+        // The top edge resizes the timeline (and so the preview above it); a double click resets it.
+        if convert(e.locationInWindow, from: nil).y < Self.grip {
+            if e.clickCount == 2 { extra = 0; UserDefaults.standard.set(0, forKey: "ExactStudio.timelineExtra"); changed(); return }
+            resizing = (e.locationInWindow.y, extra)
+            return
+        }
+        let p = local(e)
         moved = false
         if addLaneRect.contains(p) { editor.addLane(); return }
         if p.y >= Self.motionTop - Self.laneGap / 2, p.y <= Self.motionTop + Self.motionHeight + Self.laneGap / 2 {
@@ -434,8 +480,14 @@ final class TimelineView: NSView {
     }
 
     override func mouseDragged(with e: NSEvent) {
+        if let r = resizing {
+            // Window coordinates grow upward: dragging the edge up makes the timeline taller.
+            extra = min(max(r.extra + (e.locationInWindow.y - r.start), Self.minimum - contentHeight), 600)
+            changed()
+            return
+        }
         guard let editor, let drag else { return }
-        let p = convert(e.locationInWindow, from: nil), now = t(p.x)
+        let p = local(e), now = t(p.x)
         moved = true
         switch drag {
         case .scrub:
@@ -457,6 +509,12 @@ final class TimelineView: NSView {
     }
 
     override func mouseUp(with e: NSEvent) {
+        if resizing != nil {
+            resizing = nil
+            UserDefaults.standard.set(Double(extra), forKey: "ExactStudio.timelineExtra")
+            needsDisplay = true
+            return
+        }
         if let drag, moved, let editor {
             switch drag {
             case .scrub: break

@@ -325,13 +325,14 @@ final class Editor {
         case "zoom-out": s.kind = "zoom"; s.level = 0.7
         case "slow": s.kind = "speed"; s.rate = 0.5
         case "fast": s.kind = "speed"; s.rate = 2
+        case "3d": s.style = "hold"; s.tilt = 12; s.turn = -28; s.roll = 0
         case "text":
             s.text = "Your text here"; s.x = 0.5; s.y = 0.16; s.size = 0.075; s.color = "white"; s.weight = "heavy"
             s.style = "pill"; s.animIn = "letters"; s.animOut = "fade"; s.loop = "none"; s.rotation = 0
         default: break
         }
         guard Segment.kinds.contains(s.kind) else { return }
-        let length: Double = s.kind == "zoom" || s.kind == "text" ? 3 : 2
+        let length: Double = s.kind == "zoom" || s.kind == "text" || s.kind == "3d" ? 3 : 2
         let t = min(playhead, max(0, duration - 0.3))
         if s.kind == "text" {
             s.start = t
@@ -481,6 +482,60 @@ final class Editor {
         next.lanes = max(next.lanes, lane + 1)
         next.segments += zooms
         apply(next)
+        select("")
+    }
+
+    /// Set one field of the selected segment: a blur's or black and white's "scope", or a 3D
+    /// turn's "pose" (a named pose), "tilt", "turn", "roll" or "style" ("hold" or "orbit").
+    func setSegment(_ field: String, _ value: String) {
+        guard var s = selectedSegment else { return }
+        let n = Double(value)
+        switch field {
+        case "scope": s.scope = value == "frame" ? "frame" : nil
+        case "pose": let a = Editor.pose(value); s.tilt = a.tilt; s.turn = a.turn; s.roll = a.roll
+        case "tilt": if let n { s.tilt = min(max(n, -80), 80) }
+        case "turn": if let n { s.turn = min(max(n, -80), 80) }
+        case "roll": if let n { s.roll = min(max(n, -45), 45) }
+        case "style": s.style = value
+        default: return
+        }
+        replace(s)
+        if s.kind == "3d", field == "pose" || field == "style" { sampleSegment(s, part: "loop") }
+    }
+
+    // MARK: Templates
+
+    /// The edits before the last template, for one step back.
+    private var beforeTemplate: Edits?
+
+    /// Replace the texts, effects, zooms and moves with a ready-made edit laid out for the
+    /// frame's shape. The clip's parts and the 3D settings stay.
+    func applyTemplate(_ name: String) {
+        let map = self.map
+        guard let made = Templates.make(name, duration: map.outputDuration, source: { map.source($0) }, aspect: look.aspect,
+                                        clicks: meta.clicks, three: edits.three) else { return }
+        beforeTemplate = edits
+        var next = edits
+        // Each segment on the first lane where nothing overlaps it.
+        var packed: [Segment] = []
+        for var seg in made.segments.sorted(by: { $0.start < $1.start }) {
+            var lane = 0
+            while packed.contains(where: { $0.lane == lane && $0.overlaps(seg) }) { lane += 1 }
+            seg.lane = lane
+            packed.append(seg)
+        }
+        next.segments = packed
+        next.moves = made.moves
+        next.lanes = max(1, (packed.map(\.lane).max() ?? 0) + 1)
+        next.base = made.base
+        apply(next)
+        select("")
+    }
+
+    func undoTemplate() {
+        guard let before = beforeTemplate else { return }
+        beforeTemplate = nil
+        apply(before)
         select("")
     }
 
@@ -814,8 +869,9 @@ final class Editor {
         var out: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "",
                                   "removed": false, "first": false, "last": false, "transition": "cut", "text": "", "size": 0,
                                   "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "", "rotation": 0,
-                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "problem": problem]
+                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": problem]
         if let s = selectedSegment {
+            out.merge(["scope": s.scope ?? "video", "tilt": (s.tilt ?? 0).rounded(), "turn": (s.turn ?? 0).rounded(), "roll": (s.roll ?? 0).rounded()]) { $1 }
             out.merge(["id": s.id, "kind": s.kind, "level": s.level ?? 0, "rate": s.rate ?? 0, "start": s.start, "end": s.end,
                        "startText": Editor.stamp(s.start), "endText": Editor.stamp(s.end), "text": s.text ?? "",
                        "size": ((s.size ?? 0) * 1000).rounded() / 10, "color": s.color ?? "", "weight": s.weight ?? "", "style": s.style ?? "",
@@ -839,7 +895,7 @@ final class Editor {
         return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes,
                 "moves": edits.moves.count, "length": map.outputDuration, "source": duration, "playing": isPlaying,
                 "device": meta.isDevice, "found": meta.device == true, "cursorDrawn": meta.drawsCursor,
-                "baseScale": (edits.base.scale * 100).rounded(),
+                "baseScale": (edits.base.scale * 100).rounded(), "canUndoTemplate": beforeTemplate != nil,
                 "threeOn": edits.three.on,
                 // The angle the 3D controls edit: the move's in effect at the playhead, else the base.
                 "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),

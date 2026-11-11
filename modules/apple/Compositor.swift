@@ -98,9 +98,15 @@ struct Segment: Codable, Equatable {
     var loop: String?
     /// Degrees, clockwise.
     var rotation: Double?
+    /// A blur's or black and white's reach: "video" (the default) or "frame", the whole picture.
+    var scope: String?
+    /// A 3D turn's pose, in degrees.
+    var tilt: Double?
+    var turn: Double?
+    var roll: Double?
 
     static let visual = ["spotlight", "highlight", "blur", "mono"]
-    static let kinds = ["zoom", "speed", "text"] + visual
+    static let kinds = ["zoom", "speed", "text", "3d"] + visual
 
     /// Two segments may overlap in time unless they share a group: one zoom at
     /// a time, one speed at a time, one of each visual effect at a time.
@@ -195,6 +201,7 @@ struct Edits: Codable, Equatable {
     var speeds: [Segment] { segments.filter { $0.kind == "speed" } }
     var effects: [Segment] { segments.filter { Segment.visual.contains($0.kind) } }
     var texts: [Segment] { segments.filter { $0.kind == "text" } }
+    var turns: [Segment] { segments.filter { $0.kind == "3d" } }
 
     /// Why `s` cannot sit where it is, or nil when it can.
     func conflict(_ s: Segment) -> String? {
@@ -224,7 +231,7 @@ struct Edits: Codable, Equatable {
 extension Segment {
     static func noun(_ kind: String) -> String {
         ["zoom": "zooms", "speed": "speed changes", "spotlight": "spotlights", "highlight": "cursor highlights",
-         "blur": "blurs", "mono": "black-and-white effects", "text": "texts"][kind] ?? "effects"
+         "blur": "blurs", "mono": "black-and-white effects", "text": "texts", "3d": "3D turns"][kind] ?? "effects"
     }
 }
 
@@ -580,17 +587,46 @@ struct Framing {
     private var fill: Double { Double(max(canvas.width / subject.width, canvas.height / subject.height)) * 1.04 }
 
     func pose(at t: Double) -> Pose {
+        var p = movedPose(at: t)
+        // A 3D turn: the angle eases to the turn's pose and back over its span.
+        for seg in edits.turns {
+            let a = presence(seg, at: t, ramp: min(0.7, (seg.end - seg.start) / 3))
+            guard a > 0.0005 else { continue }
+            var target = Angles(tilt: seg.tilt ?? 10, turn: seg.turn ?? -24, roll: seg.roll ?? 0)
+            if seg.style == "orbit" {
+                // One full turn about the vertical across the span, the pose's tilt held.
+                let u = Ease.inOut((t - seg.start) / max(seg.end - seg.start, 0.01))
+                target.turn += 360 * u
+                p.angles = Angles(tilt: p.angles.tilt + (target.tilt - p.angles.tilt) * a, turn: p.angles.turn + 360 * u, roll: p.angles.roll + (target.roll - p.angles.roll) * a)
+                continue
+            }
+            p.angles = Angles(tilt: p.angles.tilt + (target.tilt - p.angles.tilt) * a,
+                              turn: p.angles.turn + (target.turn - p.angles.turn) * a,
+                              roll: p.angles.roll + (target.roll - p.angles.roll) * a)
+        }
+        return p
+    }
+
+    /// Whether the subject is drawn in 3D at `t`: 3D is on, or a 3D turn is under way.
+    func inDepth(at t: Double) -> Bool {
+        edits.three.on || edits.turns.contains { t > $0.start && t < $0.end }
+    }
+
+    /// The place and angle from the base and the moves alone.
+    private func movedPose(at t: Double) -> Pose {
+        let on = edits.three.on
         var from = edits.base
-        var angles = Angles(tilt: edits.three.tilt, turn: edits.three.turn, roll: edits.three.roll)
+        // With 3D off, angles come only from 3D turns: everything else is face on.
+        var angles = on ? Angles(tilt: edits.three.tilt, turn: edits.three.turn, roll: edits.three.roll) : Angles()
         for m in moves {
             let start = m.t - m.duration
-            let next = m.angles ?? angles
+            let next = on ? (m.angles ?? angles) : angles
             if t >= m.t { from = m.to; angles = next; continue }
             guard t > start, m.duration > 0 else { break }
             var p = Framing.blend(from, m.to, u: (t - start) / m.duration, style: m.style, fill: fill)
-            p.angles = Framing.turn(angles, next, u: (t - start) / m.duration, style: m.style, inDepth: edits.three.on)
+            p.angles = Framing.turn(angles, next, u: (t - start) / m.duration, style: m.style, inDepth: on)
             // In 3D a spin is a turn about the vertical, not a turn in the picture's plane.
-            if edits.three.on && m.style == "spin" { p.rotation = 0 }
+            if on && m.style == "spin" { p.rotation = 0 }
             return p
         }
         var p = Pose(x: from.x, y: from.y, scale: from.scale)
@@ -694,7 +730,7 @@ struct Framing {
         // Effects on the subject's pixels.
         let minSide = min(canvas.width, canvas.height)
         var overlays: [CIImage] = []
-        for fx in edits.effects {
+        for fx in edits.effects where fx.scope != "frame" {
             let a = presence(fx, at: t, ramp: 0.25)
             guard a > 0.001 else { continue }
             switch fx.kind {
@@ -757,7 +793,7 @@ struct Framing {
             subjectImage = cut.outputImage!.cropped(to: subject)
             // The body and buttons from the silhouette's own coordinates onto the canvas.
             var body: BodyOnCanvas?
-            if edits.three.on, let d = deviceBody {
+            if inDepth(at: t), let d = deviceBody {
                 let onCanvas = { (u: UnitRect) -> CGRect in
                     CGRect(x: at.minX + u.x * at.width, y: at.maxY - (u.y + u.h) * at.height, width: u.w * at.width, height: u.h * at.height).applying(toSubject)
                 }
@@ -820,7 +856,7 @@ struct Framing {
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let minSide = min(canvas.width, canvas.height)
         // In 3D the subject is a slab drawn by SceneKit, at the pose's angle; the rest is the flat path's.
-        if edits.three.on {
+        if inDepth(at: t) {
             var three = edits.three
             let a = pose(at: t).angles
             three.tilt = a.tilt; three.turn = a.turn; three.roll = a.roll
@@ -912,6 +948,20 @@ struct Framing {
     /// The texts showing at `t`, over `scene`.
     func overlay(_ scene: CIImage, at t: Double) -> CIImage {
         var out = scene
+        let rect = CGRect(origin: .zero, size: canvas)
+        // Whole-frame effects, over the finished picture and under the texts.
+        for fx in edits.effects where fx.scope == "frame" {
+            let a = presence(fx, at: t, ramp: 0.3)
+            guard a > 0.001 else { continue }
+            if fx.kind == "blur" {
+                out = out.clampedToExtent().applyingGaussianBlur(sigma: Double(min(canvas.width, canvas.height)) * 0.03 * a).cropped(to: rect)
+            } else if fx.kind == "mono" {
+                let c = CIFilter.colorControls()
+                c.inputImage = out
+                c.saturation = Float(1 - a)
+                out = c.outputImage!.cropped(to: rect)
+            }
+        }
         for text in edits.texts where t >= text.start && t < text.end {
             out = renderText(text, at: t).composited(over: out)
         }
