@@ -19,7 +19,7 @@ final class TimelineView: NSView {
     private weak var observedPlayer: AVPlayer?
     private var lastHeight: CGFloat = 0
 
-    private enum Drag { case scrub, move(String, Double, Double, Double), left(String, Double, Double, Int), right(String, Double, Double, Int) }
+    private enum Drag { case scrub, move(String, Double, Double, Double), left(String, Double, Double, Int), right(String, Double, Double, Int), retime(String) }
     private var drag: Drag?
     private var moved = false
 
@@ -28,7 +28,8 @@ final class TimelineView: NSView {
     private static let rulerTop: CGFloat = 10, rulerHeight: CGFloat = 20
     private static let clipTop: CGFloat = 34, clipHeight: CGFloat = 56
     private static let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
-    static func height(lanes: Int) -> CGFloat { clipTop + clipHeight + laneGap + CGFloat(lanes + 1) * (laneHeight + laneGap) + 4 }
+    private static let motionTop: CGFloat = clipTop + clipHeight + laneGap, motionHeight: CGFloat = 26
+    static func height(lanes: Int) -> CGFloat { motionTop + motionHeight + laneGap + CGFloat(lanes + 1) * (laneHeight + laneGap) + 4 }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -102,7 +103,8 @@ final class TimelineView: NSView {
     }
     private var addLaneRect: CGRect { CGRect(x: trackRect.minX, y: laneY(lanesShown), width: min(trackRect.width, 180), height: Self.laneHeight) }
     private func removeRect(_ lane: Int) -> CGRect { CGRect(x: trackRect.maxX - 22, y: laneY(lane) + 7, width: 14, height: 14) }
-    private func laneY(_ i: Int) -> CGFloat { Self.clipTop + Self.clipHeight + Self.laneGap + CGFloat(i) * (Self.laneHeight + Self.laneGap) }
+    private func laneY(_ i: Int) -> CGFloat { Self.motionTop + Self.motionHeight + Self.laneGap + CGFloat(i) * (Self.laneHeight + Self.laneGap) }
+    private func diamond(_ t: Double) -> CGRect { CGRect(x: x(t) - 7, y: Self.motionTop + Self.motionHeight / 2 - 7, width: 14, height: 14) }
     private func lane(at y: CGFloat) -> Int { max(0, Int((y - laneY(0)) / (Self.laneHeight + Self.laneGap))) }
 
     static func color(_ s: Segment) -> NSColor {
@@ -113,6 +115,7 @@ final class TimelineView: NSView {
         case "highlight": return .systemYellow
         case "blur": return .systemIndigo
         case "mono": return .systemGray
+        case "text": return .systemPink
         default: return .systemPink
         }
     }
@@ -193,6 +196,49 @@ final class TimelineView: NSView {
                 title("Removed", in: r)
             }
             stroke(r, selected: editor.selected == piece.id)
+        }
+
+        // Transitions across removed parts: a badge on the gap they bridge.
+        let parts = editor.pieces
+        for (i, p) in parts.enumerated() where !p.removed {
+            guard let kind = editor.edits.transitions[Edits.key(p.end)], parts.dropFirst(i + 1).contains(where: { !$0.removed }) else { continue }
+            let next = parts.dropFirst(i + 1).first { !$0.removed }!
+            let mid = (x(p.end) + x(next.start)) / 2
+            let tag = (kind == "crossfade" ? "Crossfade" : "Fade") as NSString
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.white]
+            let size = tag.size(withAttributes: attrs)
+            let pill = CGRect(x: mid - size.width / 2 - 7, y: clipTop + clipHeight / 2 - 9, width: size.width + 14, height: 18)
+            NSColor.systemGreen.setFill()
+            NSBezierPath(roundedRect: pill, xRadius: 9, yRadius: 9).fill()
+            tag.draw(at: CGPoint(x: pill.minX + 7, y: pill.minY + 2.5), withAttributes: attrs)
+        }
+
+        // The motion track: each move's travel, ending in a diamond where it lands.
+        let my = Self.motionTop, mh = Self.motionHeight
+        drawLabel("Motion", symbol: "arrow.up.and.down.and.arrow.left.and.right", y: my, height: mh, attrs: label, tint: .systemTeal)
+        NSColor(white: 1, alpha: 0.05).setFill()
+        NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: my, width: trackRect.width, height: mh), xRadius: 7, yRadius: 7).fill()
+        if editor.edits.moves.isEmpty {
+            let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(white: 1, alpha: 0.35)]
+            ("Drag the video in the preview to place it. Add a move to animate it." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: my + 6), withAttributes: hint)
+        }
+        for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) {
+            let selected = editor.selected == "m:" + m.id
+            let bar = CGRect(x: x(m.t - m.duration), y: my + 7, width: max(2, x(m.t) - x(m.t - m.duration)), height: mh - 14)
+            NSColor.systemTeal.withAlphaComponent(selected ? 0.75 : 0.45).setFill()
+            NSBezierPath(roundedRect: bar, xRadius: 6, yRadius: 6).fill()
+            let name = (["smooth": "Smooth", "linear": "Linear", "spring": "Spring", "zoom": "Zoom through", "swipe": "Swipe",
+                         "fade": "Fade", "spin": "Spin", "pop": "Pop"][m.style] ?? m.style) as NSString
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
+            if bar.width > name.size(withAttributes: attrs).width + 16 { name.draw(at: CGPoint(x: bar.minX + 6, y: bar.minY - 1), withAttributes: attrs) }
+            let d = diamond(m.t)
+            let path = NSBezierPath()
+            path.move(to: CGPoint(x: d.midX, y: d.minY)); path.line(to: CGPoint(x: d.maxX, y: d.midY))
+            path.line(to: CGPoint(x: d.midX, y: d.maxY)); path.line(to: CGPoint(x: d.minX, y: d.midY)); path.close()
+            (selected ? NSColor.white : NSColor.systemTeal).setFill()
+            path.fill()
+            NSColor(white: 0, alpha: 0.4).setStroke()
+            path.stroke()
         }
 
         // The lanes.
@@ -293,6 +339,7 @@ final class TimelineView: NSView {
         case "highlight": return "Cursor highlight"
         case "blur": return "Blur"
         case "mono": return "Black & white"
+        case "text": return "“\(s.text ?? "")”"
         default: return "Effect"
         }
     }
@@ -321,6 +368,17 @@ final class TimelineView: NSView {
         let p = convert(e.locationInWindow, from: nil)
         moved = false
         if addLaneRect.contains(p) { editor.addLane(); return }
+        if p.y >= Self.motionTop, p.y <= Self.motionTop + Self.motionHeight {
+            if let m = editor.edits.moves.first(where: { diamond($0.t).insetBy(dx: -4, dy: -4).contains(p) }) {
+                editor.select("m:" + m.id)
+                editor.seek(source: m.t)
+                drag = .retime(m.id)
+            } else {
+                drag = .scrub
+                editor.seek(source: t(p.x))
+            }
+            return
+        }
         if let i = (0..<editor.edits.lanes).first(where: { removeRect($0).insetBy(dx: -3, dy: -3).contains(p) }) { editor.removeLane(i); return }
         if p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight, let piece = editor.pieces.first(where: { t(p.x) >= $0.start && t(p.x) <= $0.end }) {
             // A part of the clip: select it, and seek there.
@@ -350,6 +408,9 @@ final class TimelineView: NSView {
         switch drag {
         case .scrub:
             editor.seek(source: now)
+        case let .retime(id):
+            editor.moveTime(id, to: now, live: true)
+            editor.seek(source: now)
         case let .move(id, s, end, grab):
             let len = end - s
             let start = min(max(s + now - grab, 0), editor.duration - len)
@@ -364,7 +425,11 @@ final class TimelineView: NSView {
 
     override func mouseUp(with e: NSEvent) {
         if let drag, moved, let editor {
-            if case .scrub = drag {} else { editor.endDrag() }
+            switch drag {
+            case .scrub: break
+            case let .retime(id): if let m = editor.edits.moves.first(where: { $0.id == id }) { editor.moveTime(id, to: m.t, live: false) }
+            default: editor.endDrag()
+            }
         }
         drag = nil
         changed()

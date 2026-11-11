@@ -57,8 +57,15 @@ final class Studio: ExactModule {
         return e
     }
 
-    private static let emptySelection: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "",
-                                                        "removed": false, "first": false, "last": false, "problem": ""]
+    private static let emptySelection: [String: Any] = [
+        "id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "", "removed": false, "first": false,
+        "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
+        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "problem": "",
+    ]
+    private static let emptySummary: [String: Any] = [
+        "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "moves": 0, "length": 0, "source": 0, "playing": false,
+        "device": false, "found": false, "cursorDrawn": false, "baseScale": 100,
+    ]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {
         switch request["op"] as? String {
@@ -67,7 +74,7 @@ final class Studio: ExactModule {
         case "selection":
             return editor(request["id"] as? String ?? "")?.selection ?? Self.emptySelection
         case "summary":
-            return editor(request["id"] as? String ?? "")?.summary ?? ["parts": 1, "removed": 0, "effects": 0, "lanes": 1, "length": 0, "source": 0]
+            return editor(request["id"] as? String ?? "")?.summary ?? Self.emptySummary
         default:
             throw ExactNativeRefusal("studio answers status, selection and summary")
         }
@@ -138,6 +145,14 @@ final class Studio: ExactModule {
         case "join-prev": e.join(-1)
         case "join-next": e.join(1)
         case "add-lane": e.addLane()
+        case "transition": e.setTransition(r["kind"] as? String ?? "cut")
+        case "text": e.setText(r["track"] as? String ?? "", r["kind"] as? String ?? "")
+        case "move": e.setMoveField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
+        case "place": e.placePreset(r["kind"] as? String ?? "")
+        case "add-move": e.addMove()
+        case "pattern": e.pattern(r["kind"] as? String ?? "")
+        case "find-device": e.findDevice()
+        case "forget-device": e.forgetDevice()
         case "start": e.setTimes(start: Self.seconds(r["kind"] as? String), end: nil)
         case "end": e.setTimes(start: nil, end: Self.seconds(r["kind"] as? String))
         default: break
@@ -279,7 +294,8 @@ final class Studio: ExactModule {
 let exactModule: ExactModule.Type = Studio.self
 
 /// `<studio-preview clip=… look=…>`: the open recording's player, with the look applied.
-/// A bare player layer, so the stage's colour shows around the video rather than black bars.
+/// Drag the video to place it (snapping to the centre lines), scroll or pinch to
+/// resize it; drag a text to move it.
 final class Preview: ExactNativeInstance {
     private let studio: Studio
     private let host = PlayerHost()
@@ -299,19 +315,25 @@ final class Preview: ExactNativeInstance {
         let editor = studio.editor(next)
         if next != clip {
             clip = next
-            host.player.player = editor?.player
+            host.attach(editor)
         }
         editor?.setLook(Look.parse(props["look"] ?? "{}"))
     }
 
     override func destroy() {
         studio.editor(clip)?.player.pause()
-        host.player.player = nil
+        host.attach(nil)
     }
 }
 
 final class PlayerHost: NSView {
     let player = AVPlayerLayer()
+    private let outline = CAShapeLayer()
+    private let guides = CAShapeLayer()
+    private weak var editor: Editor?
+    private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint) }
+    private var drag: Drag?
+
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -319,15 +341,147 @@ final class PlayerHost: NSView {
         player.videoGravity = .resizeAspect
         player.backgroundColor = NSColor.clear.cgColor
         layer?.addSublayer(player)
+        for l in [outline, guides] {
+            l.fillColor = nil
+            l.lineWidth = 1.5
+            layer?.addSublayer(l)
+        }
+        outline.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
+        outline.lineDashPattern = [6, 4]
+        guides.strokeColor = NSColor.systemPink.cgColor
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    func attach(_ editor: Editor?) {
+        self.editor?.unlisten(self)
+        self.editor = editor
+        player.player = editor?.player
+        editor?.listen(self) { [weak self] in self?.drawOverlay() }
+        drawOverlay()
+    }
+
     override func layout() {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         player.frame = bounds
+        outline.frame = bounds
+        guides.frame = bounds
         CATransaction.commit()
+        drawOverlay()
     }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// The video's rectangle in this view (AppKit, origin bottom-left).
+    private var video: CGRect {
+        let r = player.videoRect
+        return r.width > 0 ? r : bounds
+    }
+    /// A view point in canvas units (origin top-left).
+    private func unit(_ p: CGPoint) -> CGPoint {
+        CGPoint(x: (p.x - video.minX) / video.width, y: 1 - (p.y - video.minY) / video.height)
+    }
+    private func rect(_ u: UnitRect) -> CGRect {
+        CGRect(x: video.minX + u.x * video.width, y: video.minY + (1 - u.y - u.h) * video.height, width: u.w * video.width, height: u.h * video.height)
+    }
+    private func contains(_ u: UnitRect, _ p: CGPoint) -> Bool { p.x >= u.x && p.x <= u.x + u.w && p.y >= u.y && p.y <= u.y + u.h }
+
+    /// The selected text's box, or the video's while it is dragged.
+    private func drawOverlay() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard let editor else { outline.path = nil; guides.path = nil; return }
+        let f = editor.framing
+        if let s = editor.selectedSegment, s.kind == "text" {
+            outline.path = CGPath(roundedRect: rect(f.textFrame(s)), cornerWidth: 6, cornerHeight: 6, transform: nil)
+        } else if case .subject = drag {
+            outline.path = CGPath(rect: rect(f.subjectFrame(at: editor.playhead)), transform: nil)
+        } else {
+            outline.path = nil
+        }
+        if drag == nil { guides.path = nil }
+    }
+
+    override func mouseDown(with e: NSEvent) {
+        guard let editor else { return }
+        let u = unit(convert(e.locationInWindow, from: nil))
+        let f = editor.framing
+        let t = editor.playhead
+        // A text showing now, the selected one first.
+        let texts = editor.edits.texts.filter { t >= $0.start && t < $0.end }
+            .sorted { a, _ in a.id == editor.selected }
+        if let s = texts.first(where: { contains(f.textFrame($0), u) }) {
+            editor.select(s.id)
+            drag = .text(s.id, u, CGPoint(x: s.x ?? 0.5, y: s.y ?? 0.5))
+        } else if contains(f.subjectFrame(at: t), u) {
+            if editor.selectedSegment?.kind == "text" { editor.select("") }
+            drag = .subject(u, editor.placementNow)
+        } else {
+            editor.select("")
+            drag = nil
+        }
+        drawOverlay()
+    }
+
+    /// Within this distance of a centre line, a drag snaps to it.
+    private static let snap = 0.012
+
+    override func mouseDragged(with e: NSEvent) {
+        guard let editor, let drag else { return }
+        let u = unit(convert(e.locationInWindow, from: nil))
+        var lines: [CGFloat] = [], rows: [CGFloat] = []
+        func snapped(_ v: Double, _ hit: inout [CGFloat]) -> Double {
+            if abs(v - 0.5) < Self.snap { hit.append(0.5); return 0.5 }
+            return v
+        }
+        switch drag {
+        case let .subject(from, start):
+            let x = snapped(start.x + u.x - from.x, &lines), y = snapped(start.y + u.y - from.y, &rows)
+            editor.place(Placement(x: x, y: y, scale: start.scale), live: true)
+        case let .text(id, from, start):
+            let x = snapped(start.x + u.x - from.x, &lines), y = snapped(start.y + u.y - from.y, &rows)
+            editor.dragText(id, x: x, y: y, live: true)
+        }
+        let path = CGMutablePath()
+        for x in lines { path.move(to: CGPoint(x: video.minX + x * video.width, y: video.minY)); path.addLine(to: CGPoint(x: video.minX + x * video.width, y: video.maxY)) }
+        for y in rows { path.move(to: CGPoint(x: video.minX, y: video.minY + y * video.height)); path.addLine(to: CGPoint(x: video.maxX, y: video.minY + y * video.height)) }
+        guides.path = path
+        drawOverlay()
+    }
+
+    override func mouseUp(with e: NSEvent) {
+        guard let editor, let drag else { return }
+        switch drag {
+        case .subject: editor.endPlace()
+        case let .text(id, _, _):
+            if let s = editor.edits.texts.first(where: { $0.id == id }) { editor.dragText(id, x: s.x ?? 0.5, y: s.y ?? 0.5, live: false) }
+        }
+        self.drag = nil
+        guides.path = nil
+        drawOverlay()
+    }
+
+    /// Resize the selected text, else the video.
+    private func resize(by factor: Double) {
+        guard let editor else { return }
+        if let s = editor.selectedSegment, s.kind == "text" {
+            editor.setText("size", String((s.size ?? 0.08) * factor * 100))
+            return
+        }
+        var p = editor.placementNow
+        p.scale = min(max(p.scale * factor, 0.2), 4)
+        editor.place(p)
+    }
+
+    override func scrollWheel(with e: NSEvent) {
+        let dy = e.hasPreciseScrollingDeltas ? e.scrollingDeltaY : e.scrollingDeltaY * 8
+        guard abs(dy) > 0.1 else { return }
+        resize(by: 1 + Double(dy) * 0.004)
+    }
+
+    override func magnify(with e: NSEvent) { resize(by: 1 + Double(e.magnification)) }
 }
 #else
 final class Studio: ExactModule {}

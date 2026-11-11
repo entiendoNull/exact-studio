@@ -1,16 +1,18 @@
-// The editor's look and edits, rendered per frame: the captured source
-// cropped to its subject (a device's bezel, an area, a window), framed on a
-// background with padding, rounded corners and a shadow; zoomed in or out
-// over the zoom track's segments, following the cursor; and touched by the
-// effects track. Cuts and speed are the composition's (Editor.swift); every
-// time here is the source recording's. The preview and the export share
-// this one function, so what plays is what exports. No Exact types here: a
-// test harness compiles it alone.
+// The editor's model and its rendering. Every edit lives here as data
+// (Edits, Look, RecordingMeta); Framing renders one source frame with all of
+// it applied; Composition builds the playable, exportable composition, and
+// StudioCompositor is the AVVideoCompositing that draws it, two tracks at a
+// time where a crossfade overlaps them. Times are the source recording's
+// unless named `out`. No Exact types here: a test harness compiles it alone.
 #if os(macOS)
+import AppKit
 import AVFoundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
+import CoreText
 import Foundation
+
+// MARK: - Model
 
 /// A rectangle in unit coordinates, origin top-left.
 struct UnitRect: Codable, Equatable {
@@ -22,7 +24,7 @@ struct UnitRect: Codable, Equatable {
 /// and a position in the capture's unit coordinates (origin top-left).
 struct Point: Codable { var t: Double, x: Double, y: Double }
 
-/// What the person chose for the frame.
+/// What the person chose for the frame and the cursor.
 struct Look: Codable, Equatable {
     var background = "ocean"
     /// Padding around the subject, a percentage of the canvas's shorter side.
@@ -32,6 +34,26 @@ struct Look: Codable, Equatable {
     var shadow = true
     /// "auto" (the subject's own shape), "16:9", "9:16", "1:1" or "4:3".
     var aspect = "16:9"
+    /// The drawn cursor (recordings made without the system's in the picture).
+    var cursor = true
+    var cursorSize = 1.5
+    var clickEffect = true
+    var smoothCursor = true
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Look()
+        background = try c.decodeIfPresent(String.self, forKey: .background) ?? d.background
+        padding = try c.decodeIfPresent(Double.self, forKey: .padding) ?? d.padding
+        radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? d.radius
+        shadow = try c.decodeIfPresent(Bool.self, forKey: .shadow) ?? d.shadow
+        aspect = try c.decodeIfPresent(String.self, forKey: .aspect) ?? d.aspect
+        cursor = try c.decodeIfPresent(Bool.self, forKey: .cursor) ?? d.cursor
+        cursorSize = try c.decodeIfPresent(Double.self, forKey: .cursorSize) ?? d.cursorSize
+        clickEffect = try c.decodeIfPresent(Bool.self, forKey: .clickEffect) ?? d.clickEffect
+        smoothCursor = try c.decodeIfPresent(Bool.self, forKey: .smoothCursor) ?? d.smoothCursor
+    }
 
     static func parse(_ json: String) -> Look {
         guard let data = json.data(using: .utf8), let look = try? JSONDecoder().decode(Look.self, from: data) else { return Look() }
@@ -39,10 +61,9 @@ struct Look: Codable, Equatable {
     }
 }
 
-/// One span on the timeline. `kind` is "cut", "zoom", "speed", or a visual
-/// effect ("spotlight", "highlight", "blur", "mono"); `level` is a zoom's
-/// (below 1 zooms out), `rate` a speed's. Cuts sit on the clip; everything
-/// else on a lane, any lane, as many lanes as the person makes.
+/// One span on an effect lane. `kind` is "zoom", "speed", a visual effect
+/// ("spotlight", "highlight", "blur", "mono") or "text". `level` is a zoom's
+/// (below 1 zooms out), `rate` a speed's; the rest are a text's.
 struct Segment: Codable, Equatable {
     var id: String
     var kind: String
@@ -51,41 +72,83 @@ struct Segment: Codable, Equatable {
     var lane: Int = 0
     var level: Double?
     var rate: Double?
+    // A text's.
+    var text: String?
+    /// Its centre on the canvas, unit coordinates, origin top-left.
+    var x: Double?
+    var y: Double?
+    /// Its height as a share of the canvas's.
+    var size: Double?
+    var color: String?
+    var weight: String?
+    /// "plain", "pill", "box", "outline" or "shadow".
+    var style: String?
+    var animIn: String?
+    var animOut: String?
+    /// While shown: "none", "wave", "pulse", "float" or "wiggle".
+    var loop: String?
+    /// Degrees, clockwise.
+    var rotation: Double?
 
     static let visual = ["spotlight", "highlight", "blur", "mono"]
-    static let kinds = ["zoom", "speed"] + visual
+    static let kinds = ["zoom", "speed", "text"] + visual
 
     /// Two segments may overlap in time unless they share a group: one zoom at
     /// a time, one speed at a time, one of each visual effect at a time.
-    var group: String { kind }
+    /// Texts never clash.
+    var group: String { kind == "text" ? "text:" + id : kind }
 
     func overlaps(_ o: Segment) -> Bool { start < o.end - 0.0001 && o.start < end - 0.0001 }
+}
+
+/// Where the subject sits on the canvas: its centre (unit, origin top-left) and scale.
+struct Placement: Codable, Equatable {
+    var x = 0.5, y = 0.5, scale = 1.0
+}
+
+/// A move: at `t` the subject has arrived at `to`, having moved there over
+/// the `duration` before `t` in `style`.
+struct Move: Codable, Equatable {
+    var id: String
+    var t: Double
+    var to: Placement
+    /// "smooth", "linear", "spring", "zoom", "swipe", "fade", "spin" or "pop".
+    var style = "smooth"
+    var duration = 0.8
 }
 
 /// One part of the clip between two split points.
 struct Piece: Equatable { var start: Double, end: Double, removed: Bool
     var id: String { "p:\(Int((start * 1000).rounded()))" } }
 
-/// A recording's edits, all in source seconds: the clip's split points and
-/// which of its parts are removed, and the effect segments on their lanes.
+/// A recording's edits, all in source seconds.
 struct Edits: Codable, Equatable {
     var segments: [Segment] = []
     /// Where the clip is split, sorted.
     var splits: [Double] = []
     /// The start of each removed part.
     var removed: [Double] = []
+    /// How the video passes from a kept part into the next across removed
+    /// ones, keyed by the kept part's end in milliseconds: "crossfade" or "fade".
+    var transitions: [String: String] = [:]
     /// Effect lanes, at least one; a lane may stay empty.
     var lanes: Int = 1
+    /// Where the subject sits before any move.
+    var base = Placement()
+    var moves: [Move] = []
 
     init(segments: [Segment] = []) { self.segments = segments }
 
-    enum CodingKeys: String, CodingKey { case segments, splits, removed, lanes }
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, base, moves }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
         splits = try c.decodeIfPresent([Double].self, forKey: .splits) ?? []
         removed = try c.decodeIfPresent([Double].self, forKey: .removed) ?? []
+        transitions = try c.decodeIfPresent([String: String].self, forKey: .transitions) ?? [:]
         lanes = try c.decodeIfPresent(Int.self, forKey: .lanes) ?? 1
+        base = try c.decodeIfPresent(Placement.self, forKey: .base) ?? Placement()
+        moves = try c.decodeIfPresent([Move].self, forKey: .moves) ?? []
         // Cuts were once segments: each becomes two splits and a removed part.
         for cut in segments where cut.kind == "cut" {
             splits += [cut.start, cut.end]
@@ -97,6 +160,7 @@ struct Edits: Codable, Equatable {
     }
 
     static func same(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.0015 }
+    static func key(_ t: Double) -> String { String(Int((t * 1000).rounded())) }
 
     /// The clip's parts, in order.
     func pieces(_ duration: Double) -> [Piece] {
@@ -111,9 +175,9 @@ struct Edits: Codable, Equatable {
     var zooms: [Segment] { segments.filter { $0.kind == "zoom" } }
     var speeds: [Segment] { segments.filter { $0.kind == "speed" } }
     var effects: [Segment] { segments.filter { Segment.visual.contains($0.kind) } }
+    var texts: [Segment] { segments.filter { $0.kind == "text" } }
 
-    /// Why `s` cannot sit where it is, or nil when it can: a same-group
-    /// segment overlapping it anywhere, or any segment overlapping it on its lane.
+    /// Why `s` cannot sit where it is, or nil when it can.
     func conflict(_ s: Segment) -> String? {
         for o in segments where o.id != s.id && o.overlaps(s) {
             if o.group == s.group { return "Two \(Segment.noun(s.kind)) can’t overlap." }
@@ -140,8 +204,174 @@ struct Edits: Codable, Equatable {
 
 extension Segment {
     static func noun(_ kind: String) -> String {
-        ["cut": "cuts", "zoom": "zooms", "speed": "speed changes", "spotlight": "spotlights",
-         "highlight": "cursor highlights", "blur": "blurs", "mono": "black-and-white effects"][kind] ?? "effects"
+        ["zoom": "zooms", "speed": "speed changes", "spotlight": "spotlights", "highlight": "cursor highlights",
+         "blur": "blurs", "mono": "black-and-white effects", "text": "texts"][kind] ?? "effects"
+    }
+}
+
+/// A recording on disk, as the capture left it.
+struct RecordingMeta: Codable {
+    var id: String
+    var name: String
+    var kind: String
+    var created: Double
+    var duration: Double
+    var width: Double
+    var height: Double
+    var crop: UnitRect
+    var clicks: [Point]
+    /// When the button was let go after each click, if recorded.
+    var releases: [Point]?
+    /// A device found in the picture: cut to a rounded rectangle of this
+    /// radius (a share of the crop's width) rather than by alpha.
+    var cornerRadius: Double?
+    /// Set when a device was found in an area or window recording.
+    var device: Bool?
+    /// False when the system cursor was left out of the picture (so one is drawn).
+    var cursorBaked: Bool?
+
+    var isDevice: Bool { kind == "simulator" || kind == "emulator" || device == true }
+    var drawsCursor: Bool { cursorBaked == false }
+}
+
+// MARK: - Easing
+
+enum Ease {
+    static func clamp(_ v: Double) -> Double { min(max(v, 0), 1) }
+    /// A smootherstep: no visible jolt at either end.
+    static func smooth(_ x: Double) -> Double { let v = clamp(x); return v * v * v * (v * (v * 6 - 15) + 10) }
+    static func inOut(_ x: Double) -> Double { let v = clamp(x); return v < 0.5 ? 4 * v * v * v : 1 - pow(-2 * v + 2, 3) / 2 }
+    static func out(_ x: Double) -> Double { let v = clamp(x); return 1 - pow(1 - v, 3) }
+    /// A spring settling at 1 with a little overshoot.
+    static func spring(_ x: Double, bounce: Double = 1) -> Double {
+        let v = clamp(x)
+        guard v < 1 else { return 1 }
+        return 1 - exp(-6 * v) * cos(v * .pi * (2.5 + 2 * bounce))
+    }
+}
+
+/// How far into a segment's effect `t` is: 0 outside, easing to 1 over `ramp` seconds at each end.
+func presence(_ s: Segment, at t: Double, ramp: Double) -> Double {
+    let r = min(ramp, (s.end - s.start) / 2)
+    guard t > s.start, t < s.end, r > 0 else { return 0 }
+    return Ease.smooth(min((t - s.start) / r, (s.end - t) / r, 1))
+}
+
+/// The cursor in the subject's unit coordinates, looked up by time.
+struct CursorPath {
+    let samples: [Point]
+
+    /// The cursor at `t`, averaged over a short window so motion glides.
+    func smoothed(at t: Double, window: Double = 0.35) -> CGPoint? {
+        guard !samples.isEmpty else { return nil }
+        var lo = 0, hi = samples.count
+        while lo < hi { let mid = (lo + hi) / 2; if samples[mid].t < t - window { lo = mid + 1 } else { hi = mid } }
+        var sx = 0.0, sy = 0.0, n = 0.0, i = lo
+        while i < samples.count, samples[i].t <= t + window * 0.3 {
+            let w = 1 - abs(samples[i].t - t) / window
+            sx += samples[i].x * w; sy += samples[i].y * w; n += w
+            i += 1
+        }
+        if n > 0 { return CGPoint(x: sx / n, y: sy / n) }
+        let p = samples[min(lo, samples.count - 1)]
+        return CGPoint(x: p.x, y: p.y)
+    }
+
+    /// The cursor at `t`, unsmoothed.
+    func at(_ t: Double) -> CGPoint? { smoothed(at: t, window: 0.03) }
+}
+
+// MARK: - Art
+
+/// The arrow cursor, as AppKit draws it, with its hot spot. Made on the main thread once.
+enum CursorArt {
+    private(set) static var image: CIImage?
+    private(set) static var hotSpot = CGPoint(x: 4, y: 4)
+    /// Its height in points.
+    private(set) static var points: CGFloat = 24
+
+    static func prepare() {
+        guard image == nil else { return }
+        let arrow = NSCursor.arrow
+        let size = arrow.image.size
+        var rect = CGRect(origin: .zero, size: CGSize(width: size.width * 4, height: size.height * 4))
+        guard let cg = arrow.image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return }
+        image = CIImage(cgImage: cg)
+        hotSpot = arrow.hotSpot
+        points = size.height
+    }
+}
+
+/// Text set as one image per letter, with each letter's place in the line. Cached by everything that shapes it.
+final class TextArt {
+    struct Letter { let image: CIImage; let x: CGFloat; let width: CGFloat }
+    struct Set { let letters: [Letter]; let width: CGFloat; let height: CGFloat; let ascent: CGFloat; let descent: CGFloat }
+
+    private static var cache: [String: Set] = [:]
+    private static let lock = NSLock()
+
+    static func color(_ name: String?) -> NSColor {
+        switch name ?? "white" {
+        case "black": return .black
+        case "yellow": return NSColor(srgbRed: 1, green: 0.84, blue: 0.2, alpha: 1)
+        case "pink": return NSColor(srgbRed: 1, green: 0.27, blue: 0.55, alpha: 1)
+        case "blue": return NSColor(srgbRed: 0.25, green: 0.55, blue: 1, alpha: 1)
+        case "mint": return NSColor(srgbRed: 0.35, green: 0.92, blue: 0.7, alpha: 1)
+        default: return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        }
+    }
+
+    static func isLight(_ name: String?) -> Bool { name != "black" }
+
+    static func set(_ s: Segment, height: CGFloat) -> Set {
+        let text = (s.text ?? "").isEmpty ? " " : s.text!
+        let size = max(8, (s.size ?? 0.08) * height)
+        let key = "\(text)|\(Int(size))|\(s.weight ?? "")|\(s.color ?? "")|\(s.style ?? "")"
+        lock.lock(); defer { lock.unlock() }
+        if let hit = cache[key] { return hit }
+        let weight: NSFont.Weight = s.weight == "regular" ? .regular : s.weight == "heavy" ? .heavy : .bold
+        var font = NSFont.systemFont(ofSize: size, weight: weight)
+        if s.weight == "rounded", let rounded = NSFont.systemFont(ofSize: size, weight: .bold).fontDescriptor.withDesign(.rounded) {
+            font = NSFont(descriptor: rounded, size: size) ?? font
+        }
+        let ink = color(s.color)
+        var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink]
+        if s.style == "outline" {
+            attrs[.strokeColor] = isLight(s.color) ? NSColor.black : NSColor.white
+            attrs[.strokeWidth] = -4
+        }
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attrs))
+        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        var letters: [Letter] = []
+        let ns = text as NSString
+        var i = 0
+        while i < ns.length {
+            let r = ns.rangeOfComposedCharacterSequence(at: i)
+            let x0 = CTLineGetOffsetForStringIndex(line, r.location, nil)
+            let x1 = CTLineGetOffsetForStringIndex(line, r.location + r.length, nil)
+            let piece = ns.substring(with: r)
+            let pad = size * 0.25
+            let w = max(1, x1 - x0) + pad * 2, h = ascent + descent + pad * 2
+            if let ctx = CGContext(data: nil, width: Int(ceil(w)), height: Int(ceil(h)), bitsPerComponent: 8, bytesPerRow: 0,
+                                   space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
+                let g = NSGraphicsContext(cgContext: ctx, flipped: false)
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = g
+                NSAttributedString(string: piece, attributes: attrs).draw(at: CGPoint(x: pad, y: pad + descent))
+                NSGraphicsContext.restoreGraphicsState()
+                if let cg = ctx.makeImage() {
+                    // Origin at the letter's own left edge, on the line's descent.
+                    let img = CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: -pad, y: -pad))
+                    letters.append(Letter(image: img, x: x0, width: x1 - x0))
+                }
+            }
+            i = r.location + r.length
+        }
+        let made = Set(letters: letters, width: width, height: ascent + descent, ascent: ascent, descent: descent)
+        if cache.count > 200 { cache.removeAll() }
+        cache[key] = made
+        return made
     }
 }
 
@@ -167,57 +397,42 @@ enum Backgrounds {
     }
 }
 
-/// How far into a segment's effect `t` is: 0 outside, easing to 1 over `ramp` seconds at each end.
-func presence(_ s: Segment, at t: Double, ramp: Double) -> Double {
-    let r = min(ramp, (s.end - s.start) / 2)
-    guard t > s.start, t < s.end, r > 0 else { return 0 }
-    let v = min((t - s.start) / r, (s.end - t) / r, 1)
-    // A smootherstep: no visible jolt at either end.
-    return v * v * v * (v * (v * 6 - 15) + 10)
-}
-
-/// The cursor in the subject's unit coordinates, looked up by time.
-struct CursorPath {
-    let samples: [Point]
-
-    /// The cursor at `t`, averaged over a short window so the camera glides.
-    func smoothed(at t: Double, window: Double = 0.35) -> CGPoint? {
-        guard !samples.isEmpty else { return nil }
-        var lo = 0, hi = samples.count
-        while lo < hi { let mid = (lo + hi) / 2; if samples[mid].t < t - window { lo = mid + 1 } else { hi = mid } }
-        var sx = 0.0, sy = 0.0, n = 0.0, i = lo
-        while i < samples.count, samples[i].t <= t + window * 0.3 {
-            let w = 1 - abs(samples[i].t - t) / window
-            sx += samples[i].x * w; sy += samples[i].y * w; n += w
-            i += 1
-        }
-        if n > 0 { return CGPoint(x: sx / n, y: sy / n) }
-        let p = samples[min(lo, samples.count - 1)]
-        return CGPoint(x: p.x, y: p.y)
+extension CIImage {
+    func opacity(_ a: Double) -> CIImage {
+        guard a < 0.999 else { return self }
+        let m = CIFilter.colorMatrix()
+        m.inputImage = self
+        m.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(max(0, a)))
+        return m.outputImage!
     }
-
-    /// The cursor at `t`, unsmoothed (an effect drawn under it).
-    func at(_ t: Double) -> CGPoint? { smoothed(at: t, window: 0.05) }
 }
+
+// MARK: - Framing
+
+/// Where the subject is at an instant: its placement, a turn, and an opacity.
+struct Pose { var x: Double, y: Double, scale: Double, rotation: Double = 0, opacity: Double = 1 }
 
 /// One recording's framing: everything per frame except the frame itself.
 struct Framing {
     let canvas: CGSize
-    /// The subject's rectangle on the canvas, Core Image coordinates (origin bottom-left).
+    /// The subject's rectangle on the canvas at its base size and centred, Core Image coordinates.
     let subject: CGRect
-    let crop: UnitRect
-    let rounded: Bool
+    let meta: RecordingMeta
     let look: Look
     let edits: Edits
     let cursor: CursorPath
+    let releases: [Double]
     private let background: CIImage
+    private let moves: [Move]
 
-    init(source: CGSize, crop: UnitRect, device: Bool, look: Look, edits: Edits, cursor: [Point]) {
-        self.crop = crop
+    var crop: UnitRect { meta.crop }
+
+    init(meta: RecordingMeta, look: Look, edits: Edits, cursor: [Point]) {
+        self.meta = meta
         self.look = look
         self.edits = edits
-        rounded = !device
-        let content = CGSize(width: source.width * crop.w, height: source.height * crop.h)
+        let crop = meta.crop
+        let content = CGSize(width: meta.width * crop.w, height: meta.height * crop.h)
         let ratio: Double
         switch look.aspect {
         case "16:9": ratio = 16.0 / 9
@@ -235,28 +450,110 @@ struct Framing {
         let k = min(room.width / max(content.width, 1), room.height / max(content.height, 1))
         let size = CGSize(width: content.width * k, height: content.height * k)
         subject = CGRect(x: (canvas.width - size.width) / 2, y: (canvas.height - size.height) / 2, width: size.width, height: size.height)
-        // Cursor positions arrive in the capture's coordinates: move them into the crop's.
         let toCrop = { (p: Point) -> Point in Point(t: p.t, x: (p.x - crop.x) / crop.w, y: (p.y - crop.y) / crop.h) }
         self.cursor = CursorPath(samples: cursor.map(toCrop))
+        releases = (meta.releases ?? []).map(\.t).sorted()
         background = Backgrounds.image(look.background, size: canvas)
+        moves = edits.moves.sorted { $0.t < $1.t }
     }
 
-    /// A point in the subject's unit coordinates, on the canvas.
-    private func onCanvas(_ p: CGPoint) -> CGPoint {
+    /// A point in the subject's unit coordinates, on the canvas at the subject's base place.
+    private func onSubject(_ p: CGPoint) -> CGPoint {
         CGPoint(x: subject.minX + min(max(p.x, 0), 1) * subject.width,
                 y: subject.minY + (1 - min(max(p.y, 0), 1)) * subject.height)
     }
 
-    func render(_ frame: CIImage, at t: Double) -> CIImage {
+    // MARK: Placement
+
+    /// The scale at which the subject covers the whole canvas.
+    private var fill: Double { Double(max(canvas.width / subject.width, canvas.height / subject.height)) * 1.04 }
+
+    func pose(at t: Double) -> Pose {
+        var from = edits.base
+        for m in moves {
+            let start = m.t - m.duration
+            if t >= m.t { from = m.to; continue }
+            guard t > start, m.duration > 0 else { break }
+            return Framing.blend(from, m.to, u: (t - start) / m.duration, style: m.style, fill: fill)
+        }
+        return Pose(x: from.x, y: from.y, scale: from.scale)
+    }
+
+    static func blend(_ a: Placement, _ b: Placement, u: Double, style: String, fill: Double) -> Pose {
+        func mix(_ e: Double) -> Pose {
+            Pose(x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e, scale: a.scale + (b.scale - a.scale) * e)
+        }
+        switch style {
+        case "linear":
+            return mix(Ease.clamp(u))
+        case "spring":
+            return mix(Ease.spring(u))
+        case "zoom":
+            // Grow to cover the canvas, then settle into the new place.
+            let mid = Placement(x: 0.5, y: 0.5, scale: fill)
+            return u < 0.5 ? blend(a, mid, u: u * 2, style: "smooth", fill: fill) : blend(mid, b, u: u * 2 - 1, style: "smooth", fill: fill)
+        case "swipe":
+            // Out past the edge in the direction of travel, back in from the other side.
+            let dx = b.x - a.x, dy = b.y - a.y, len = hypot(dx, dy)
+            let (ux, uy) = len < 0.01 ? (1.0, 0.0) : (dx / len, dy / len)
+            if u < 0.5 {
+                let e = Ease.inOut(u * 2) * 1.3
+                return Pose(x: a.x + ux * e, y: a.y + uy * e, scale: a.scale)
+            }
+            let e = (1 - Ease.out(u * 2 - 1)) * 1.3
+            return Pose(x: b.x - ux * e, y: b.y - uy * e, scale: b.scale)
+        case "fade":
+            if u < 0.5 { return Pose(x: a.x, y: a.y, scale: a.scale, opacity: 1 - Ease.smooth(u * 2)) }
+            return Pose(x: b.x, y: b.y, scale: b.scale, opacity: Ease.smooth(u * 2 - 1))
+        case "spin":
+            var p = mix(Ease.inOut(u))
+            p.rotation = 360 * Ease.inOut(u)
+            p.scale *= 1 - 0.3 * sin(.pi * Ease.clamp(u))
+            return p
+        case "pop":
+            // Shrink a little while travelling, spring back on arrival.
+            var p = mix(Ease.inOut(u))
+            let v = Ease.clamp(u)
+            p.scale *= v < 0.6 ? 1 - 0.18 * Ease.smooth(v / 0.3) : 0.82 + 0.18 * Ease.spring((v - 0.6) / 0.4, bounce: 1.4)
+            return p
+        default:
+            return mix(Ease.inOut(u))
+        }
+    }
+
+    /// The transform that puts the subject, drawn at its base place, at `pose`.
+    func placement(_ pose: Pose) -> CGAffineTransform {
+        let c = CGPoint(x: subject.midX, y: subject.midY)
+        let to = CGPoint(x: pose.x * canvas.width, y: (1 - pose.y) * canvas.height)
+        return CGAffineTransform(translationX: -c.x, y: -c.y)
+            .concatenating(CGAffineTransform(rotationAngle: -pose.rotation * .pi / 180))
+            .concatenating(CGAffineTransform(scaleX: pose.scale, y: pose.scale))
+            .concatenating(CGAffineTransform(translationX: to.x, y: to.y))
+    }
+
+    /// The subject's rectangle on the canvas at `t` (no turn). Unit, origin top-left.
+    func subjectFrame(at t: Double) -> UnitRect {
+        let p = pose(at: t)
+        let w = subject.width * p.scale / canvas.width, h = subject.height * p.scale / canvas.height
+        return UnitRect(x: p.x - w / 2, y: p.y - h / 2, w: w, h: h)
+    }
+
+    // MARK: Rendering
+
+    /// One frame: `frame` is the source at `t`; `opacity` fades the subject (a transition's).
+    /// Texts are drawn over the finished frame by `overlay`, once, even where two frames blend.
+    func render(_ frame: CIImage, at t: Double, opacity: Double = 1, texts: Bool = true) -> CIImage {
+        let canvasRect = CGRect(origin: .zero, size: canvas)
         let e = frame.extent
         let cropRect = CGRect(x: e.minX + crop.x * e.width, y: e.minY + (1 - crop.y - crop.h) * e.height,
                               width: crop.w * e.width, height: crop.h * e.height)
-        var subjectImage = frame.cropped(to: cropRect)
-            .transformed(by: CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY))
-            .transformed(by: CGAffineTransform(scaleX: subject.width / cropRect.width, y: subject.height / cropRect.height))
-            .transformed(by: CGAffineTransform(translationX: subject.minX, y: subject.minY))
+        let toSubject = CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY)
+            .concatenating(CGAffineTransform(scaleX: subject.width / cropRect.width, y: subject.height / cropRect.height))
+            .concatenating(CGAffineTransform(translationX: subject.minX, y: subject.minY))
+        let source = frame.cropped(to: cropRect).transformed(by: toSubject)
+        var subjectImage = source
 
-        // Effects on the subject's pixels, before its shape is cut.
+        // Effects on the subject's pixels.
         let minSide = min(canvas.width, canvas.height)
         var overlays: [CIImage] = []
         for fx in edits.effects {
@@ -273,7 +570,7 @@ struct Framing {
             case "spotlight":
                 guard let p = cursor.smoothed(at: t, window: 0.2) else { continue }
                 let g = CIFilter.radialGradient()
-                g.center = onCanvas(p)
+                g.center = onSubject(p)
                 g.radius0 = Float(minSide * 0.09)
                 g.radius1 = Float(minSide * 0.16)
                 g.color0 = CIColor(red: 0, green: 0, blue: 0, alpha: 0)
@@ -282,7 +579,7 @@ struct Framing {
             case "highlight":
                 guard let p = cursor.at(t) else { continue }
                 let g = CIFilter.radialGradient()
-                g.center = onCanvas(p)
+                g.center = onSubject(p)
                 g.radius0 = Float(minSide * 0.022)
                 g.radius1 = Float(minSide * 0.03)
                 g.color0 = CIColor(red: 1, green: 0.84, blue: 0.2, alpha: 0.45 * a)
@@ -294,31 +591,45 @@ struct Framing {
         }
         for o in overlays { subjectImage = o.composited(over: subjectImage) }
 
-        if rounded && look.radius > 0 {
-            let mask = CIFilter.roundedRectangleGenerator()
-            mask.extent = subject
-            mask.radius = Float(look.radius)
-            mask.color = .white
-            let blend = CIFilter.blendWithAlphaMask()
-            blend.inputImage = subjectImage
-            blend.backgroundImage = CIImage.empty()
-            blend.maskImage = mask.outputImage
-            subjectImage = blend.outputImage!.cropped(to: subject)
-        } else if !rounded {
-            // A device keeps its bezel's shape: the source's alpha. Effects drawn
-            // over the whole subject rectangle are cut back to it.
-            let source = frame.cropped(to: cropRect)
-                .transformed(by: CGAffineTransform(translationX: -cropRect.minX, y: -cropRect.minY))
-                .transformed(by: CGAffineTransform(scaleX: subject.width / cropRect.width, y: subject.height / cropRect.height))
-                .transformed(by: CGAffineTransform(translationX: subject.minX, y: subject.minY))
-            let blend = CIFilter.blendWithAlphaMask()
-            blend.inputImage = subjectImage
-            blend.backgroundImage = CIImage.empty()
-            blend.maskImage = source
-            subjectImage = blend.outputImage!.cropped(to: subject)
+        // The drawn cursor, over the picture and inside the subject.
+        if look.cursor && meta.drawsCursor, let art = CursorArt.image, let p = (look.smoothCursor ? cursor.smoothed(at: t, window: 0.12) : cursor.at(t)) {
+            let k = subject.width / (crop.w * meta.width)
+            // The capture's backing scale is 2 on a Retina display: the cursor's points in source pixels, then on the canvas.
+            let height = CursorArt.points * 2 * k * look.cursorSize * clickScale(at: t)
+            let s = height / art.extent.height
+            let hot = CGPoint(x: CursorArt.hotSpot.x / CursorArt.points * height, y: CursorArt.hotSpot.y / CursorArt.points * height)
+            let at = onSubject(p)
+            let drawn = art.transformed(by: CGAffineTransform(scaleX: s, y: s))
+                .transformed(by: CGAffineTransform(translationX: at.x - hot.x, y: at.y - (height - hot.y)))
+            subjectImage = drawn.composited(over: subjectImage)
         }
 
-        // The subject and its shadow are one layer; the zoom moves that layer over a still background.
+        // The subject's shape.
+        let mask: CIImage
+        if meta.isDevice, let r = meta.cornerRadius {
+            let g = CIFilter.roundedRectangleGenerator()
+            g.extent = subject
+            g.radius = Float(r * subject.width)
+            g.color = .white
+            mask = g.outputImage!
+        } else if meta.isDevice {
+            mask = source
+        } else if look.radius > 0 {
+            let g = CIFilter.roundedRectangleGenerator()
+            g.extent = subject
+            g.radius = Float(look.radius)
+            g.color = .white
+            mask = g.outputImage!
+        } else {
+            mask = CIImage(color: .white).cropped(to: subject)
+        }
+        let cut = CIFilter.blendWithAlphaMask()
+        cut.inputImage = subjectImage
+        cut.backgroundImage = CIImage.empty()
+        cut.maskImage = mask
+        subjectImage = cut.outputImage!.cropped(to: subject)
+
+        // The subject and its shadow are one layer; placement and zoom move it over a still background.
         var layer = subjectImage
         if look.shadow {
             let blur = minSide * 0.025
@@ -334,20 +645,49 @@ struct Framing {
                 .transformed(by: CGAffineTransform(translationX: 0, y: -blur * 0.5))
             layer = subjectImage.composited(over: shadow)
         }
+        let pose = pose(at: t)
+        let place = placement(pose)
+        layer = layer.transformed(by: place).opacity(pose.opacity * opacity)
 
-        let canvasRect = CGRect(origin: .zero, size: canvas)
-        let (s, c) = camera(at: t)
+        let (s, c) = camera(at: t, place: place)
         if abs(s - 1) > 0.0005 {
             let mid = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
             layer = layer.transformed(by: CGAffineTransform(translationX: -c.x, y: -c.y)
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
                 .concatenating(CGAffineTransform(translationX: mid.x, y: mid.y)))
         }
-        return layer.composited(over: background).cropped(to: canvasRect)
+        let scene = layer.composited(over: background).cropped(to: canvasRect)
+        return texts ? overlay(scene, at: t) : scene
+    }
+
+    /// The texts showing at `t`, over `scene`.
+    func overlay(_ scene: CIImage, at t: Double) -> CIImage {
+        var out = scene
+        for text in edits.texts where t >= text.start && t < text.end {
+            out = renderText(text, at: t).composited(over: out)
+        }
+        return out.cropped(to: CGRect(origin: .zero, size: canvas))
+    }
+
+    /// The cursor's size at `t`: a little smaller while the button is down, springing back on release.
+    func clickScale(at t: Double) -> Double {
+        guard look.clickEffect else { return 1 }
+        var scale = 1.0
+        for c in meta.clicks where t >= c.t && t < c.t + 2 {
+            let up = min(releases.first { $0 > c.t } ?? c.t + 0.12, c.t + 1.5)
+            if t < up {
+                scale = min(scale, 1 - 0.22 * Ease.out((t - c.t) / 0.07))
+            } else {
+                let q = (t - up) / 0.45
+                guard q < 1 else { continue }
+                scale = min(scale, 1 - 0.22 * exp(-6 * q) * cos(q * .pi * 3))
+            }
+        }
+        return scale
     }
 
     /// The zoom at `t`: its scale, and the canvas point it centres.
-    func camera(at t: Double) -> (CGFloat, CGPoint) {
+    func camera(at t: Double, place: CGAffineTransform) -> (CGFloat, CGPoint) {
         let mid = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
         var s = 1.0, amount = 0.0
         for z in edits.zooms {
@@ -355,24 +695,158 @@ struct Framing {
             if a > amount { amount = a; s = 1 + ((z.level ?? 2) - 1) * a }
         }
         guard amount > 0.0005 else { return (1, mid) }
-        // In: toward the cursor (or the subject's centre). Out: about the centre.
         guard s > 1 else { return (CGFloat(s), mid) }
         let f = cursor.smoothed(at: t) ?? CGPoint(x: 0.5, y: 0.5)
-        let target = onCanvas(f)
+        let target = onSubject(f).applying(place)
         var c = CGPoint(x: mid.x + (target.x - mid.x) * amount, y: mid.y + (target.y - mid.y) * amount)
         let half = CGSize(width: canvas.width / s / 2, height: canvas.height / s / 2)
         c.x = min(max(c.x, half.width), canvas.width - half.width)
         c.y = min(max(c.y, half.height), canvas.height - half.height)
         return (CGFloat(s), c)
     }
+
+    // MARK: Text
+
+    func renderText(_ s: Segment, at t: Double) -> CIImage {
+        let art = TextArt.set(s, height: canvas.height)
+        guard !art.letters.isEmpty else { return .empty() }
+        let fs = art.height
+        let n = art.letters.count
+        let center = CGPoint(x: (s.x ?? 0.5) * canvas.width, y: (1 - (s.y ?? 0.5)) * canvas.height)
+        let since = t - s.start, until = s.end - t
+        let inDur = 0.55, outDur = 0.45
+        let stagger = min(0.045, 0.6 / Double(max(n, 1)))
+        let animIn = s.animIn ?? "pop", animOut = s.animOut ?? "fade"
+
+        // The text as a whole.
+        var whole = CGAffineTransform.identity, wholeAlpha = 1.0, wholeBlur = 0.0
+        func scaleWhole(_ k: Double) { whole = whole.scaledBy(x: k, y: k) }
+        let ein = since / inDur, eout = until / outDur
+        switch animIn {
+        case "fade": wholeAlpha *= Ease.smooth(ein)
+        case "pop": scaleWhole(max(0.001, Ease.spring(ein, bounce: 1.2))); wholeAlpha *= Ease.smooth(ein * 3)
+        case "rise": whole = whole.translatedBy(x: 0, y: -(1 - Ease.out(ein)) * fs * 0.6); wholeAlpha *= Ease.smooth(ein)
+        case "blur": wholeBlur = (1 - Ease.out(ein)) * fs * 0.35; wholeAlpha *= Ease.smooth(ein)
+        case "spin": whole = whole.rotated(by: -(1 - Ease.spring(ein)) * .pi / 2); scaleWhole(max(0.001, Ease.spring(ein))); wholeAlpha *= Ease.smooth(ein * 2)
+        case "slide": whole = whole.translatedBy(x: -(1 - Ease.spring(ein, bounce: 0.6)) * canvas.width * 0.4, y: 0); wholeAlpha *= Ease.smooth(ein * 2)
+        default: break
+        }
+        switch animOut {
+        case "fade": wholeAlpha *= Ease.smooth(eout)
+        case "pop": scaleWhole(max(0.001, Ease.inOut(eout))); wholeAlpha *= Ease.smooth(eout * 2)
+        case "sink": whole = whole.translatedBy(x: 0, y: -(1 - Ease.out(eout)) * fs * 0.6); wholeAlpha *= Ease.smooth(eout)
+        case "blur": wholeBlur = max(wholeBlur, (1 - Ease.out(eout)) * fs * 0.35); wholeAlpha *= Ease.smooth(eout)
+        default: break
+        }
+        switch s.loop ?? "none" {
+        case "pulse": scaleWhole(1 + 0.045 * sin(since * 2 * .pi / 1.4))
+        case "float": whole = whole.translatedBy(x: 0, y: sin(since * 2 * .pi / 2.4) * fs * 0.08)
+        case "wiggle": whole = whole.rotated(by: sin(since * 2 * .pi / 1.1) * 0.05)
+        default: break
+        }
+        whole = whole.rotated(by: -(s.rotation ?? 0) * .pi / 180)
+
+        // Each letter.
+        var line = CIImage.empty()
+        let left = -art.width / 2, base = -art.height / 2
+        for (i, letter) in art.letters.enumerated() {
+            let li = since - Double(i) * stagger
+            let lo = until - Double(n - 1 - i) * stagger * 0.6
+            var m = CGAffineTransform.identity, alpha = 1.0
+            let mid = CGPoint(x: letter.width / 2, y: art.height / 2)
+            func aboutMid(_ x: CGAffineTransform) {
+                m = m.concatenating(CGAffineTransform(translationX: -mid.x, y: -mid.y)).concatenating(x).concatenating(CGAffineTransform(translationX: mid.x, y: mid.y))
+            }
+            switch animIn {
+            case "letters":
+                let e = li / 0.5
+                m = m.concatenating(CGAffineTransform(translationX: 0, y: -(1 - Ease.spring(e, bounce: 1.1)) * fs * 0.7))
+                alpha *= Ease.smooth(e * 2.5)
+            case "letters-pop":
+                let e = li / 0.45
+                let k = max(0.001, Ease.spring(e, bounce: 1.3))
+                aboutMid(CGAffineTransform(scaleX: k, y: k))
+                alpha *= Ease.smooth(e * 3)
+            case "drop":
+                let e = li / 0.6
+                m = m.concatenating(CGAffineTransform(translationX: 0, y: (1 - Ease.spring(e, bounce: 0.8)) * fs * 1.6))
+                alpha *= Ease.smooth(e * 3)
+            case "typewriter":
+                alpha *= since >= Double(i) * 0.06 ? 1 : 0
+            default: break
+            }
+            switch animOut {
+            case "fall":
+                let e = 1 - lo / 0.5
+                if e > 0 {
+                    aboutMid(CGAffineTransform(rotationAngle: CGFloat(Ease.inOut(e)) * (i % 2 == 0 ? 0.6 : -0.6)))
+                    m = m.concatenating(CGAffineTransform(translationX: 0, y: -Ease.inOut(e) * fs * 1.4))
+                    alpha *= 1 - Ease.smooth(e)
+                }
+            case "letters":
+                alpha *= Ease.smooth(lo / 0.3)
+            default: break
+            }
+            if s.loop == "wave" {
+                m = m.concatenating(CGAffineTransform(translationX: 0, y: sin(since * 2 * .pi / 1.2 - Double(i) * 0.5) * fs * 0.08))
+            }
+            guard alpha > 0.001 else { continue }
+            let placed = letter.image
+                .transformed(by: m)
+                .transformed(by: CGAffineTransform(translationX: left + letter.x, y: base))
+                .opacity(alpha)
+            line = placed.composited(over: line)
+        }
+
+        // The shape behind it.
+        let padX = fs * 0.45, padY = fs * 0.22
+        let box = CGRect(x: -art.width / 2 - padX, y: -art.height / 2 - padY, width: art.width + padX * 2, height: art.height + padY * 2)
+        var group = line
+        let light = TextArt.isLight(s.color)
+        switch s.style ?? "plain" {
+        case "pill", "box":
+            let g = CIFilter.roundedRectangleGenerator()
+            g.extent = box
+            g.radius = Float(s.style == "pill" ? box.height / 2 : fs * 0.18)
+            g.color = light ? CIColor(red: 0, green: 0, blue: 0, alpha: 0.62) : CIColor(red: 1, green: 1, blue: 1, alpha: 0.92)
+            group = line.composited(over: g.outputImage!)
+        case "shadow":
+            let sh = CIFilter.colorMatrix()
+            sh.inputImage = line
+            sh.rVector = CIVector(x: 0, y: 0, z: 0, w: 0); sh.gVector = CIVector(x: 0, y: 0, z: 0, w: 0); sh.bVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            sh.aVector = CIVector(x: 0, y: 0, z: 0, w: 0.55)
+            group = line.composited(over: sh.outputImage!.applyingGaussianBlur(sigma: fs * 0.08).transformed(by: CGAffineTransform(translationX: 0, y: -fs * 0.05)))
+        default: break
+        }
+        if wholeBlur > 0.5 { group = group.clampedToExtent().applyingGaussianBlur(sigma: wholeBlur).cropped(to: box.insetBy(dx: -wholeBlur * 3, dy: -wholeBlur * 3)) }
+        return group
+            .transformed(by: whole)
+            .transformed(by: CGAffineTransform(translationX: center.x, y: center.y))
+            .opacity(wholeAlpha)
+    }
+
+    /// A text's box on the canvas at rest. Unit, origin top-left.
+    func textFrame(_ s: Segment) -> UnitRect {
+        let art = TextArt.set(s, height: canvas.height)
+        let w = (art.width + art.height * 0.9) / canvas.width, h = art.height * 1.44 / canvas.height
+        return UnitRect(x: (s.x ?? 0.5) - w / 2, y: (s.y ?? 0.5) - h / 2, w: w, h: h)
+    }
 }
 
-/// Source time to output time and back, across cuts and speed changes.
+// MARK: - Time
+
+/// Source time to output time and back, across removed parts, speed changes and crossfades.
 struct TimeMap {
-    struct Piece { var src0: Double, src1: Double, out0: Double, rate: Double
-        var out1: Double { out0 + (src1 - src0) / rate } }
+    struct Piece {
+        var src0: Double, src1: Double, out0: Double, rate: Double
+        /// How long this piece overlaps the one before (a crossfade), and fades in or out (through the background).
+        var overlap = 0.0, fadeIn = 0.0, fadeOut = 0.0
+        var out1: Double { out0 + (src1 - src0) / rate }
+    }
     let pieces: [Piece]
     let duration: Double
+
+    static let crossfade = 0.6, fade = 0.4
 
     init(duration: Double, edits: Edits) {
         self.duration = duration
@@ -380,17 +854,28 @@ struct TimeMap {
         let cuts = edits.cuts(duration)
         for s in cuts + edits.speeds { marks.insert(min(max(s.start, 0), duration)); marks.insert(min(max(s.end, 0), duration)) }
         let sorted = marks.sorted()
-        var out: [Piece] = [], at = 0.0
+        var out: [Piece] = []
         for (a, b) in zip(sorted, sorted.dropFirst()) where b - a > 0.001 {
             let m = (a + b) / 2
             if cuts.contains(where: { m > $0.start && m < $0.end }) { continue }
             let rate = edits.speeds.last(where: { m > $0.start && m < $0.end })?.rate ?? 1
             if let last = out.last, last.rate == rate, abs(last.src1 - a) < 0.0005 {
                 out[out.count - 1].src1 = b
-            } else {
-                out.append(Piece(src0: a, src1: b, out0: at, rate: rate))
+                continue
             }
-            at = out.last!.out1
+            var p = Piece(src0: a, src1: b, out0: out.last?.out1 ?? 0, rate: rate)
+            // Across removed parts: the transition the kept part before chose.
+            if let last = out.last, a - last.src1 > 0.0005, let kind = edits.transitions[Edits.key(last.src1)] {
+                if kind == "crossfade" {
+                    let d = min(TimeMap.crossfade, (last.out1 - last.out0) / 2, (b - a) / rate / 2)
+                    p.overlap = d
+                    p.out0 -= d
+                } else if kind == "fade" {
+                    out[out.count - 1].fadeOut = TimeMap.fade
+                    p.fadeIn = TimeMap.fade
+                }
+            }
+            out.append(p)
         }
         pieces = out
     }
@@ -398,11 +883,11 @@ struct TimeMap {
     var outputDuration: Double { pieces.last?.out1 ?? 0 }
 
     func source(_ out: Double) -> Double {
-        guard let p = pieces.first(where: { out < $0.out1 }) ?? pieces.last else { return out }
+        guard let p = pieces.last(where: { out >= $0.out0 }) ?? pieces.first else { return out }
         return min(p.src1, p.src0 + max(0, out - p.out0) * p.rate)
     }
 
-    /// The output time of a source instant; one inside a cut lands where the cut ends.
+    /// The output time of a source instant; one inside a removed part lands where the next part starts.
     func output(_ src: Double) -> Double {
         for p in pieces {
             if src < p.src0 { return p.out0 }
@@ -412,47 +897,129 @@ struct TimeMap {
     }
 }
 
-/// A recording on disk, as the capture left it.
-struct RecordingMeta: Codable {
-    var id: String
-    var name: String
-    var kind: String
-    var created: Double
-    var duration: Double
-    var width: Double
-    var height: Double
-    var crop: UnitRect
-    var clicks: [Point]
+// MARK: - Composition
 
-    var isDevice: Bool { kind == "simulator" || kind == "emulator" }
+/// The framing the compositor draws with: swapped whole when a look, effect,
+/// text or move changes, so the playback needn't be rebuilt.
+final class RenderState: @unchecked Sendable {
+    private var framing: Framing
+    private let lock = NSLock()
+    init(_ f: Framing) { framing = f }
+    var current: Framing { lock.lock(); defer { lock.unlock() }; return framing }
+    func update(_ f: Framing) { lock.lock(); framing = f; lock.unlock() }
+}
+
+/// One stretch of output time: one piece's frames, or two blending.
+final class StudioInstruction: NSObject, AVVideoCompositionInstructionProtocol {
+    struct Layer { let track: CMPersistentTrackID; let piece: TimeMap.Piece }
+    let timeRange: CMTimeRange
+    let enablePostProcessing = false
+    let containsTweening = true
+    let requiredSourceTrackIDs: [NSValue]?
+    let passthroughTrackID = kCMPersistentTrackID_Invalid
+    let layers: [Layer]
+    let state: RenderState
+
+    init(_ range: CMTimeRange, _ layers: [Layer], _ state: RenderState) {
+        timeRange = range
+        self.layers = layers
+        self.state = state
+        requiredSourceTrackIDs = layers.map { NSNumber(value: $0.track) }
+    }
+}
+
+final class StudioCompositor: NSObject, AVVideoCompositing {
+    let sourcePixelBufferAttributes: [String: any Sendable]? = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+    let requiredPixelBufferAttributesForRenderContext: [String: any Sendable] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+    private static let context = CIContext(options: [.cacheIntermediates: false])
+    private static let space = CGColorSpace(name: CGColorSpace.sRGB)!
+
+    func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {}
+
+    func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
+        guard let ins = request.videoCompositionInstruction as? StudioInstruction, let out = request.renderContext.newPixelBuffer() else {
+            return request.finish(with: NSError(domain: "ExactStudio", code: 1))
+        }
+        let framing = ins.state.current
+        let now = request.compositionTime.seconds
+        var frames: [CIImage] = []
+        var last = 0.0
+        for layer in ins.layers {
+            guard let buffer = request.sourceFrame(byTrackID: layer.track) else { continue }
+            let p = layer.piece
+            let t = min(p.src1, p.src0 + max(0, now - p.out0) * p.rate)
+            var fade = 1.0
+            if p.fadeIn > 0 { fade = min(fade, Ease.smooth((now - p.out0) / p.fadeIn)) }
+            if p.fadeOut > 0 { fade = min(fade, Ease.smooth((p.out1 - now) / p.fadeOut)) }
+            frames.append(framing.render(CIImage(cvPixelBuffer: buffer), at: t, opacity: fade, texts: false))
+            last = t
+        }
+        var image = frames.first ?? CIImage(color: .black)
+        if frames.count == 2, let next = ins.layers.last?.piece {
+            let u = Ease.inOut((now - next.out0) / max(next.overlap, 0.001))
+            let d = CIFilter.dissolveTransition()
+            d.inputImage = frames[0]
+            d.targetImage = frames[1]
+            d.time = Float(u)
+            image = d.outputImage ?? frames[1]
+        }
+        image = framing.overlay(image, at: last)
+        let size = request.renderContext.size
+        StudioCompositor.context.render(image, to: out, bounds: CGRect(origin: .zero, size: size), colorSpace: StudioCompositor.space)
+        request.finish(withComposedVideoFrame: out)
+    }
 }
 
 enum Composition {
-    /// The recording with its cuts and speed changes, and the video
-    /// composition that draws `look` and the zooms and effects over it.
-    static func make(asset: AVAsset, meta: RecordingMeta, cursor: [Point], look: Look, edits: Edits) throws -> (AVAsset, AVMutableVideoComposition, TimeMap) {
+    /// The recording with its removed parts, speed changes and transitions,
+    /// drawn by StudioCompositor with `state`'s framing.
+    static func make(asset: AVAsset, meta: RecordingMeta, edits: Edits, state: RenderState) throws -> (AVAsset, AVMutableVideoComposition, TimeMap) {
         guard let source = asset.tracks(withMediaType: .video).first else { throw CompositionError.noVideo }
         let duration = min(meta.duration, asset.duration.seconds)
         let map = TimeMap(duration: duration, edits: edits)
         let mix = AVMutableComposition()
-        guard let track = mix.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw CompositionError.noVideo }
+        // Two tracks, the pieces alternating between them, so a crossfade has both at once.
+        guard let a = mix.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
+              let b = mix.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { throw CompositionError.noVideo }
+        let tracks = [a, b]
         let start = source.timeRange.start
         func time(_ s: Double) -> CMTime { CMTime(seconds: s, preferredTimescale: 6000) }
-        for p in map.pieces {
+        for (i, p) in map.pieces.enumerated() {
+            let track = tracks[i % 2]
             let range = CMTimeRange(start: start + time(p.src0), end: start + time(p.src1))
-            let at = mix.duration
+            let at = time(p.out0)
+            let end = track.timeRange.isEmpty ? CMTime.zero : track.timeRange.end
+            if end < at { track.insertEmptyTimeRange(CMTimeRange(start: end, end: at)) }
             try track.insertTimeRange(range, of: source, at: at)
             if p.rate != 1 {
-                track.scaleTimeRange(CMTimeRange(start: at, duration: range.duration), toDuration: time((p.src1 - p.src0) / p.rate))
+                track.scaleTimeRange(CMTimeRange(start: at, duration: range.duration), toDuration: time(p.out1) - at)
             }
         }
-        let framing = Framing(source: CGSize(width: meta.width, height: meta.height), crop: meta.crop,
-                              device: meta.isDevice, look: look, edits: edits, cursor: cursor)
-        let composition = AVMutableVideoComposition(asset: mix) { request in
-            let t = map.source(request.compositionTime.seconds)
-            request.finish(with: framing.render(request.sourceImage, at: t), context: nil)
+        // Instructions: a piece alone, then the stretch it shares with the next, end to end.
+        var instructions: [StudioInstruction] = []
+        let pieces = map.pieces
+        var cursor = CMTime.zero
+        for (i, p) in pieces.enumerated() {
+            let layer = StudioInstruction.Layer(track: tracks[i % 2].trackID, piece: p)
+            let hasNext = i + 1 < pieces.count
+            let soloEnd = hasNext ? time(pieces[i + 1].out0) : mix.duration
+            if soloEnd > cursor {
+                instructions.append(StudioInstruction(CMTimeRange(start: cursor, end: soloEnd), [layer], state))
+                cursor = soloEnd
+            }
+            if hasNext, pieces[i + 1].overlap > 0 {
+                let next = StudioInstruction.Layer(track: tracks[(i + 1) % 2].trackID, piece: pieces[i + 1])
+                let end = time(p.out1)
+                if end > cursor {
+                    instructions.append(StudioInstruction(CMTimeRange(start: cursor, end: end), [layer, next], state))
+                    cursor = end
+                }
+            }
         }
-        composition.renderSize = framing.canvas
+        let composition = AVMutableVideoComposition()
+        composition.customVideoCompositorClass = StudioCompositor.self
+        composition.instructions = instructions
+        composition.renderSize = state.current.canvas
         composition.frameDuration = CMTime(value: 1, timescale: 60)
         return (mix, composition, map)
     }

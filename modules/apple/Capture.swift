@@ -14,7 +14,8 @@ enum Sources {
         let bundle = window.owningApplication?.bundleIdentifier ?? ""
         let app = window.owningApplication?.applicationName ?? ""
         let title = window.title ?? ""
-        if bundle == "com.apple.iphonesimulator" { return .simulator }
+        // Xcode 27 shows simulated devices in Device Hub; earlier, in Simulator.
+        if bundle == "com.apple.iphonesimulator" || bundle == "com.apple.dt.Devices" || app == "Device Hub" { return .simulator }
         if app.hasPrefix("qemu-system") || title.hasPrefix("Android Emulator") { return .emulator }
         return .window
     }
@@ -274,9 +275,11 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private var firstTime: Double?
     private var lastTime: Double = 0
     private var crop: UnitRect = .full
+    private var cornerRadius: Double?
     private var detected = false
     private var cursor: [(Double, CGPoint)] = []
     private var clicks: [(Double, CGPoint)] = []
+    private var releases: [(Double, CGPoint)] = []
     private var sampler: Timer?
     private var monitor: Any?
 
@@ -304,19 +307,27 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         try await stream.startCapture()
         await MainActor.run {
             // The cursor at 60 Hz, and every click, in host time, mapped into the capture.
-            sampler = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.sample(click: false) }
-            monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in self?.sample(click: true) }
+            sampler = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.sample(.move) }
+            monitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .leftMouseUp, .rightMouseUp]) { [weak self] e in
+                self?.sample(e.type == .leftMouseUp || e.type == .rightMouseUp ? .up : .down)
+            }
         }
     }
 
-    private func sample(click: Bool) {
+    private enum Sample { case move, down, up }
+
+    private func sample(_ kind: Sample) {
         guard let f = frameOnScreen(), f.width > 0, f.height > 0 else { return }
         let m = NSEvent.mouseLocation
         let top = NSScreen.screens.first?.frame.maxY ?? 0
         let p = CGPoint(x: (m.x - f.minX) / f.width, y: (top - m.y - f.minY) / f.height)
         let now = CACurrentMediaTime()
         queue.async {
-            if click { self.clicks.append((now, p)) } else { self.cursor.append((now, p)) }
+            switch kind {
+            case .down: self.clicks.append((now, p))
+            case .up: self.releases.append((now, p))
+            case .move: self.cursor.append((now, p))
+            }
         }
     }
 
@@ -332,7 +343,13 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         if !detected && (kind == .simulator || kind == .emulator) {
             detected = true
-            crop = Bezel.detect(buffer) ?? .full
+            // A transparent window around the device, else its dark bezel on an opaque one.
+            if let found = Bezel.detect(buffer) {
+                crop = found
+            } else if let outline = Bezel.outline(buffer) {
+                crop = outline.rect
+                cornerRadius = outline.radius
+            }
         }
         lastTime = pts.seconds
         if input.isReadyForMoreMediaData { input.append(sample) }
@@ -355,10 +372,13 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
                 self.input.markAsFinished()
                 self.writer.endSession(atSourceTime: CMTime(seconds: self.lastTime, preferredTimescale: 600))
                 let cursor = self.cursor.filter { $0.0 >= first }.map { Point(t: $0.0 - first, x: $0.1.x, y: $0.1.y) }
-                let clicks = self.clicks.filter { $0.0 >= first }.map { Point(t: $0.0 - first, x: $0.1.x, y: $0.1.y) }
+                let point = { (e: (Double, CGPoint)) in Point(t: e.0 - first, x: e.1.x, y: e.1.y) }
+                let clicks = self.clicks.filter { $0.0 >= first }.map(point)
+                let releases = self.releases.filter { $0.0 >= first }.map(point)
                 let meta = RecordingMeta(id: self.id, name: self.name, kind: self.kind.rawValue,
                                          created: Date().timeIntervalSince1970 * 1000, duration: self.lastTime - first,
-                                         width: self.pixelSize.width, height: self.pixelSize.height, crop: self.crop, clicks: clicks)
+                                         width: self.pixelSize.width, height: self.pixelSize.height, crop: self.crop, clicks: clicks,
+                                         releases: releases, cornerRadius: self.cornerRadius, device: nil, cursorBaked: false)
                 self.writer.finishWriting {
                     do {
                         try Library.write(meta, cursor: cursor, in: self.folder)
@@ -380,7 +400,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         let config = SCStreamConfiguration()
         config.pixelFormat = kCVPixelFormatType_32BGRA
-        config.showsCursor = true
+        // The cursor is drawn by the editor from the recorded path, so it can be hidden, resized and animated.
+        config.showsCursor = false
         config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         config.queueDepth = 8
         config.capturesAudio = false

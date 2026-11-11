@@ -40,6 +40,19 @@ shape SegmentInfo
   removed: bool
   first: bool
   last: bool
+  transition: string
+  text: string
+  size: number
+  color: string
+  weight: string
+  style: string
+  animIn: string
+  animOut: string
+  loop: string
+  rotation: number
+  moveStyle: string
+  duration: number
+  scale: number
   problem: string
 
 shape Summary
@@ -47,8 +60,14 @@ shape Summary
   removed: number
   effects: number
   lanes: number
+  moves: number
   length: number
   source: number
+  playing: bool
+  device: bool
+  found: bool
+  cursorDrawn: bool
+  baseScale: number
 
 shape Reply
   ok: bool
@@ -71,7 +90,7 @@ fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn kindTitle(kind: string, level: number, rate: number): string = kind == "clip" ? "Clip Part" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
 fn countLine(n: number, one: string, many: string): string = n == 1 ? `1 ${one}` : `${n} ${many}`
@@ -86,6 +105,10 @@ component ExactStudio
   state padding = 8 persist
   state radius = 14 persist
   state shadow = true persist
+  state cursorOn = true persist
+  state cursorSize = 150 persist
+  state clickEffect = true persist
+  state smoothCursor = true persist
   state startedAt = 0
   state now = 0
   state listed = 0
@@ -103,11 +126,11 @@ component ExactStudio
   mutation nudged as shape Done refreshes library
   mutation edited as shape Done queue
   derive current = first(library.items.filter(r => r.id == selected))
-  derive isDevice = match current { case some(r) => r.kind == "simulator" or r.kind == "emulator", case none => false }
+  derive isDevice = summary.device or (match current { case some(r) => r.kind == "simulator" or r.kind == "emulator", case none => false })
   derive devices = sources.items.filter(s => s.kind == "simulator" or s.kind == "emulator")
   derive displays = sources.items.filter(s => s.kind == "display")
   derive windows = sources.items.filter(s => s.kind == "window")
-  derive look = `{"background":"${background}","aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow}}`
+  derive look = `{"background":"${background}","aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow},"cursor":${cursorOn},"cursorSize":${cursorSize / 100},"clickEffect":${clickEffect},"smoothCursor":${smoothCursor}}`
   derive startError = match started { case some(r) => r.error, case none => "" }
   derive stopError = match stopped { case some(r) => r.error, case none => "" }
   derive exportLine = match exported { case some(r) => (r.ok ? "Saved to Movies › Exact Studio." : r.error), case none => "" }
@@ -164,6 +187,28 @@ component ExactStudio
     send edited = editClip(selected, "set", "", 0, k)
   action editDo(what: string)
     send edited = editClip(selected, what, "", 0, "")
+  action setCursorOn(v: bool)
+    cursorOn = v
+  action setCursorSize(v: number)
+    cursorSize = round(v)
+  action setClickEffect(v: bool)
+    clickEffect = v
+  action setSmoothCursor(v: bool)
+    smoothCursor = v
+  action textField(field: string, v: string)
+    send edited = editClip(selected, "text", field, 0, v)
+  action textNumber(field: string, v: number)
+    send edited = editClip(selected, "text", field, 0, `${round(v)}`)
+  action moveField(field: string, v: string)
+    send edited = editClip(selected, "move", field, 0, v)
+  action moveNumber(field: string, v: number)
+    send edited = editClip(selected, "move", field, 0, `${v}`)
+  action placeAt(name: string)
+    send edited = editClip(selected, "place", "", 0, name)
+  action pattern(name: string)
+    send edited = editClip(selected, "pattern", "", 0, name)
+  action setTransition(v: string)
+    send edited = editClip(selected, "transition", "", 0, v)
   action setStart(v: string)
     send edited = editClip(selected, "start", "", 0, v)
   action setEnd(v: string)
@@ -266,13 +311,17 @@ component ExactStudio
                 column flex=1 min-width=0 min-height=0 gap=12 padding=16 background-color="-exact-background"
                   studio-preview clip=rec.id look=look aria-label="Preview" flex=1 min-height=200 testId="preview"
                   row gap=8 align-items="center" flex-wrap="wrap"
-                    button press=editDo("play") aria-label="Play or pause" buttonStyle="filled" testId="play"
-                      image "symbol:play-fill"
+                    button press=editDo("play") aria-label=(summary.playing ? "Pause" : "Play") buttonStyle="filled" testId="play"
+                      image (summary.playing ? "symbol:pause-fill" : "symbol:play-fill")
                     column width=1 height=22 background-color="-exact-separator"
                     button popovertarget="add-menu" buttonStyle="bordered" testId="add"
                       image "symbol:add"
                       text "Add"
                     column id="add-menu" popover="auto" role="menu" aria-label="Add at the playhead"
+                      button press=add("text") popovertarget="add-menu" popovertargetaction="hide" testId="add-text"
+                        image "symbol:sf/textformat"
+                        text "Text"
+                      hr
                       button press=add("zoom-in") popovertarget="add-menu" popovertargetaction="hide" testId="add-zoom-in"
                         image "symbol:sf/plus.magnifyingglass"
                         text "Zoom In"
@@ -303,6 +352,30 @@ component ExactStudio
                     button press=editDo("split-clip") buttonStyle="bordered" testId="split-clip"
                       image "symbol:sf/scissors"
                       text "Split Clip"
+                    button popovertarget="motion-menu" buttonStyle="bordered" testId="motion"
+                      image "symbol:sf/arrow.up.and.down.and.arrow.left.and.right"
+                      text "Motion"
+                    column id="motion-menu" popover="auto" role="menu" aria-label="Animate the video's place"
+                      button press=editDo("add-move") popovertarget="motion-menu" popovertargetaction="hide" testId="add-move"
+                        image "symbol:sf/diamond"
+                        text "Add Move Here"
+                        text "Then drag the video where it should go"
+                      hr
+                      button press=pattern("side") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-side"
+                        text "Side to Side"
+                        text "Left, right, back to the middle"
+                      button press=pattern("tour") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-tour"
+                        text "Zoom Tour"
+                        text "Through full screen to each side"
+                      button press=pattern("entrance") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-entrance"
+                        text "Entrance"
+                        text "Springs in from below"
+                      button press=pattern("bounce") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-bounce"
+                        text "Bounce"
+                        text "Pops from side to side"
+                      button press=pattern("drift") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-drift"
+                        text "Slow Push In"
+                        text "A gentle zoom over six seconds"
                     button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
                       image "symbol:sf/cursorarrow.click.2"
                       text "Zoom on Clicks"
@@ -311,7 +384,7 @@ component ExactStudio
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
-              scroll width="19rem" min-height=0 background-color="-exact-secondary-background"
+              scroll width="22rem" min-height=0 background-color="-exact-secondary-background"
                 column gap=20 padding=16
                   column gap=8
                     button press=exportIt buttonStyle="filled" disabled=pending(exported) testId="export"
@@ -372,6 +445,96 @@ component ExactStudio
                             option "Cursor highlight" value="highlight"
                             option "Blur" value="blur"
                             option "Black & white" value="mono"
+                      if sel.kind == "text"
+                        column gap=4
+                          text "Words" font="-exact-caption1" color="-exact-secondary-label"
+                          input value=sel.text change=textField("text") aria-label="Text" testId="text-words"
+                        column gap=4
+                          row
+                            text "Size" flex=1
+                            text `${round(sel.size)}` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=2 max=30 step=0.5 value=sel.size change=textNumber("size") aria-label="Text size" testId="text-size"
+                        column gap=4
+                          row
+                            text "Tilt" flex=1
+                            text `${sel.rotation}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-45 max=45 step=1 value=sel.rotation change=textNumber("rotation") aria-label="Tilt" testId="text-rotation"
+                        row gap=6 role="radiogroup" aria-label="Colour" appearance="none"
+                          for c in ["white", "black", "yellow", "pink", "blue", "mint"] key=c
+                            button role="radio" aria-checked=(sel.color == c) aria-label=c press=textField("color", c) testId=`text-color-${c}` width=26 height=26 border-radius=13 border-width=2 border-style="solid" border-color=(sel.color == c ? "-exact-system-blue" : "-exact-separator") background-color=(c == "white" ? "#ffffff" : c == "black" ? "#111111" : c == "yellow" ? "#ffd633" : c == "pink" ? "#ff458c" : c == "blue" ? "#408cff" : "#59ebb3")
+                        row role="radiogroup" aria-label="Weight"
+                          for w in ["regular", "bold", "heavy", "rounded"] key=w
+                            button role="radio" aria-checked=(sel.weight == w) press=textField("weight", w) testId=`text-weight-${w}` flex=1
+                              text (w == "regular" ? "Light" : w == "bold" ? "Bold" : w == "heavy" ? "Heavy" : "Round")
+                        row align-items="center" gap=8
+                          text "Shape" flex=1
+                          select value=sel.style change=textField("style") aria-label="Shape" testId="text-style"
+                            option "Plain" value="plain"
+                            option "Pill" value="pill"
+                            option "Box" value="box"
+                            option "Outline" value="outline"
+                            option "Soft shadow" value="shadow"
+                        row align-items="center" gap=8
+                          text "In" flex=1
+                          select value=sel.animIn change=textField("in") aria-label="Animation in" testId="text-in"
+                            option "Letters spring up" value="letters"
+                            option "Letters pop" value="letters-pop"
+                            option "Letters drop" value="drop"
+                            option "Typewriter" value="typewriter"
+                            option "Pop" value="pop"
+                            option "Spin in" value="spin"
+                            option "Slide in" value="slide"
+                            option "Rise" value="rise"
+                            option "Blur in" value="blur"
+                            option "Fade" value="fade"
+                            option "None" value="none"
+                        row align-items="center" gap=8
+                          text "Out" flex=1
+                          select value=sel.animOut change=textField("out") aria-label="Animation out" testId="text-out"
+                            option "Fade" value="fade"
+                            option "Letters fall" value="fall"
+                            option "Letters fade" value="letters"
+                            option "Pop away" value="pop"
+                            option "Sink" value="sink"
+                            option "Blur out" value="blur"
+                            option "None" value="none"
+                        row align-items="center" gap=8
+                          text "While shown" flex=1
+                          select value=sel.loop change=textField("loop") aria-label="While shown" testId="text-loop"
+                            option "Still" value="none"
+                            option "Wave" value="wave"
+                            option "Pulse" value="pulse"
+                            option "Float" value="float"
+                            option "Wiggle" value="wiggle"
+                        text "Drag the text in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
+                      if sel.kind == "move"
+                        text "Where it lands" font="-exact-caption1" color="-exact-secondary-label"
+                        row gap=6 flex-wrap="wrap"
+                          for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
+                            button press=placeAt(pl) buttonStyle="bordered" testId=`move-place-${pl}`
+                              text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
+                        row align-items="center" gap=8
+                          text "Style" flex=1
+                          select value=sel.moveStyle change=moveField("style") aria-label="Move style" testId="move-style"
+                            option "Smooth" value="smooth"
+                            option "Linear" value="linear"
+                            option "Spring" value="spring"
+                            option "Zoom through" value="zoom"
+                            option "Swipe" value="swipe"
+                            option "Fade" value="fade"
+                            option "Spin" value="spin"
+                            option "Pop" value="pop"
+                        text "Speed" font="-exact-caption1" color="-exact-secondary-label"
+                        row role="radiogroup" aria-label="Speed"
+                          for d in [0.4, 0.8, 1.4, 2.5] key=d
+                            button role="radio" aria-checked=(sel.duration == d) press=moveNumber("duration", d) testId=`move-speed-${d}` flex=1
+                              text (d == 0.4 ? "Fast" : d == 0.8 ? "Normal" : d == 1.4 ? "Slow" : "Calm")
+                        column gap=4
+                          row
+                            text "Size" flex=1
+                            text `${sel.scale}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=20 max=250 step=1 value=sel.scale change=moveNumber("scale") aria-label="Size" testId="move-scale"
+                        text "With this move selected, drag the video in the preview to set where it lands." font="-exact-caption1" color="-exact-tertiary-label"
                       if sel.kind == "clip"
                         button press=editDo("remove") buttonStyle=(sel.removed ? "bordered" : "filled") testId="piece-remove"
                           text (sel.removed ? "Restore This Part" : "Remove This Part")
@@ -380,16 +543,32 @@ component ExactStudio
                             text "Join Previous"
                           button press=editDo("join-next") buttonStyle="bordered" flex=1 disabled=sel.last testId="join-next"
                             text "Join Next"
+                        if not sel.removed and not sel.last
+                          row align-items="center" gap=8
+                            text "Into the next part" flex=1
+                            select value=sel.transition change=setTransition aria-label="Transition" testId="transition"
+                              option "Cut" value="cut"
+                              option "Crossfade" value="crossfade"
+                              option "Fade through" value="fade"
+                          text "Used where removed parts lie between this part and the next." font="-exact-caption1" color="-exact-tertiary-label"
                       else
                         row gap=8
-                          button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
-                            text "Split Here"
+                          if sel.kind != "move"
+                            button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
+                              text "Split Here"
                           button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
                             text "Remove"
                   else
+                    column gap=10 padding=14 border-radius=14 background-color="-exact-tertiary-background" testId="placement"
+                      text "Placement" font="-exact-headline"
+                      row gap=6 flex-wrap="wrap"
+                        for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
+                          button press=placeAt(pl) buttonStyle="bordered" testId=`place-${pl}`
+                            text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
+                      text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. Motion › Add Move Here, then drag, animates it.") font="-exact-caption1" color="-exact-tertiary-label"
                     column gap=6 padding=14 border-radius=14 background-color="-exact-tertiary-background"
                       text "Timeline" font="-exact-headline"
-                      text `${countLine(summary.parts, "clip part", "clip parts")} (${summary.removed} removed) · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
+                      text `${countLine(summary.parts, "clip part", "clip parts")} (${summary.removed} removed) · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")} · ${countLine(summary.moves, "move", "moves")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
                       text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
 
                   column gap=12
@@ -420,6 +599,34 @@ component ExactStudio
                       text "Shadow" flex=1
                       input type="checkbox" switch checked=shadow change=setShadow aria-label="Shadow" testId="shadow"
 
+                  column gap=10
+                    text "CURSOR" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                    if summary.cursorDrawn
+                      row align-items="center"
+                        text "Show cursor" flex=1
+                        input type="checkbox" switch checked=cursorOn change=setCursorOn aria-label="Show cursor" testId="cursor-on"
+                      if cursorOn
+                        column gap=4
+                          row
+                            text "Size" flex=1
+                            text `${cursorSize}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=50 max=400 step=10 value=cursorSize input=setCursorSize aria-label="Cursor size" testId="cursor-size"
+                        row align-items="center"
+                          text "Squeeze on click" flex=1
+                          input type="checkbox" switch checked=clickEffect change=setClickEffect aria-label="Squeeze on click" testId="click-effect"
+                        row align-items="center"
+                          text "Smooth movement" flex=1
+                          input type="checkbox" switch checked=smoothCursor change=setSmoothCursor aria-label="Smooth movement" testId="smooth-cursor"
+                    else
+                      text "This recording has the system cursor in its picture. New recordings leave it out, so it can be hidden, resized and animated here." font="-exact-footnote" color="-exact-tertiary-label"
+
+                  if not summary.device
+                    column gap=8
+                      text "DEVICE" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                      button press=editDo("find-device") buttonStyle="bordered" testId="find-device"
+                        image "symbol:sf/iphone"
+                        text "Find a Device in the Picture"
+                      text "Crops to a Simulator’s bezel when the recording shows one with its window around it." font="-exact-caption1" color="-exact-tertiary-label"
                   if isDevice
                     column gap=8
                       text "BEZEL CROP" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
@@ -436,6 +643,9 @@ component ExactStudio
                           text "Trim Right"
                       button press=trim("reset", 0) testId="trim-reset"
                         text "Use the whole window" font="-exact-footnote"
+                      if summary.found
+                        button press=editDo("forget-device") testId="forget-device"
+                          text "Not a device" font="-exact-footnote"
 
                   row gap=8
                     button press=editDo("clear") buttonStyle="bordered" flex=1 testId="clear"
