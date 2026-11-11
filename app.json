@@ -29,7 +29,8 @@
   },
   "modules": [
     "studio-preview",
-    "studio-timeline"
+    "studio-timeline",
+    "studio-color"
   ],
   "userInterfaceStyle": "dark"
 }

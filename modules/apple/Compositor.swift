@@ -26,7 +26,12 @@ struct Point: Codable { var t: Double, x: Double, y: Double }
 
 /// What the person chose for the frame and the cursor.
 struct Look: Codable, Equatable {
+    /// A preset's name, "custom", or "video" (the recording itself, blurred).
     var background = "ocean"
+    var customA = "#6A11CB"
+    var customB = "#2575FC"
+    var customAngle = 135.0
+    var customRadial = false
     /// Padding around the subject, a percentage of the canvas's shorter side.
     var padding = 8.0
     /// Corner radius in output pixels; devices keep their bezel's own shape.
@@ -45,6 +50,10 @@ struct Look: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Look()
         background = try c.decodeIfPresent(String.self, forKey: .background) ?? d.background
+        customA = try c.decodeIfPresent(String.self, forKey: .customA) ?? d.customA
+        customB = try c.decodeIfPresent(String.self, forKey: .customB) ?? d.customB
+        customAngle = try c.decodeIfPresent(Double.self, forKey: .customAngle) ?? d.customAngle
+        customRadial = try c.decodeIfPresent(Bool.self, forKey: .customRadial) ?? d.customRadial
         padding = try c.decodeIfPresent(Double.self, forKey: .padding) ?? d.padding
         radius = try c.decodeIfPresent(Double.self, forKey: .radius) ?? d.radius
         shadow = try c.decodeIfPresent(Bool.self, forKey: .shadow) ?? d.shadow
@@ -392,26 +401,74 @@ final class TextArt {
     }
 }
 
-/// The background presets: two colours on a diagonal.
+/// The backgrounds: named gradients, a custom one, and the video itself blurred.
 enum Backgrounds {
-    static let presets: [String: (CIColor, CIColor)] = [
-        "ocean": (CIColor(red: 0.13, green: 0.36, blue: 0.85), CIColor(red: 0.20, green: 0.78, blue: 0.86)),
-        "sunset": (CIColor(red: 0.98, green: 0.45, blue: 0.35), CIColor(red: 0.62, green: 0.25, blue: 0.80)),
-        "mint": (CIColor(red: 0.16, green: 0.66, blue: 0.52), CIColor(red: 0.73, green: 0.93, blue: 0.62)),
-        "midnight": (CIColor(red: 0.06, green: 0.07, blue: 0.16), CIColor(red: 0.22, green: 0.18, blue: 0.42)),
-        "graphite": (CIColor(red: 0.16, green: 0.16, blue: 0.18), CIColor(red: 0.36, green: 0.37, blue: 0.40)),
-        "paper": (CIColor(red: 0.95, green: 0.94, blue: 0.92), CIColor(red: 0.86, green: 0.85, blue: 0.83)),
+    struct Gradient { let a: CIColor; let b: CIColor; let angle: Double; let radial: Bool }
+
+    private static func c(_ hex: Int) -> CIColor {
+        CIColor(red: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255)
+    }
+    private static func g(_ a: Int, _ b: Int, _ angle: Double = 135, radial: Bool = false) -> Gradient { Gradient(a: c(a), b: c(b), angle: angle, radial: radial) }
+
+    /// In the order the inspector shows them.
+    static let order = [
+        "ocean", "sunset", "mint", "midnight", "graphite", "paper",
+        "peach", "lagoon", "berry", "aurora", "ember", "lavender",
+        "citrus", "forest", "sky", "rose", "dusk", "steel",
+        "candy", "deepsea", "sand", "neon", "glow", "noir",
+    ]
+    static let presets: [String: Gradient] = [
+        "ocean": g(0x215CD9, 0x33C7DB), "sunset": g(0xFA7359, 0x9E40CC), "mint": g(0x29A885, 0xBAED9E),
+        "midnight": g(0x0F1229, 0x382E6B), "graphite": g(0x29292E, 0x5C5E66), "paper": g(0xF2F0EB, 0xDBD9D4),
+        "peach": g(0xFFB88C, 0xDE6262), "lagoon": g(0x43CEA2, 0x185A9D), "berry": g(0x8E2DE2, 0xF00000, 160),
+        "aurora": g(0x00C9A7, 0x4A00E0, 200), "ember": g(0xF12711, 0xF5AF19, 45), "lavender": g(0xC3B1E1, 0x7F7FD5),
+        "citrus": g(0xF7FF00, 0xDB36A4, 160), "forest": g(0x134E5E, 0x71B280), "sky": g(0x89F7FE, 0x66A6FF, 180),
+        "rose": g(0xFFDDE1, 0xEE9CA7), "dusk": g(0x2C3E50, 0xFD746C), "steel": g(0x8E9EAB, 0xEEF2F3, 180),
+        "candy": g(0xFF5F6D, 0xFFC371, 90), "deepsea": g(0x000428, 0x004E92, 180), "sand": g(0xE6DADA, 0xC9A878),
+        "neon": g(0x12C2E9, 0xF64F59, 120), "glow": g(0xFF9A8B, 0x4B0082, 0, radial: true), "noir": g(0x434343, 0x000000, 0, radial: true),
     ]
 
-    static func image(_ name: String, size: CGSize) -> CIImage {
-        let (a, b) = presets[name] ?? presets["ocean"]!
-        let g = CIFilter.linearGradient()
-        g.point0 = CGPoint(x: 0, y: size.height)
-        g.point1 = CGPoint(x: size.width, y: 0)
-        g.color0 = a
-        g.color1 = b
-        return g.outputImage!.cropped(to: CGRect(origin: .zero, size: size))
+    static func hex(_ s: String?) -> CIColor? {
+        guard var t = s?.trimmingCharacters(in: .whitespaces), !t.isEmpty else { return nil }
+        if t.hasPrefix("#") { t.removeFirst() }
+        guard t.count == 6, let v = Int(t, radix: 16) else { return nil }
+        return c(v)
     }
+
+    /// The gradient `look` names: a preset, or (for "custom") its own colours and direction.
+    static func gradient(_ look: Look) -> Gradient {
+        if look.background == "custom" {
+            return Gradient(a: hex(look.customA) ?? c(0x6A11CB), b: hex(look.customB) ?? c(0x2575FC),
+                            angle: look.customAngle, radial: look.customRadial)
+        }
+        return presets[look.background] ?? presets["ocean"]!
+    }
+
+    static func image(_ gr: Gradient, size: CGSize) -> CIImage {
+        let rect = CGRect(origin: .zero, size: size)
+        let mid = CGPoint(x: size.width / 2, y: size.height / 2)
+        if gr.radial {
+            let r = CIFilter.radialGradient()
+            r.center = mid
+            r.radius0 = 0
+            r.radius1 = Float(hypot(size.width, size.height) / 2)
+            r.color0 = gr.a
+            r.color1 = gr.b
+            return r.outputImage!.cropped(to: rect)
+        }
+        // The angle as CSS's: 0 points up, 90 right; the line spans the canvas's diagonal reach.
+        let rad = (gr.angle - 90) * .pi / 180
+        let dx = cos(rad), dy = -sin(rad)
+        let reach = (abs(dx) * size.width + abs(dy) * size.height) / 2
+        let l = CIFilter.smoothLinearGradient()
+        l.point0 = CGPoint(x: mid.x - dx * reach, y: mid.y - dy * reach)
+        l.point1 = CGPoint(x: mid.x + dx * reach, y: mid.y + dy * reach)
+        l.color0 = gr.a
+        l.color1 = gr.b
+        return l.outputImage!.cropped(to: rect)
+    }
+
+    static func image(_ name: String, size: CGSize) -> CIImage { image(presets[name] ?? presets["ocean"]!, size: size) }
 }
 
 extension CIImage {
@@ -474,7 +531,7 @@ struct Framing {
         let toCrop = { (p: Point) -> Point in Point(t: p.t, x: (p.x - crop.x) / crop.w, y: (p.y - crop.y) / crop.h) }
         self.cursor = CursorPath(samples: cursor.map(toCrop))
         releases = (meta.releases ?? []).map(\.t).sorted()
-        background = Backgrounds.image(look.background, size: canvas)
+        background = Backgrounds.image(Backgrounds.gradient(look), size: canvas)
         moves = edits.moves.sorted { $0.t < $1.t }
     }
 
@@ -641,7 +698,22 @@ struct Framing {
         } else {
             subjectImage = shaped(subjectImage, source: source)
         }
-        return finish(subjectImage, at: t, opacity: opacity, texts: texts)
+        return finish(subjectImage, at: t, opacity: opacity, texts: texts, source: source)
+    }
+
+    /// The recording itself, stretched to cover the canvas, blurred deep and dimmed.
+    private func blurred(_ source: CIImage) -> CIImage {
+        let k = max(canvas.width / subject.width, canvas.height / subject.height) * 1.15
+        let cover = source.clampedToExtent()
+            .transformed(by: CGAffineTransform(translationX: -subject.midX, y: -subject.midY)
+                .concatenating(CGAffineTransform(scaleX: k, y: k))
+                .concatenating(CGAffineTransform(translationX: canvas.width / 2, y: canvas.height / 2)))
+            .applyingGaussianBlur(sigma: min(canvas.width, canvas.height) * 0.06)
+        let dim = CIFilter.colorControls()
+        dim.inputImage = cover
+        dim.brightness = -0.12
+        dim.saturation = 1.25
+        return dim.outputImage!.cropped(to: CGRect(origin: .zero, size: canvas))
     }
 
     /// The subject cut to a rounded rectangle, or (a device without a silhouette) to its own alpha.
@@ -672,7 +744,7 @@ struct Framing {
     }
 
     /// The cut subject placed, zoomed and shadowed over the background, with the texts.
-    private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool) -> CIImage {
+    private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool, source: CIImage) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let minSide = min(canvas.width, canvas.height)
         // The subject and its shadow are one layer; placement and zoom move it over a still background.
@@ -702,7 +774,8 @@ struct Framing {
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
                 .concatenating(CGAffineTransform(translationX: mid.x, y: mid.y)))
         }
-        let scene = layer.composited(over: background).cropped(to: canvasRect)
+        let ground = look.background == "video" ? blurred(source) : background
+        let scene = layer.composited(over: ground).cropped(to: canvasRect)
         return texts ? overlay(scene, at: t) : scene
     }
 

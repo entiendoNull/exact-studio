@@ -109,6 +109,16 @@ component ExactStudio
   state cursorSize = 150 persist
   state clickEffect = true persist
   state smoothCursor = true persist
+  state customA = "#6A11CB" persist
+  state customB = "#2575FC" persist
+  state customAngle = 135 persist
+  state customRadial = false persist
+  state openPlace = true persist
+  state openHelp = false persist
+  state openBg = true persist
+  state openFrame = true persist
+  state openCursor = false persist
+  state openDevice = true persist
   state startedAt = 0
   state now = 0
   state listed = 0
@@ -130,7 +140,8 @@ component ExactStudio
   derive devices = sources.items.filter(s => s.kind == "simulator" or s.kind == "emulator")
   derive displays = sources.items.filter(s => s.kind == "display")
   derive windows = sources.items.filter(s => s.kind == "window")
-  derive look = `{"background":"${background}","aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow},"cursor":${cursorOn},"cursorSize":${cursorSize / 100},"clickEffect":${clickEffect},"smoothCursor":${smoothCursor}}`
+  derive gradients = ["ocean", "sunset", "mint", "midnight", "graphite", "paper", "peach", "lagoon", "berry", "aurora", "ember", "lavender", "citrus", "forest", "sky", "rose", "dusk", "steel", "candy", "deepsea", "sand", "neon", "glow", "noir"]
+  derive look = `{"background":"${background}","customA":"${customA}","customB":"${customB}","customAngle":${customAngle},"customRadial":${customRadial},"aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow},"cursor":${cursorOn},"cursorSize":${cursorSize / 100},"clickEffect":${clickEffect},"smoothCursor":${smoothCursor}}`
   derive startError = match started { case some(r) => r.error, case none => "" }
   derive stopError = match stopped { case some(r) => r.error, case none => "" }
   derive exportLine = match exported { case some(r) => (r.ok ? "Saved to Movies › Exact Studio." : r.error), case none => "" }
@@ -187,6 +198,32 @@ component ExactStudio
     send edited = editClip(selected, "set", "", 0, k)
   action editDo(what: string)
     send edited = editClip(selected, what, "", 0, "")
+  action toggleSection(name: string)
+    if name == "place"
+      openPlace = not openPlace
+    if name == "help"
+      openHelp = not openHelp
+    if name == "bg"
+      openBg = not openBg
+    if name == "frame"
+      openFrame = not openFrame
+    if name == "cursor"
+      openCursor = not openCursor
+    if name == "device"
+      openDevice = not openDevice
+  action setCustomA(v: string)
+    customA = v
+    background = "custom"
+  action setCustomB(v: string)
+    customB = v
+    background = "custom"
+  action setCustomAngle(v: number)
+    customAngle = round(v)
+  action setCustomRadial(v: bool)
+    customRadial = v
+  action swapCustom
+    customA = customB
+    customB = customA
   action setCursorOn(v: bool)
     cursorOn = v
   action setCursorSize(v: number)
@@ -559,92 +596,150 @@ component ExactStudio
                           button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
                             text "Remove"
                   else
-                    column gap=10 padding=14 border-radius=14 background-color="-exact-tertiary-background" testId="placement"
-                      text "Placement" font="-exact-headline"
-                      row gap=6 flex-wrap="wrap"
-                        for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
-                          button press=placeAt(pl) buttonStyle="bordered" testId=`place-${pl}`
-                            text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
-                      text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. Motion › Add Move Here, then drag, animates it.") font="-exact-caption1" color="-exact-tertiary-label"
-                    column gap=6 padding=14 border-radius=14 background-color="-exact-tertiary-background"
-                      text "Timeline" font="-exact-headline"
+                    column gap=10
+                      button press=toggleSection("place") appearance="none" aria-expanded=openPlace testId="sec-place" padding-top=2 padding-bottom=2
+                        row align-items="center" gap=6 flex=1
+                          text "PLACEMENT" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
+                          image (openPlace ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                      if openPlace
+                        row gap=6 flex-wrap="wrap"
+                          for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
+                            button press=placeAt(pl) buttonStyle="bordered" testId=`place-${pl}`
+                              text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
+                        text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. Motion › Add Move Here, then drag, animates it.") font="-exact-caption1" color="-exact-tertiary-label"
+                    column gap=10
+                      button press=toggleSection("help") appearance="none" aria-expanded=openHelp testId="sec-help" padding-top=2 padding-bottom=2
+                        row align-items="center" gap=6 flex=1
+                          text "TIMELINE" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
+                          image (openHelp ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
                       text `${countLine(summary.parts, "clip part", "clip parts")} (${summary.removed} removed) · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")} · ${countLine(summary.moves, "move", "moves")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
-                      text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
+                      if openHelp
+                        text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
 
                   column gap=12
-                    text "BACKGROUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                    row gap=8 flex-wrap="wrap" role="radiogroup" aria-label="Background" appearance="none"
-                      for b in ["ocean", "sunset", "mint", "midnight", "graphite", "paper"] key=b
-                        button role="radio" aria-checked=(background == b) aria-label=b press=pickBackground(b) testId=`bg-${b}` padding=3 border-radius=13 border-width=2 border-style="solid" border-color=(background == b ? "-exact-system-blue" : "transparent")
-                          image `assets/swatches/${b}.png` width=36 height=36 border-radius=10 aria-hidden=true
+                    button press=toggleSection("bg") appearance="none" aria-expanded=openBg testId="sec-bg" padding-top=2 padding-bottom=2
+                      row align-items="center" gap=6 flex=1
+                        text "BACKGROUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
+                        image (openBg ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                    if openBg
+                      row gap=8 flex-wrap="wrap" role="radiogroup" aria-label="Background" appearance="none"
+                        for b in gradients key=b
+                          button role="radio" aria-checked=(background == b) aria-label=b press=pickBackground(b) testId=`bg-${b}` padding=3 border-radius=13 border-width=2 border-style="solid" border-color=(background == b ? "-exact-system-blue" : "transparent")
+                            image `assets/swatches/${b}.png` width=34 height=34 border-radius=10 aria-hidden=true
+                      row gap=8
+                        button press=pickBackground("video") buttonStyle=(background == "video" ? "filled" : "bordered") flex=1 testId="bg-video"
+                          image "symbol:sf/drop.halffull"
+                          text "Blurred Video"
+                        button press=pickBackground("custom") buttonStyle=(background == "custom" ? "filled" : "bordered") flex=1 testId="bg-custom"
+                          image "symbol:sf/paintpalette"
+                          text "Custom"
+                      if background == "custom"
+                        column gap=10 padding=12 border-radius=12 background-color="-exact-tertiary-background"
+                          row align-items="center" gap=10
+                            text "From" flex=1
+                            studio-color hex=customA change=setCustomA aria-label="Gradient start colour" width=64 height=28 testId="custom-a"
+                          row align-items="center" gap=10
+                            text "To" flex=1
+                            studio-color hex=customB change=setCustomB aria-label="Gradient end colour" width=64 height=28 testId="custom-b"
+                          row role="radiogroup" aria-label="Gradient kind"
+                            button role="radio" aria-checked=(not customRadial) press=setCustomRadial(false) flex=1 testId="custom-linear"
+                              text "Linear"
+                            button role="radio" aria-checked=customRadial press=setCustomRadial(true) flex=1 testId="custom-radial"
+                              text "Radial"
+                          if not customRadial
+                            column gap=4
+                              row
+                                text "Direction" flex=1
+                                text `${customAngle}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                              input type="range" min=0 max=360 step=5 value=customAngle input=setCustomAngle aria-label="Gradient direction" testId="custom-angle"
+                          button press=swapCustom testId="custom-swap"
+                            text "Swap Colours" font="-exact-footnote"
 
                   column gap=12
-                    text "FRAME" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                    row role="radiogroup" aria-label="Shape"
-                      for a in ["16:9", "9:16", "1:1", "4:3", "auto"] key=a
-                        button role="radio" aria-checked=(aspect == a) press=pickAspect(a) testId=`aspect-${a}` flex=1
-                          text (a == "auto" ? "Fit" : a)
-                    column gap=4
-                      row
-                        text "Padding" flex=1
-                        text `${padding}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                      input type="range" min=0 max=30 step=1 value=padding input=setPadding aria-label="Padding" testId="padding"
-                    if not isDevice
+                    button press=toggleSection("frame") appearance="none" aria-expanded=openFrame testId="sec-frame" padding-top=2 padding-bottom=2
+                      row align-items="center" gap=6 flex=1
+                        text "FRAME" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
+                        image (openFrame ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                    if openFrame
+                      row role="radiogroup" aria-label="Shape"
+                        for a in ["16:9", "9:16", "1:1", "4:3", "auto"] key=a
+                          button role="radio" aria-checked=(aspect == a) press=pickAspect(a) testId=`aspect-${a}` flex=1
+                            text (a == "auto" ? "Fit" : a)
                       column gap=4
                         row
-                          text "Corners" flex=1
-                          text `${radius}` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                        input type="range" min=0 max=48 step=1 value=radius input=setRadius aria-label="Corner radius" testId="radius"
-                    row align-items="center"
-                      text "Shadow" flex=1
-                      input type="checkbox" switch checked=shadow change=setShadow aria-label="Shadow" testId="shadow"
-
-                  column gap=10
-                    text "CURSOR" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                    if summary.cursorDrawn
-                      row align-items="center"
-                        text "Show cursor" flex=1
-                        input type="checkbox" switch checked=cursorOn change=setCursorOn aria-label="Show cursor" testId="cursor-on"
-                      if cursorOn
+                          text "Padding" flex=1
+                          text `${padding}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                        input type="range" min=0 max=30 step=1 value=padding input=setPadding aria-label="Padding" testId="padding"
+                      if not isDevice
                         column gap=4
                           row
-                            text "Size" flex=1
-                            text `${cursorSize}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=50 max=400 step=10 value=cursorSize input=setCursorSize aria-label="Cursor size" testId="cursor-size"
-                        row align-items="center"
-                          text "Squeeze on click" flex=1
-                          input type="checkbox" switch checked=clickEffect change=setClickEffect aria-label="Squeeze on click" testId="click-effect"
-                        row align-items="center"
-                          text "Smooth movement" flex=1
-                          input type="checkbox" switch checked=smoothCursor change=setSmoothCursor aria-label="Smooth movement" testId="smooth-cursor"
-                    else
-                      text "This recording has the system cursor in its picture. New recordings leave it out, so it can be hidden, resized and animated here." font="-exact-footnote" color="-exact-tertiary-label"
+                            text "Corners" flex=1
+                            text `${radius}` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=0 max=48 step=1 value=radius input=setRadius aria-label="Corner radius" testId="radius"
+                      row align-items="center"
+                        text "Shadow" flex=1
+                        input type="checkbox" switch checked=shadow change=setShadow aria-label="Shadow" testId="shadow"
 
-                  column gap=8
-                    text "DEVICE" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                    button press=editDo("find-device") buttonStyle="bordered" testId="find-device"
-                      image "symbol:sf/iphone"
-                      text (summary.device ? "Fit to the Phone Again" : "Find a Device in the Picture")
-                    text "Cuts the video to the phone’s own outline, side buttons included, leaving its window out." font="-exact-caption1" color="-exact-tertiary-label"
-                  if isDevice
-                    column gap=8
-                      text "BEZEL CROP" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                      text "Found automatically. Trim an edge if a sliver of window shows." font="-exact-footnote" color="-exact-tertiary-label"
-                      row gap=6
-                        button press=trim("top", 0.004) buttonStyle="bordered" flex=1 testId="trim-top"
-                          text "Trim Top"
-                        button press=trim("bottom", 0.004) buttonStyle="bordered" flex=1 testId="trim-bottom"
-                          text "Trim Bottom"
-                      row gap=6
-                        button press=trim("left", 0.004) buttonStyle="bordered" flex=1 testId="trim-left"
-                          text "Trim Left"
-                        button press=trim("right", 0.004) buttonStyle="bordered" flex=1 testId="trim-right"
-                          text "Trim Right"
-                      button press=trim("reset", 0) testId="trim-reset"
-                        text "Use the whole window" font="-exact-footnote"
-                      if summary.found
-                        button press=editDo("forget-device") testId="forget-device"
-                          text "Not a device" font="-exact-footnote"
+                  column gap=10
+                    button press=toggleSection("cursor") appearance="none" aria-expanded=openCursor testId="sec-cursor" padding-top=2 padding-bottom=2
+                      row align-items="center" gap=6 flex=1
+                        text "CURSOR" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
+                        image (openCursor ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                    if openCursor
+                      if summary.cursorDrawn
+                        row align-items="center"
+                          text "Show cursor" flex=1
+                          input type="checkbox" switch checked=cursorOn change=setCursorOn aria-label="Show cursor" testId="cursor-on"
+                        if cursorOn
+                          column gap=4
+                            row
+                              text "Size" flex=1
+                              text `${cursorSize}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                            input type="range" min=50 max=400 step=10 value=cursorSize input=setCursorSize aria-label="Cursor size" testId="cursor-size"
+                          row align-items="center"
+                            text "Squeeze on click" flex=1
+                            input type="checkbox" switch checked=clickEffect change=setClickEffect aria-label="Squeeze on click" testId="click-effect"
+                          row align-items="center"
+                            text "Smooth movement" flex=1
+                            input type="checkbox" switch checked=smoothCursor change=setSmoothCursor aria-label="Smooth movement" testId="smooth-cursor"
+                      else
+                        text "This recording has the system cursor in its picture. New recordings leave it out, so it can be hidden, resized and animated here." font="-exact-footnote" color="-exact-tertiary-label"
+
+                  column gap=10
+                    button press=toggleSection("device") appearance="none" aria-expanded=openDevice testId="sec-device" padding-top=2 padding-bottom=2
+                      row align-items="center" gap=6 flex=1
+                        text "DEVICE" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
+                        image (openDevice ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                    if openDevice
+                      row gap=8
+                        button press=editDo("find-device") buttonStyle="bordered" flex=1 testId="find-device"
+                          image "symbol:sf/iphone"
+                          text (summary.device ? "Fit to the Phone" : "Find a Device")
+                        if isDevice
+                          button popovertarget="crop-menu" buttonStyle="bordered" testId="crop"
+                            image "symbol:sf/crop"
+                            text "Crop"
+                          column id="crop-menu" popover="auto" role="menu" aria-label="Crop"
+                            button press=trim("top", 0.004) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-top"
+                              image "symbol:sf/arrow.down.to.line"
+                              text "Trim Top"
+                            button press=trim("bottom", 0.004) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-bottom"
+                              image "symbol:sf/arrow.up.to.line"
+                              text "Trim Bottom"
+                            button press=trim("left", 0.004) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-left"
+                              image "symbol:sf/arrow.right.to.line"
+                              text "Trim Left"
+                            button press=trim("right", 0.004) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-right"
+                              image "symbol:sf/arrow.left.to.line"
+                              text "Trim Right"
+                            hr
+                            button press=trim("reset", 0) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-reset"
+                              image "symbol:sf/rectangle.expand.vertical"
+                              text "Use the Whole Window"
+                            if summary.found
+                              button press=editDo("forget-device") popovertarget="crop-menu" popovertargetaction="hide" destructive=true testId="forget-device"
+                                text "Not a Device"
+                      text (isDevice ? "Cut to the phone’s own outline, side buttons included. Crop trims an edge a little at a time." : "Cuts the video to a phone’s own outline when the recording shows a Simulator in its window.") font="-exact-caption1" color="-exact-tertiary-label"
 
                   row gap=8
                     button press=editDo("clear") buttonStyle="bordered" flex=1 testId="clear"
