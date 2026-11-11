@@ -1060,7 +1060,11 @@ struct Framing {
             g.extent = box
             g.radius = Float(s.style == "pill" ? box.height / 2 : fs * 0.18)
             g.color = light ? CIColor(red: 0, green: 0, blue: 0, alpha: 0.62) : CIColor(red: 1, green: 1, blue: 1, alpha: 0.92)
-            group = line.composited(over: g.outputImage!)
+            // Behind letters that arrive or leave one by one, the shape comes with the first and goes with the last.
+            let byLetter = ["letters", "letters-pop", "drop", "typewriter"].contains(animIn)
+            let byLetterOut = ["fall", "letters"].contains(animOut)
+            let shown = min(byLetter ? Ease.smooth(since / 0.3) : 1, byLetterOut ? Ease.smooth((until - 0.15) / 0.3) : 1)
+            group = line.composited(over: g.outputImage!.opacity(shown))
         case "shadow":
             let sh = CIFilter.colorMatrix()
             sh.inputImage = line
