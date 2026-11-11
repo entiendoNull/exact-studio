@@ -76,9 +76,56 @@ final class Editor {
     }
 
     func togglePlay() {
+        endSample(returning: false)
         if isPlaying { player.pause(); return }
         if let item = player.currentItem, item.currentTime().seconds >= map.outputDuration - 0.05 { player.seek(to: .zero) }
         player.play()
+    }
+
+    // MARK: Showing a change once
+
+    private var sampleEnd: Any?
+    private var sampleReturn: Double?
+
+    /// Play source seconds `from`–`to` once, then go back to where the playhead was:
+    /// so a chosen animation is seen without pressing play. Not while already playing.
+    func sample(_ from: Double, _ to: Double) {
+        guard !isPlaying || sampleReturn != nil else { return }
+        let back = sampleReturn ?? playhead
+        endSample(returning: false)
+        sampleReturn = back
+        let a = max(0, from), b = min(duration, max(to, a + 0.2))
+        let end = CMTime(seconds: map.output(b), preferredTimescale: 6000)
+        sampleEnd = player.addBoundaryTimeObserver(forTimes: [NSValue(time: end)], queue: .main) { [weak self] in
+            self?.endSample(returning: true)
+        }
+        player.seek(to: CMTime(seconds: map.output(a), preferredTimescale: 6000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] done in
+            guard done, self?.sampleReturn != nil else { return }
+            self?.player.play()
+        }
+    }
+
+    private func endSample(returning: Bool) {
+        if let o = sampleEnd { player.removeTimeObserver(o) }
+        sampleEnd = nil
+        guard let back = sampleReturn else { return }
+        sampleReturn = nil
+        guard returning else { return }
+        player.pause()
+        // A beat on the last frame, then back.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, !self.isPlaying else { return }
+            self.seek(source: back)
+        }
+    }
+
+    /// The span that shows a segment's chosen look: its entrance, its exit, or a stretch of its middle.
+    private func sampleSegment(_ s: Segment, part: String) {
+        switch part {
+        case "out": sample(s.end - 1.1, s.end)
+        case "loop": sample(s.start + 0.6, min(s.end, s.start + 3))
+        default: sample(s.start, min(s.end, s.start + 1.3))
+        }
     }
 
     // MARK: Building
@@ -322,6 +369,7 @@ final class Editor {
         if s.kind == "speed", let n = number { s.rate = n }
         if Segment.visual.contains(s.kind), let k = kind, Segment.visual.contains(k) { s.kind = k }
         replace(s)
+        sampleSegment(s, part: "in")
     }
 
     /// Set one field of the selected text.
@@ -341,6 +389,12 @@ final class Editor {
         default: return
         }
         replace(s)
+        switch field {
+        case "in", "style", "weight", "color": sampleSegment(s, part: "in")
+        case "out": sampleSegment(s, part: "out")
+        case "loop": sampleSegment(s, part: "loop")
+        default: break
+        }
     }
 
     private func replace(_ s: Segment) {
@@ -516,6 +570,7 @@ final class Editor {
         default: return
         }
         setMove(m)
+        if field != "scale" { sample(m.t - m.duration - 0.3, m.t + 0.4) }
     }
 
     /// A named place: the subject's spot and size there.
