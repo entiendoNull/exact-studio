@@ -61,11 +61,11 @@ final class Studio: ExactModule {
     private static let emptySelection: [String: Any] = [
         "id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "", "removed": false, "first": false,
         "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
-        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "problem": "",
+        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "rotate": 0, "problem": "",
     ]
     private static let emptySummary: [String: Any] = [
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "moves": 0, "length": 0, "source": 0, "playing": false,
-        "device": false, "found": false, "cursorDrawn": false, "baseScale": 100,
+        "device": false, "found": false, "cursorDrawn": false, "baseScale": 100, "tilt": 0, "turn": 0, "rotate": 0,
     ]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {
@@ -150,6 +150,7 @@ final class Studio: ExactModule {
         case "text": e.setText(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "move": e.setMoveField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "place": e.placePreset(r["kind"] as? String ?? "")
+        case "angle": e.setAngle(r["track"] as? String ?? "", Double(r["kind"] as? String ?? "") ?? 0)
         case "add-move": e.addMove()
         case "pattern": e.pattern(r["kind"] as? String ?? "")
         case "find-device": e.findDevice()
@@ -332,7 +333,7 @@ final class PlayerHost: NSView {
     private let outline = CAShapeLayer()
     private let guides = CAShapeLayer()
     private weak var editor: Editor?
-    private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint) }
+    private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint), tilt(CGPoint, Placement) }
     private var drag: Drag?
 
     override init(frame: NSRect) {
@@ -419,6 +420,8 @@ final class PlayerHost: NSView {
             outline.path = CGPath(roundedRect: rect(f.textFrame(s)), cornerWidth: 6, cornerHeight: 6, transform: nil)
         } else if case .subject = drag {
             outline.path = CGPath(rect: rect(f.subjectFrame(at: editor.playhead)), transform: nil)
+        } else if case .tilt = drag {
+            outline.path = nil
         } else {
             outline.path = nil
         }
@@ -438,7 +441,8 @@ final class PlayerHost: NSView {
             drag = .text(s.id, u, CGPoint(x: s.x ?? 0.5, y: s.y ?? 0.5))
         } else if contains(f.subjectFrame(at: t), u) {
             if editor.selectedSegment?.kind == "text" { editor.select("") }
-            drag = .subject(u, editor.placementNow)
+            // ⌥-drag turns it in depth; a plain drag moves it.
+            drag = e.modifierFlags.contains(.option) ? .tilt(u, editor.placementNow) : .subject(u, editor.placementNow)
         } else {
             editor.select("")
             drag = nil
@@ -464,6 +468,15 @@ final class PlayerHost: NSView {
         case let .text(id, from, start):
             let x = snapped(start.x + u.x - from.x, &lines), y = snapped(start.y + u.y - from.y, &rows)
             editor.dragText(id, x: x, y: y, live: true)
+        case let .tilt(from, start):
+            // Across: turn (dragging right brings the right side forward); down: tilt the top away.
+            var p = start
+            p.turn = min(max(start.turn - Double(u.x - from.x) * 140, -70), 70)
+            p.tilt = min(max(start.tilt + Double(u.y - from.y) * 140, -70), 70)
+            // Near flat snaps flat.
+            if abs(p.turn) < 2 { p.turn = 0 }
+            if abs(p.tilt) < 2 { p.tilt = 0 }
+            editor.place(p, live: true)
         }
         let path = CGMutablePath()
         for x in lines { path.move(to: CGPoint(x: video.minX + x * video.width, y: video.minY)); path.addLine(to: CGPoint(x: video.minX + x * video.width, y: video.maxY)) }
@@ -475,7 +488,7 @@ final class PlayerHost: NSView {
     override func mouseUp(with e: NSEvent) {
         guard let editor, let drag else { return }
         switch drag {
-        case .subject: editor.endPlace()
+        case .subject, .tilt: editor.endPlace()
         case let .text(id, _, _):
             if let s = editor.edits.texts.first(where: { $0.id == id }) { editor.dragText(id, x: s.x ?? 0.5, y: s.y ?? 0.5, live: false) }
         }

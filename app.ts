@@ -21,12 +21,12 @@ const sources: Sources = {
     return later(native, { op: 'recordings' }, { items: [] });
   },
   editSelection: async ([id], _store, _storage, native): Promise<Result<'editSelection'>> => {
-    if (!native?.available) return { id: '', kind: '', level: 0, rate: 0, start: 0, end: 0, startText: '', endText: '', removed: false, first: false, last: false, transition: 'cut', text: '', size: 0, color: '', weight: '', style: '', animIn: '', animOut: '', loop: '', rotation: 0, moveStyle: '', duration: 0, scale: 0, problem: '' };
+    if (!native?.available) return { id: '', kind: '', level: 0, rate: 0, start: 0, end: 0, startText: '', endText: '', removed: false, first: false, last: false, transition: 'cut', text: '', size: 0, color: '', weight: '', style: '', animIn: '', animOut: '', loop: '', rotation: 0, moveStyle: '', duration: 0, scale: 0, tilt: 0, turn: 0, rotate: 0, problem: '' };
     native.watch('edits');
     return native.call({ op: 'selection', id }) as Result<'editSelection'>;
   },
   editSummary: async ([id], _store, _storage, native): Promise<Result<'editSummary'>> => {
-    if (!native?.available) return { parts: 1, removed: 0, effects: 0, lanes: 1, moves: 0, length: 0, source: 0, playing: false, device: false, found: false, cursorDrawn: false, baseScale: 100 };
+    if (!native?.available) return { parts: 1, removed: 0, effects: 0, lanes: 1, moves: 0, length: 0, source: 0, playing: false, device: false, found: false, cursorDrawn: false, baseScale: 100, tilt: 0, turn: 0, rotate: 0 };
     native.watch('edits');
     return native.call({ op: 'summary', id }) as Result<'editSummary'>;
   },

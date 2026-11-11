@@ -113,6 +113,22 @@ struct Segment: Codable, Equatable {
 /// Where the subject sits on the canvas: its centre (unit, origin top-left) and scale.
 struct Placement: Codable, Equatable {
     var x = 0.5, y = 0.5, scale = 1.0
+    /// Degrees in 3D: `tilt` leans the top away (positive) or toward the viewer, `turn`
+    /// swings the right side away (positive) or toward; `rotation` turns it flat, clockwise.
+    var tilt = 0.0, turn = 0.0, rotation = 0.0
+
+    init(x: Double = 0.5, y: Double = 0.5, scale: Double = 1, tilt: Double = 0, turn: Double = 0, rotation: Double = 0) {
+        self.x = x; self.y = y; self.scale = scale; self.tilt = tilt; self.turn = turn; self.rotation = rotation
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        x = try c.decodeIfPresent(Double.self, forKey: .x) ?? 0.5
+        y = try c.decodeIfPresent(Double.self, forKey: .y) ?? 0.5
+        scale = try c.decodeIfPresent(Double.self, forKey: .scale) ?? 1
+        tilt = try c.decodeIfPresent(Double.self, forKey: .tilt) ?? 0
+        turn = try c.decodeIfPresent(Double.self, forKey: .turn) ?? 0
+        rotation = try c.decodeIfPresent(Double.self, forKey: .rotation) ?? 0
+    }
 }
 
 /// A move: at `t` the subject has arrived at `to`, having moved there over
@@ -484,7 +500,18 @@ extension CIImage {
 // MARK: - Framing
 
 /// Where the subject is at an instant: its placement, a turn, and an opacity.
-struct Pose { var x: Double, y: Double, scale: Double, rotation: Double = 0, opacity: Double = 1 }
+struct Pose {
+    var x: Double, y: Double, scale: Double, rotation: Double = 0, opacity: Double = 1
+    var tilt = 0.0, turn = 0.0
+    init(x: Double, y: Double, scale: Double, rotation: Double = 0, opacity: Double = 1, tilt: Double = 0, turn: Double = 0) {
+        self.x = x; self.y = y; self.scale = scale; self.rotation = rotation; self.opacity = opacity; self.tilt = tilt; self.turn = turn
+    }
+    init(_ p: Placement, opacity: Double = 1) {
+        self.init(x: p.x, y: p.y, scale: p.scale, rotation: p.rotation, opacity: opacity, tilt: p.tilt, turn: p.turn)
+    }
+    /// Turned in depth enough to draw with perspective.
+    var tilted: Bool { abs(tilt) > 0.05 || abs(turn) > 0.05 }
+}
 
 /// One recording's framing: everything per frame except the frame itself.
 struct Framing {
@@ -554,12 +581,14 @@ struct Framing {
             guard t > start, m.duration > 0 else { break }
             return Framing.blend(from, m.to, u: (t - start) / m.duration, style: m.style, fill: fill)
         }
-        return Pose(x: from.x, y: from.y, scale: from.scale)
+        return Pose(from)
     }
 
     static func blend(_ a: Placement, _ b: Placement, u: Double, style: String, fill: Double) -> Pose {
         func mix(_ e: Double) -> Pose {
-            Pose(x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e, scale: a.scale + (b.scale - a.scale) * e)
+            func l(_ p: Double, _ q: Double) -> Double { p + (q - p) * e }
+            return Pose(x: l(a.x, b.x), y: l(a.y, b.y), scale: l(a.scale, b.scale), rotation: l(a.rotation, b.rotation),
+                        tilt: l(a.tilt, b.tilt), turn: l(a.turn, b.turn))
         }
         switch style {
         case "linear":
@@ -568,7 +597,7 @@ struct Framing {
             return mix(Ease.spring(u))
         case "zoom":
             // Grow to cover the canvas, then settle into the new place.
-            let mid = Placement(x: 0.5, y: 0.5, scale: fill)
+            let mid = Placement(x: 0.5, y: 0.5, scale: fill)  // flat while it fills the frame
             return u < 0.5 ? blend(a, mid, u: u * 2, style: "smooth", fill: fill) : blend(mid, b, u: u * 2 - 1, style: "smooth", fill: fill)
         case "swipe":
             // Out past the edge in the direction of travel, back in from the other side.
@@ -576,16 +605,20 @@ struct Framing {
             let (ux, uy) = len < 0.01 ? (1.0, 0.0) : (dx / len, dy / len)
             if u < 0.5 {
                 let e = Ease.inOut(u * 2) * 1.3
-                return Pose(x: a.x + ux * e, y: a.y + uy * e, scale: a.scale)
+                var p = Pose(a)
+                p.x += ux * e; p.y += uy * e
+                return p
             }
             let e = (1 - Ease.out(u * 2 - 1)) * 1.3
-            return Pose(x: b.x - ux * e, y: b.y - uy * e, scale: b.scale)
+            var p = Pose(b)
+            p.x -= ux * e; p.y -= uy * e
+            return p
         case "fade":
-            if u < 0.5 { return Pose(x: a.x, y: a.y, scale: a.scale, opacity: 1 - Ease.smooth(u * 2)) }
-            return Pose(x: b.x, y: b.y, scale: b.scale, opacity: Ease.smooth(u * 2 - 1))
+            if u < 0.5 { return Pose(a, opacity: 1 - Ease.smooth(u * 2)) }
+            return Pose(b, opacity: Ease.smooth(u * 2 - 1))
         case "spin":
             var p = mix(Ease.inOut(u))
-            p.rotation = 360 * Ease.inOut(u)
+            p.rotation += 360 * Ease.inOut(u)
             p.scale *= 1 - 0.3 * sin(.pi * Ease.clamp(u))
             return p
         case "pop":
@@ -747,6 +780,8 @@ struct Framing {
     private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool, source: CIImage) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let minSide = min(canvas.width, canvas.height)
+        let pose = pose(at: t)
+        if pose.tilted { return finishTilted(subjectImage, pose: pose, at: t, opacity: opacity, texts: texts, source: source) }
         // The subject and its shadow are one layer; placement and zoom move it over a still background.
         var layer = subjectImage
         if look.shadow {
@@ -763,7 +798,6 @@ struct Framing {
                 .transformed(by: CGAffineTransform(translationX: 0, y: -blur * 0.5))
             layer = subjectImage.composited(over: shadow)
         }
-        let pose = pose(at: t)
         let place = placement(pose)
         layer = layer.transformed(by: place).opacity(pose.opacity * opacity)
 
@@ -773,6 +807,83 @@ struct Framing {
             layer = layer.transformed(by: CGAffineTransform(translationX: -c.x, y: -c.y)
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
                 .concatenating(CGAffineTransform(translationX: mid.x, y: mid.y)))
+        }
+        let ground = look.background == "video" ? blurred(source) : background
+        let scene = layer.composited(over: ground).cropped(to: canvasRect)
+        return texts ? overlay(scene, at: t) : scene
+    }
+
+    /// A point of the subject, at its base place, after the turn in depth: rotated about
+    /// the subject's centre by `turn` (around the vertical) then `tilt` (around the
+    /// horizontal), seen from a camera at `depth` in front of the canvas.
+    func project(_ p: CGPoint, tilt: Double, turn: Double) -> CGPoint {
+        let c = CGPoint(x: subject.midX, y: subject.midY)
+        let depth = Double(hypot(canvas.width, canvas.height)) * 1.4
+        let ty = turn * .pi / 180, tx = tilt * .pi / 180
+        var x = Double(p.x - c.x), y = Double(p.y - c.y), z = 0.0
+        // Turn: the right side (x > 0) goes away (z < 0) for a positive turn.
+        (x, z) = (x * cos(ty) + z * sin(ty), -x * sin(ty) + z * cos(ty))
+        // Tilt: the top (y > 0, Core Image's up) goes away for a positive tilt.
+        (y, z) = (y * cos(tx) + z * sin(tx), -y * sin(tx) + z * cos(tx))
+        let k = depth / (depth - z)
+        return CGPoint(x: c.x + CGFloat(x * k), y: c.y + CGFloat(y * k))
+    }
+
+    /// The subject turned in depth: warped with perspective, lit by a glare that moves
+    /// with the turn, with a shadow taken from the warped shape; then placed, zoomed,
+    /// and laid over the background as the flat path does.
+    private func finishTilted(_ subjectImage: CIImage, pose: Pose, at t: Double, opacity: Double, texts: Bool, source: CIImage) -> CIImage {
+        let canvasRect = CGRect(origin: .zero, size: canvas)
+        let minSide = min(canvas.width, canvas.height)
+        let r = subject
+        let warp = CIFilter.perspectiveTransform()
+        warp.inputImage = subjectImage
+        warp.topLeft = project(CGPoint(x: r.minX, y: r.maxY), tilt: pose.tilt, turn: pose.turn)
+        warp.topRight = project(CGPoint(x: r.maxX, y: r.maxY), tilt: pose.tilt, turn: pose.turn)
+        warp.bottomLeft = project(CGPoint(x: r.minX, y: r.minY), tilt: pose.tilt, turn: pose.turn)
+        warp.bottomRight = project(CGPoint(x: r.maxX, y: r.minY), tilt: pose.tilt, turn: pose.turn)
+        var body = warp.outputImage!
+
+        // The glare: a soft band across the glass, sliding with the turn and the tilt.
+        let bounds = body.extent
+        let slide = (pose.turn / 60 + pose.tilt / 90) * 0.5
+        let mid = CGPoint(x: bounds.midX + CGFloat(slide) * bounds.width, y: bounds.midY + CGFloat(slide) * bounds.height * 0.4)
+        let band = CIFilter.smoothLinearGradient()
+        band.point0 = CGPoint(x: mid.x - bounds.width * 0.35, y: mid.y + bounds.height * 0.35)
+        band.point1 = CGPoint(x: mid.x + bounds.width * 0.35, y: mid.y - bounds.height * 0.35)
+        let strength = min(0.22, (abs(pose.turn) + abs(pose.tilt)) / 160)
+        band.color0 = CIColor(red: 1, green: 1, blue: 1, alpha: 0)
+        band.color1 = CIColor(red: 1, green: 1, blue: 1, alpha: CGFloat(strength))
+        let glare = CIFilter.sourceAtopCompositing()
+        glare.inputImage = band.outputImage!.cropped(to: bounds)
+        glare.backgroundImage = body
+        body = glare.outputImage!.cropped(to: bounds)
+
+        var layer = body
+        if look.shadow {
+            // A turned phone throws its shadow a little further and softer.
+            let lift = (abs(pose.tilt) + abs(pose.turn)) / 90
+            let blur = minSide * (0.025 + 0.02 * lift)
+            let silhouette = CIFilter.colorMatrix()
+            silhouette.inputImage = body
+            silhouette.rVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            silhouette.gVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            silhouette.bVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            silhouette.aVector = CIVector(x: 0, y: 0, z: 0, w: 0.45)
+            let shadow = silhouette.outputImage!
+                .clampedToExtent().cropped(to: bounds)
+                .applyingGaussianBlur(sigma: blur)
+                .transformed(by: CGAffineTransform(translationX: CGFloat(-pose.turn / 60) * blur, y: -blur * (0.5 + lift)))
+            layer = body.composited(over: shadow)
+        }
+        let place = placement(pose)
+        layer = layer.transformed(by: place).opacity(pose.opacity * opacity)
+        let (s, c) = camera(at: t, place: place)
+        if abs(s - 1) > 0.0005 {
+            let middle = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
+            layer = layer.transformed(by: CGAffineTransform(translationX: -c.x, y: -c.y)
+                .concatenating(CGAffineTransform(scaleX: s, y: s))
+                .concatenating(CGAffineTransform(translationX: middle.x, y: middle.y)))
         }
         let ground = look.background == "video" ? blurred(source) : background
         let scene = layer.composited(over: ground).cropped(to: canvasRect)

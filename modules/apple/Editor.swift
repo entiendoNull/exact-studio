@@ -485,7 +485,21 @@ final class Editor {
     /// Where the subject is at the playhead.
     var placementNow: Placement {
         let p = framing.pose(at: playhead)
-        return Placement(x: p.x, y: p.y, scale: p.scale)
+        return Placement(x: p.x, y: p.y, scale: p.scale, tilt: p.tilt, turn: p.turn, rotation: p.rotation)
+    }
+
+    /// Set one angle (or the size) of where the subject is now: the selected move's
+    /// landing, else as `place` decides (the move here, a new move, or the base).
+    func setAngle(_ field: String, _ value: Double, live: Bool = false) {
+        if selectedMove != nil && !live { return setMoveField(field, String(value)) }
+        var p = placementNow
+        switch field {
+        case "tilt": p.tilt = min(max(value, -70), 70)
+        case "turn": p.turn = min(max(value, -70), 70)
+        case "rotation": p.rotation = min(max(value, -180), 180)
+        default: return
+        }
+        place(p, live: live)
     }
 
     /// The move the playhead sits on (within a few frames), if any.
@@ -567,10 +581,13 @@ final class Editor {
         case "style": m.style = value
         case "duration": if let n { m.duration = min(max(n, 0.05), 10) }
         case "scale": if let n { m.to.scale = min(max(n / 100, 0.2), 4) }
+        case "tilt": if let n { m.to.tilt = min(max(n, -70), 70) }
+        case "turn": if let n { m.to.turn = min(max(n, -70), 70) }
+        case "rotation": if let n { m.to.rotation = min(max(n, -180), 180) }
         default: return
         }
         setMove(m)
-        if field != "scale" { sample(m.t - m.duration - 0.3, m.t + 0.4) }
+        if field == "style" || field == "duration" { sample(m.t - m.duration - 0.3, m.t + 0.4) }
     }
 
     /// A named place: the subject's spot and size there.
@@ -583,11 +600,22 @@ final class Editor {
         case "bottom": return Placement(x: 0.5, y: 0.64, scale: 0.85)
         case "large": return Placement(x: 0.5, y: 0.5, scale: 1.35)
         case "small": return Placement(x: 0.78, y: 0.72, scale: 0.45)
+        // In depth: a leaning hero shot, a turn to either side, laid back like on a table.
+        case "hero": return Placement(x: 0.5, y: 0.52, scale: 1.05, tilt: 10, turn: -24)
+        case "lean-left": return Placement(x: 0.5, y: 0.5, scale: 1, turn: 32)
+        case "lean-right": return Placement(x: 0.5, y: 0.5, scale: 1, turn: -32)
+        case "lay-back": return Placement(x: 0.5, y: 0.56, scale: 1.1, tilt: 42)
         default: return nil
         }
     }
 
     func placePreset(_ name: String) {
+        // Flat keeps where and how big it is, and only takes the turn out.
+        if name == "flat" {
+            var p = selectedMove?.to ?? placementNow
+            p.tilt = 0; p.turn = 0; p.rotation = 0
+            return place(p)
+        }
         guard let p = Editor.preset(name) else { return }
         place(p)
     }
@@ -613,6 +641,12 @@ final class Editor {
             add = [m(6.0, Placement(x: 0.52, y: 0.48, scale: 1.12), "linear", 6.0)]
         case "bounce": // Pop between the sides.
             add = [m(1.0, l, "pop", 0.8), m(2.8, r, "pop", 0.8), m(4.6, c, "pop", 0.8)]
+        case "turntable": // Swing round to one side, then the other, then face front.
+            add = [m(1.5, Placement(turn: -32), "smooth", 1.5), m(4.0, Placement(turn: 32), "smooth", 2.5), m(6.0, c, "smooth", 1.8)]
+        case "reveal": // Up from lying back, springing into a hero pose.
+            add = [m(0.01, Placement(x: 0.5, y: 0.62, scale: 0.85, tilt: 55), "linear", 0.01), m(1.6, Editor.preset("hero")!, "spring", 1.5)]
+        case "float": // A slow drift between gentle angles.
+            add = [m(2.0, Placement(tilt: 6, turn: -12), "smooth", 2.0), m(4.0, Placement(tilt: -4, turn: 12), "smooth", 2.0), m(6.0, c, "smooth", 2.0)]
         default: return
         }
         var next = edits
@@ -714,7 +748,7 @@ final class Editor {
         var out: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "",
                                   "removed": false, "first": false, "last": false, "transition": "cut", "text": "", "size": 0,
                                   "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "", "rotation": 0,
-                                  "moveStyle": "", "duration": 0, "scale": 0, "problem": problem]
+                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "rotate": 0, "problem": problem]
         if let s = selectedSegment {
             out.merge(["id": s.id, "kind": s.kind, "level": s.level ?? 0, "rate": s.rate ?? 0, "start": s.start, "end": s.end,
                        "startText": Editor.stamp(s.start), "endText": Editor.stamp(s.end), "text": s.text ?? "",
@@ -722,7 +756,8 @@ final class Editor {
                        "animIn": s.animIn ?? "", "animOut": s.animOut ?? "", "loop": s.loop ?? "", "rotation": s.rotation ?? 0]) { $1 }
         } else if let m = selectedMove {
             out.merge(["id": "m:" + m.id, "kind": "move", "start": m.t, "end": m.t, "startText": Editor.stamp(m.t), "endText": Editor.stamp(m.t),
-                       "moveStyle": m.style, "duration": m.duration, "scale": (m.to.scale * 100).rounded()]) { $1 }
+                       "moveStyle": m.style, "duration": m.duration, "scale": (m.to.scale * 100).rounded(),
+                       "tilt": m.to.tilt.rounded(), "turn": m.to.turn.rounded(), "rotate": m.to.rotation.rounded()]) { $1 }
         } else if let p = selectedPiece {
             let all = pieces
             out.merge(["id": p.id, "kind": "clip", "start": p.start, "end": p.end, "startText": Editor.stamp(p.start), "endText": Editor.stamp(p.end),
@@ -737,7 +772,8 @@ final class Editor {
         return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes,
                 "moves": edits.moves.count, "length": map.outputDuration, "source": duration, "playing": isPlaying,
                 "device": meta.isDevice, "found": meta.device == true, "cursorDrawn": meta.drawsCursor,
-                "baseScale": (edits.base.scale * 100).rounded()]
+                "baseScale": (edits.base.scale * 100).rounded(),
+                "tilt": placementNow.tilt.rounded(), "turn": placementNow.turn.rounded(), "rotate": placementNow.rotation.rounded()]
     }
 }
 
