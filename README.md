@@ -10,7 +10,7 @@ A macOS screen recorder built with [Exact](https://github.com/expo/exact). It re
 - **Cursor**: new recordings leave the system cursor out and draw it from the recorded path, so it can be hidden, resized, smoothed, and squeezed on each click.
 - **Text**: any number of texts on the lanes, each dragged into place, with size, tilt, colour, weight and a shape (pill, box, outline, soft shadow), an entrance (letters spring up, pop or drop, typewriter, pop, spin, slide, rise, blur, fade), an exit (fade, letters fall, pop away, sink, blur) and a loop while shown (wave, pulse, float, wiggle).
 - **Timeline**: the clip as a filmstrip, and effect lanes under it. **Split Clip** (or S) splits the clip at the playhead with a visible gap; select a part and remove it (it stays hatched, so it can be restored) or join it with a neighbour; a kept part can pass into the next across removed ones with a crossfade or a fade through the background. **Add** puts a zoom in, zoom out, slow down, speed up, spotlight, cursor highlight, blur, or black and white at the playhead. Effects overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. **+ Add effect lane** adds a lane; an empty lane's × removes it. Drag an effect to move it (across lanes too) or its edges to resize. The inspector shows the selection's start and end as fields: type `1.25` or `0:01.25` and press Return. Delete removes the selection, Space plays, the arrow keys step a frame (Shift: a second).
-- **Zoom on clicks**: a new recording starts with a zoom around each group of clicks; the button regenerates them.
+- **Zoom on clicks**: a new recording starts with no zooms; the button adds one around each group of clicks.
 - **Export** an MP4 to `~/Movies/Exact Studio/`.
 
 ## Run

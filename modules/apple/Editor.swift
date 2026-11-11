@@ -46,8 +46,8 @@ final class Editor {
         if let data = try? Data(contentsOf: file), let saved = try? JSONDecoder().decode(Edits.self, from: data) {
             edits = saved
         } else {
-            // A first open: the clicks become zooms, ready to adjust.
-            edits = Edits(segments: Edits.autoZooms(meta.clicks, duration: meta.duration))
+            // A first open starts clean; Zoom on Clicks adds zooms where the clicks are.
+            edits = Edits()
         }
         map = TimeMap(duration: meta.duration, edits: edits)
         state = RenderState(Framing(meta: meta, look: Look(), edits: edits, cursor: cursor, folder: Library.recordings.appendingPathComponent(id)))

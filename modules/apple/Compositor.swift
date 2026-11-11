@@ -352,7 +352,7 @@ enum CursorArt {
 /// Text set as one image per letter, with each letter's place in the line. Cached by everything that shapes it.
 final class TextArt {
     struct Letter { let image: CIImage; let x: CGFloat; let width: CGFloat }
-    struct Set { let letters: [Letter]; let width: CGFloat; let height: CGFloat; let ascent: CGFloat; let descent: CGFloat }
+    struct Set { let letters: [Letter]; let width: CGFloat; let height: CGFloat; let ascent: CGFloat; let descent: CGFloat; let capHeight: CGFloat }
 
     private static var cache: [String: Set] = [:]
     private static let lock = NSLock()
@@ -402,11 +402,14 @@ final class TextArt {
             let w = max(1, x1 - x0) + pad * 2, h = ascent + descent + pad * 2
             if let ctx = CGContext(data: nil, width: Int(ceil(w)), height: Int(ceil(h)), bitsPerComponent: 8, bytesPerRow: 0,
                                    space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) {
-                let g = NSGraphicsContext(cgContext: ctx, flipped: false)
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = g
-                NSAttributedString(string: piece, attributes: attrs).draw(at: CGPoint(x: pad, y: pad + descent))
-                NSGraphicsContext.restoreGraphicsState()
+                // CoreText puts the baseline exactly where it is told: `pad + descent` up from the image's bottom.
+                var ct: [NSAttributedString.Key: Any] = [.font: font, NSAttributedString.Key(kCTForegroundColorAttributeName as String): ink.cgColor]
+                if s.style == "outline" {
+                    ct[NSAttributedString.Key(kCTStrokeColorAttributeName as String)] = (isLight(s.color) ? NSColor.black : NSColor.white).cgColor
+                    ct[NSAttributedString.Key(kCTStrokeWidthAttributeName as String)] = -4
+                }
+                ctx.textPosition = CGPoint(x: pad, y: pad + descent)
+                CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: piece, attributes: ct)), ctx)
                 if let cg = ctx.makeImage() {
                     // Origin at the letter's own left edge, on the line's descent.
                     let img = CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: -pad, y: -pad))
@@ -415,7 +418,7 @@ final class TextArt {
             }
             i = r.location + r.length
         }
-        let made = Set(letters: letters, width: width, height: ascent + descent, ascent: ascent, descent: descent)
+        let made = Set(letters: letters, width: width, height: ascent + descent, ascent: ascent, descent: descent, capHeight: font.capHeight)
         if cache.count > 200 { cache.removeAll() }
         cache[key] = made
         return made
@@ -994,7 +997,9 @@ struct Framing {
 
         // Each letter.
         var line = CIImage.empty()
-        let left = -art.width / 2, base = -art.height / 2
+        // Each letter's image has its baseline `descent` up from its bottom; set the baseline so the
+        // capitals' height is centred on the text's middle, as a pill or a box centres its label.
+        let left = -art.width / 2, base = -art.capHeight / 2 - art.descent
         for (i, letter) in art.letters.enumerated() {
             let li = since - Double(i) * stagger
             let lo = until - Double(n - 1 - i) * stagger * 0.6
