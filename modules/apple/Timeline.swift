@@ -19,7 +19,7 @@ final class TimelineView: NSView {
     private weak var observedPlayer: AVPlayer?
     private var lastHeight: CGFloat = 0
 
-    private enum Drag { case scrub, move(String, Double, Double, Double), left(String, Double, Double, Int), right(String, Double, Double, Int), retime(String) }
+    private enum Drag { case scrub, move(String, Double, Double, Double), left(String, Double, Double, Int), right(String, Double, Double, Int), retime(String, Double) }
     private var drag: Drag?
     private var moved = false
 
@@ -201,19 +201,19 @@ final class TimelineView: NSView {
                 sel.stroke()
             }
         }
-        // The scissors pins.
+        // A split marker over each split: a thin line down the gap, with two small arrowheads
+        // above the clip pointing in at it.
         for split in editor.edits.splits where split > 0.001 && split < d - 0.001 {
-            let cx = x(split), pin = CGRect(x: cx - 9, y: clipTop - 22, width: 18, height: 18)
-            let path = NSBezierPath(ovalIn: pin)
-            let tip = NSBezierPath()
-            tip.move(to: CGPoint(x: cx - 5, y: pin.maxY - 3)); tip.line(to: CGPoint(x: cx, y: pin.maxY + 4)); tip.line(to: CGPoint(x: cx + 5, y: pin.maxY - 3)); tip.close()
-            amber.setFill()
-            path.fill(); tip.fill()
-            if let icon = NSImage(systemSymbolName: "scissors", accessibilityDescription: "Cut")?.withSymbolConfiguration(.init(pointSize: 9, weight: .bold)) {
-                let tinted = icon.copy() as! NSImage
-                tinted.lockFocus(); NSColor(white: 0.1, alpha: 1).set(); CGRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop); tinted.unlockFocus()
-                tinted.draw(in: CGRect(x: cx - tinted.size.width / 2, y: pin.midY - tinted.size.height / 2, width: tinted.size.width, height: tinted.size.height),
-                            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            let cx = x(split)
+            NSColor(white: 1, alpha: 0.8).setFill()
+            CGRect(x: cx - 0.75, y: clipTop - 12, width: 1.5, height: clipHeight + 12).fill()
+            let mid = clipTop - 8, w: CGFloat = 6, h: CGFloat = 5
+            for side in [-1.0, 1.0] {
+                let head = NSBezierPath()
+                let tipX = cx + CGFloat(side) * 2.5, backX = tipX + CGFloat(side) * w
+                head.move(to: CGPoint(x: tipX, y: mid)); head.line(to: CGPoint(x: backX, y: mid - h)); head.line(to: CGPoint(x: backX, y: mid + h)); head.close()
+                NSColor.white.setFill()
+                head.fill()
             }
         }
 
@@ -403,7 +403,8 @@ final class TimelineView: NSView {
             if let m = moveHit(p) {
                 editor.select("m:" + m.id)
                 editor.seek(source: m.t)
-                drag = .retime(m.id)
+                // Keep where in the move it was grabbed, so a drag slides it from there.
+                drag = .retime(m.id, m.t - t(p.x))
             } else {
                 drag = .scrub
                 editor.seek(source: t(p.x))
@@ -439,9 +440,10 @@ final class TimelineView: NSView {
         switch drag {
         case .scrub:
             editor.seek(source: now)
-        case let .retime(id):
-            editor.moveTime(id, to: now, live: true)
-            editor.seek(source: now)
+        case let .retime(id, grab):
+            let to = now + grab
+            editor.moveTime(id, to: to, live: true)
+            editor.seek(source: to)
         case let .move(id, s, end, grab):
             let len = end - s
             let start = min(max(s + now - grab, 0), editor.duration - len)
@@ -458,7 +460,7 @@ final class TimelineView: NSView {
         if let drag, moved, let editor {
             switch drag {
             case .scrub: break
-            case let .retime(id): if let m = editor.edits.moves.first(where: { $0.id == id }) { editor.moveTime(id, to: m.t, live: false) }
+            case let .retime(id, _): if let m = editor.edits.moves.first(where: { $0.id == id }) { editor.moveTime(id, to: m.t, live: false) }
             default: editor.endDrag()
             }
         }
