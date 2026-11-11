@@ -14,10 +14,10 @@
     "macos": {
       "minimumOS": "14.0",
       "window": {
-        "width": 1180,
-        "height": 820,
-        "minWidth": 900,
-        "minHeight": 640
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1120,
+        "minHeight": 720
       }
     }
   },
@@ -28,6 +28,8 @@
     }
   },
   "modules": [
-    "studio-preview"
-  ]
+    "studio-preview",
+    "studio-timeline"
+  ],
+  "userInterfaceStyle": "dark"
 }

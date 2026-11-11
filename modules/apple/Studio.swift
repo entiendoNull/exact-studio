@@ -1,12 +1,17 @@
 // Exact Studio's native module: what app.ts asks (`native.call` / `later`)
-// and the `studio-preview` view. Topics app.ts watches: "status" (recording
-// or not) and "recordings" (the library changed).
+// and its views, `studio-preview` and `studio-timeline`. Topics app.ts
+// watches: "status" (recording or not), "recordings" (the library changed)
+// and "edits" (a recording's edits or selection changed).
 //
 //   call   {op: "status"}                       → {recording, name, kind}
+//          {op: "selection", id}                → {track, id, level, rate, kind, start, end}
+//          {op: "summary", id}                  → {cuts, zooms, speeds, effects, length, source}
 //   later  {op: "sources"}                      → {items: [{id, name, app, kind}], allowed}
 //          {op: "start", source}                → {ok, error}   source "area" opens the picker
 //          {op: "stop"}                         → {ok, error, id}
 //          {op: "recordings"}                   → {items: [{id, name, kind, created, duration}]}
+//          {op: "edit", id, do, track?, number?, kind?}  → {ok}
+//                 do: add (track), set (number | kind), delete, split, auto, clear, play
 //          {op: "export", id, look}             → {ok, error, path}
 //          {op: "delete", id}                   → {ok, error}
 //          {op: "reveal", path}                 → {ok}
@@ -19,20 +24,40 @@ import ScreenCaptureKit
 
 final class Studio: ExactModule {
     override class var views: [String: ExactNativeFactory] {
-        ["studio-preview": ExactNativeFactory(for: Studio.self) { _, props, events in Preview(props, events) }]
+        [
+            "studio-preview": ExactNativeFactory(for: Studio.self) { studio, props, events in Preview(studio, props, events) },
+            "studio-timeline": ExactNativeFactory(for: Studio.self) { studio, props, events in Timeline(studio, props, events) },
+        ]
     }
 
     private var recorder: Recorder?
     private var starting = false
     private var picker: AreaPicker?
     private var statusItem: NSStatusItem?
+    private var editors: [String: Editor] = [:]
+
+    /// The open recording's editor, made on first use.
+    func editor(_ id: String) -> Editor? {
+        guard !id.isEmpty, !id.contains("/") else { return nil }
+        if let e = editors[id] { return e }
+        guard let e = Editor(id: id) else { return nil }
+        e.onChange = { [weak self] in self?.context.changed("edits") }
+        editors[id] = e
+        return e
+    }
+
+    private static let emptySelection: [String: Any] = ["track": "", "id": "", "level": 0, "rate": 0, "kind": "", "start": 0, "end": 0]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {
         switch request["op"] as? String {
         case "status":
             return ["recording": recorder != nil, "name": recorder?.name ?? "", "kind": recorder?.kind.rawValue ?? ""]
+        case "selection":
+            return editor(request["id"] as? String ?? "")?.selection ?? Self.emptySelection
+        case "summary":
+            return editor(request["id"] as? String ?? "")?.summary ?? ["cuts": 0, "zooms": 0, "speeds": 0, "effects": 0, "length": 0, "source": 0]
         default:
-            throw ExactNativeRefusal("studio answers status")
+            throw ExactNativeRefusal("studio answers status, selection and summary")
         }
     }
 
@@ -55,11 +80,15 @@ final class Studio: ExactModule {
                 ["id": $0.id, "name": $0.name, "kind": $0.kind, "created": $0.created, "duration": $0.duration]
             }
             reply.send(["items": items])
+        case "edit":
+            edit(request)
+            reply.send(["ok": true])
         case "export":
             export(id: request["id"] as? String ?? "", look: Look.parse(request["look"] as? String ?? "{}"), reply: reply)
         case "delete":
             let id = request["id"] as? String ?? ""
             guard !id.isEmpty, !id.contains("/") else { return reply.send(["ok": false, "error": "No such recording."]) }
+            if let e = editors.removeValue(forKey: id) { e.player.pause(); e.player.replaceCurrentItem(with: nil) }
             try? FileManager.default.removeItem(at: Library.recordings.appendingPathComponent(id))
             context.changed("recordings")
             reply.send(["ok": true, "error": ""])
@@ -71,6 +100,20 @@ final class Studio: ExactModule {
             reply.send(["ok": true])
         default:
             reply.fail("studio answers no \(op)")
+        }
+    }
+
+    private func edit(_ r: [String: Any]) {
+        guard let e = editor(r["id"] as? String ?? "") else { return }
+        switch r["do"] as? String {
+        case "add": e.add(r["track"] as? String ?? "zoom")
+        case "set": e.setValue(number: r["number"] as? Double, kind: r["kind"] as? String)
+        case "delete": e.deleteSelected()
+        case "split": e.splitSelected()
+        case "auto": e.autoZoom()
+        case "clear": e.clearAll()
+        case "play": e.togglePlay()
+        default: break
         }
     }
 
@@ -177,24 +220,25 @@ final class Studio: ExactModule {
         guard c.w > 0.1, c.h > 0.1, c.x >= 0, c.y >= 0, c.x + c.w <= 1.0001, c.y + c.h <= 1.0001 else { return }
         meta.crop = c
         try? Library.save(meta)
+        editors[id]?.setCrop(c)
         context.changed("recordings")
-        Preview.changed(id)
     }
 
     private func export(id: String, look: Look, reply: ExactReply) {
-        guard let meta = Library.meta(id) else { return reply.send(["ok": false, "error": "No such recording.", "path": ""]) }
-        let asset = AVURLAsset(url: Library.recordings.appendingPathComponent(id).appendingPathComponent("capture.mov"))
-        let composition = Composition.make(asset: asset, meta: meta, cursor: Library.cursor(id), look: look)
-        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+        guard let e = editor(id) else { return reply.send(["ok": false, "error": "No such recording.", "path": ""]) }
+        let made: (AVAsset, AVMutableVideoComposition)
+        do { made = try e.exportable(look: look) } catch { return reply.send(["ok": false, "error": "\(error)", "path": ""]) }
+        guard let session = AVAssetExportSession(asset: made.0, presetName: AVAssetExportPresetHighestQuality) else {
             return reply.send(["ok": false, "error": "This Mac can’t export that.", "path": ""])
         }
-        let safe = meta.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        let safe = e.meta.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        try? FileManager.default.createDirectory(at: Library.root, withIntermediateDirectories: true)
         var out = Library.root.appendingPathComponent("\(safe) \(id).mp4")
         var n = 2
         while FileManager.default.fileExists(atPath: out.path) { out = Library.root.appendingPathComponent("\(safe) \(id) \(n).mp4"); n += 1 }
         session.outputURL = out
         session.outputFileType = .mp4
-        session.videoComposition = composition
+        session.videoComposition = made.1
         session.shouldOptimizeForNetworkUse = true
         session.exportAsynchronously {
             if session.status == .completed {
@@ -207,28 +251,16 @@ final class Studio: ExactModule {
 }
 let exactModule: ExactModule.Type = Studio.self
 
-/// `<studio-preview clip=… look=…>`: the recording, played with the look applied.
+/// `<studio-preview clip=… look=…>`: the open recording's player, with the look applied.
+/// A bare player layer, so the stage's colour shows around the video rather than black bars.
 final class Preview: ExactNativeInstance {
-    private static var live: [ObjectIdentifier: Preview] = [:]
-    static func changed(_ id: String) { live.values.filter { $0.clip == id }.forEach { $0.rebuild(force: true) } }
-
-    private let player = AVPlayer()
-    private let host = AVPlayerView()
+    private let studio: Studio
+    private let host = PlayerHost()
     private var clip = ""
-    private var lookJSON = ""
-    private var asset: AVURLAsset?
 
-    init(_ props: [String: String], _ events: ExactNativeEvents) {
+    init(_ studio: Studio, _ props: [String: String], _ events: ExactNativeEvents) {
+        self.studio = studio
         super.init(events: events)
-        host.player = player
-        host.controlsStyle = .floating
-        host.showsFullScreenToggleButton = false
-        host.videoGravity = .resizeAspect
-        host.wantsLayer = true
-        host.layer?.backgroundColor = NSColor.black.cgColor
-        host.layer?.cornerRadius = 10
-        host.layer?.masksToBounds = true
-        Preview.live[ObjectIdentifier(self)] = self
         try? setProps(props)
         events.intrinsicSize(CGSize(width: 640, height: 360))
     }
@@ -236,35 +268,38 @@ final class Preview: ExactNativeInstance {
     override var view: ExactNativeView { host }
 
     override func setProps(_ props: [String: String]) throws {
-        let newClip = props["clip"] ?? "", newLook = props["look"] ?? "{}"
-        let clipChanged = newClip != clip
-        guard clipChanged || newLook != lookJSON else { return }
-        clip = newClip
-        lookJSON = newLook
-        rebuild(force: clipChanged)
-    }
-
-    fileprivate func rebuild(force: Bool) {
-        guard !clip.isEmpty, let meta = Library.meta(clip) else {
-            player.replaceCurrentItem(with: nil); asset = nil; return
+        let next = props["clip"] ?? ""
+        let editor = studio.editor(next)
+        if next != clip {
+            clip = next
+            host.player.player = editor?.player
         }
-        if force || asset == nil {
-            let a = AVURLAsset(url: Library.recordings.appendingPathComponent(clip).appendingPathComponent("capture.mov"))
-            asset = a
-            let item = AVPlayerItem(asset: a)
-            item.videoComposition = Composition.make(asset: a, meta: meta, cursor: Library.cursor(clip), look: Look.parse(lookJSON))
-            player.replaceCurrentItem(with: item)
-        } else if let a = asset, let item = player.currentItem {
-            // Same clip, new look: keep the playhead where it is.
-            item.videoComposition = Composition.make(asset: a, meta: meta, cursor: Library.cursor(clip), look: Look.parse(lookJSON))
-            if player.rate == 0 { item.seek(to: item.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil) }
-        }
+        editor?.setLook(Look.parse(props["look"] ?? "{}"))
     }
 
     override func destroy() {
-        player.pause()
-        player.replaceCurrentItem(with: nil)
-        Preview.live[ObjectIdentifier(self)] = nil
+        studio.editor(clip)?.player.pause()
+        host.player.player = nil
+    }
+}
+
+final class PlayerHost: NSView {
+    let player = AVPlayerLayer()
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        player.videoGravity = .resizeAspect
+        player.backgroundColor = NSColor.clear.cgColor
+        layer?.addSublayer(player)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        player.frame = bounds
+        CATransaction.commit()
     }
 }
 #else

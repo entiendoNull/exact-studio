@@ -20,6 +20,18 @@ const sources: Sources = {
     native?.watch('recordings');
     return later(native, { op: 'recordings' }, { items: [] });
   },
+  editSelection: async ([id], _store, _storage, native): Promise<Result<'editSelection'>> => {
+    if (!native?.available) return { track: '', id: '', level: 0, rate: 0, kind: '', start: 0, end: 0 };
+    native.watch('edits');
+    return native.call({ op: 'selection', id }) as Result<'editSelection'>;
+  },
+  editSummary: async ([id], _store, _storage, native): Promise<Result<'editSummary'>> => {
+    if (!native?.available) return { cuts: 0, zooms: 0, speeds: 0, effects: 0, length: 0, source: 0 };
+    native.watch('edits');
+    return native.call({ op: 'summary', id }) as Result<'editSummary'>;
+  },
+  editClip: ([id, what, track, number, kind], _store, _storage, native) =>
+    later(native, { op: 'edit', id, do: what, track, number, kind }, { ok: false }),
   startRecording: ([source], _store, _storage, native) =>
     later(native, { op: 'start', source }, { ok: false, error: 'Recording needs the Mac app.' }),
   stopRecording: (_args, _store, _storage, native) =>

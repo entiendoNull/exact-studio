@@ -1,7 +1,8 @@
 // Exact Studio: record an area, a window, or a Simulator or Android emulator
-// cropped to its bezel; then frame it on a background, zoom into clicks, and
-// export. Capture, framing and export are the native module's
-// (modules/apple/); this view picks and adjusts.
+// cropped to its bezel; then frame it on a background and edit it on a
+// timeline (cuts, zooms in and out, speed, effects) and export. Capture,
+// rendering, the preview and the timeline are the native module's
+// (modules/apple/); this view lays them out and holds the frame's settings.
 shape Status
   recording: bool
   name: string
@@ -27,6 +28,23 @@ shape Recording
 shape RecordingList
   items: Recording[]
 
+shape SegmentInfo
+  track: string
+  id: string
+  level: number
+  rate: number
+  kind: string
+  start: number
+  end: number
+
+shape Summary
+  cuts: number
+  zooms: number
+  speeds: number
+  effects: number
+  length: number
+  source: number
+
 shape Reply
   ok: bool
   error: string
@@ -48,6 +66,9 @@ fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
+fn trackLabel(track: string): string = track == "cut" ? "Cut" : track == "zoom" ? "Zoom" : track == "speed" ? "Speed" : "Effect"
+fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
+fn countLine(n: number, one: string, many: string): string = n == 1 ? `1 ${one}` : `${n} ${many}`
 
 routes nav
   home "/"
@@ -59,26 +80,31 @@ component ExactStudio
   state padding = 8 persist
   state radius = 14 persist
   state shadow = true persist
-  state zoom = true persist
-  state zoomLevel = 2 persist
   state startedAt = 0
   state now = 0
   state listed = 0
+  state allWindows = false
   resource status = recorderStatus() as shape Status else empty()
   resource sources = captureSources(listed) as shape SourceList else empty()
   resource library = recordings() as shape RecordingList else empty()
+  resource sel = editSelection(selected) as shape SegmentInfo else empty()
+  resource summary = editSummary(selected) as shape Summary else empty()
   mutation started as shape Reply then afterStart
   mutation stopped as shape Stopped refreshes library then afterStop
   mutation exported as shape Exported
   mutation deleted as shape Reply refreshes library
   mutation revealed as shape Done
   mutation nudged as shape Done refreshes library
+  mutation edited as shape Done queue
   derive current = first(library.items.filter(r => r.id == selected))
   derive isDevice = match current { case some(r) => r.kind == "simulator" or r.kind == "emulator", case none => false }
-  derive look = `{"background":"${background}","aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow},"zoom":${zoom},"zoomLevel":${zoomLevel}}`
+  derive devices = sources.items.filter(s => s.kind == "simulator" or s.kind == "emulator")
+  derive displays = sources.items.filter(s => s.kind == "display")
+  derive windows = sources.items.filter(s => s.kind == "window")
+  derive look = `{"background":"${background}","aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow}}`
   derive startError = match started { case some(r) => r.error, case none => "" }
   derive stopError = match stopped { case some(r) => r.error, case none => "" }
-  derive exportLine = match exported { case some(r) => (r.ok ? "Exported." : r.error), case none => "" }
+  derive exportLine = match exported { case some(r) => (r.ok ? "Saved to Movies › Exact Studio." : r.error), case none => "" }
   derive exportPath = match exported { case some(r) => r.path, case none => "" }
   task tick when status.recording
     every(500, step)
@@ -87,6 +113,8 @@ component ExactStudio
     now = performanceNow()
   action refresh
     listed = listed + 1
+  action toggleWindows
+    allWindows = not allWindows
   action record(source: string)
     send started = startRecording(source)
   action afterStart
@@ -113,10 +141,6 @@ component ExactStudio
     radius = round(v)
   action setShadow(v: bool)
     shadow = v
-  action setZoom(v: bool)
-    zoom = v
-  action pickZoom(v: number)
-    zoomLevel = v
   action exportIt
     send exported = exportRecording(selected, look)
   action reveal
@@ -126,128 +150,244 @@ component ExactStudio
     selected = ""
   action trim(edge: string, by: number)
     send nudged = nudgeCrop(selected, edge, by)
+  action add(track: string)
+    send edited = editClip(selected, "add", track, 0, "")
+  action setNumber(n: number)
+    send edited = editClip(selected, "set", "", n, "")
+  action setKind(k: string)
+    send edited = editClip(selected, "set", "", 0, k)
+  action editDo(what: string)
+    send edited = editClip(selected, what, "", 0, "")
 
   view
     main testId="root" navigationKey=`${top(nav).id}` width="100%" height="100%"
       for e in stack(nav) key=e.id
-        column navigationKey=`${e.id}` navigationScroll="editor" position="absolute" inset=0 display="flex" flex-direction="column"
+        column navigationKey=`${e.id}` navigationScroll="sidebar" position="absolute" inset=0 display="flex" flex-direction="column"
           header display="flex" align-items="center"
             text "Exact Studio" role="heading" aria-level=1 flex=1
           row flex=1 min-height=0
-            // The sidebar: what to record, and what has been recorded.
-            scroll width="19rem" min-height=0 padding=16 background-color="-exact-secondary-background"
-              column gap=20
+            // ── The sidebar: what to record, and what has been recorded.
+            scroll id="sidebar" width="21rem" min-height=0 background-color="-exact-secondary-background"
+              column gap=22 padding=16
                 if status.recording
-                  column gap=10 padding=14 border-radius=12 background-color="-exact-background" testId="recording"
-                    row gap=8 align-items="center"
-                      image "symbol:sf/record.circle.fill" color="-exact-system-red" aria-hidden=true
-                      text "Recording" font="-exact-headline"
-                      text mmss(max(0, (now - startedAt) / 1000)) font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="elapsed"
+                  column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background" testId="recording"
+                    row gap=10 align-items="center"
+                      column width=12 height=12 border-radius=6 background-color="-exact-system-red"
+                      text "Recording" font="-exact-headline" flex=1
+                      text mmss(max(0, (now - startedAt) / 1000)) font="-exact-title2" font-variant-numeric="tabular-nums" testId="elapsed"
                     text status.name font="-exact-footnote" color="-exact-secondary-label" line-clamp=2
                     button press=stop buttonStyle="filled" disabled=pending(stopped) testId="stop"
                       text "Stop Recording"
+                    text "Or press Stop in the menu bar." font="-exact-caption1" color="-exact-tertiary-label"
                 else
-                  column gap=8
-                    row align-items="center"
-                      text "Record" role="heading" aria-level=2 font="-exact-headline" flex=1
-                      button press=refresh aria-label="Refresh sources" testId="refresh"
-                        image "symbol:refresh"
+                  column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background"
+                    row gap=12 align-items="center"
+                      column width=40 height=40 border-radius=20 background-color="-exact-system-red" align-items="center" justify-content="center"
+                        image "symbol:sf/record.circle" color="white" font="-exact-title3" aria-hidden=true
+                      column flex=1 min-width=0
+                        text "New Recording" font="-exact-headline"
+                        text "Pick what to capture" font="-exact-footnote" color="-exact-secondary-label"
                     button press=record("area") buttonStyle="filled" disabled=pending(started) testId="record-area"
-                      text "Record an Area…"
+                      image "symbol:sf/rectangle.dashed"
+                      text "Drag Out an Area"
                     if not sources.allowed and not pending(sources)
-                      text "Allow Exact Studio under System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-secondary-label" testId="permission"
+                      text "Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-system-orange" testId="permission"
                     if startError != "" and not pending(started)
                       text startError font="-exact-footnote" color="-exact-system-red" testId="start-error"
-                    for s in sources.items key=s.id
-                      button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` justify-content="flex-start"
-                        row gap=8 align-items="center" min-width=0
-                          image kindSymbol(s.kind) aria-hidden=true
-                          column min-width=0 align-items="flex-start"
-                            text s.name line-clamp=1
-                            if s.app != ""
-                              text (s.kind == "simulator" or s.kind == "emulator" ? `${s.app} · bezel crop` : s.app) font="-exact-caption1" color="-exact-secondary-label" line-clamp=1
+                  if devices.length > 0
+                    column gap=6
+                      text "DEVICES" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                      for s in devices key=s.id
+                        button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color="-exact-tertiary-background"
+                          row gap=10 align-items="center" min-width=0 flex=1
+                            column width=34 height=34 border-radius=9 background-color="-exact-system-blue" align-items="center" justify-content="center"
+                              image "symbol:sf/iphone" color="white" aria-hidden=true
+                            column min-width=0 flex=1 align-items="flex-start"
+                              text s.name line-clamp=1 font-weight=500
+                              text `${s.app} · fits the bezel` font="-exact-caption1" color="-exact-system-teal" line-clamp=1
+                            image "symbol:sf/record.circle" color="-exact-system-red" aria-hidden=true
+                  column gap=4
+                    row align-items="center"
+                      text "DISPLAYS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1
+                      button press=refresh aria-label="Refresh sources" testId="refresh"
+                        image "symbol:refresh"
+                    for s in displays key=s.id
+                      button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
+                        row gap=10 align-items="center" min-width=0 flex=1
+                          image "symbol:sf/display" color="-exact-secondary-label" aria-hidden=true
+                          text s.name line-clamp=1 flex=1 text-align="left"
+                  column gap=4
+                    row align-items="center"
+                      text "WINDOWS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1
+                      if windows.length > 6
+                        button press=toggleWindows testId="all-windows"
+                          text (allWindows ? "Fewer" : `All ${windows.length}`) font="-exact-caption1"
+                    for s in (allWindows ? windows : windows.slice(0, 6)) key=s.id
+                      button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
+                        row gap=10 align-items="center" min-width=0 flex=1
+                          image "symbol:sf/macwindow" color="-exact-secondary-label" aria-hidden=true
+                          column min-width=0 flex=1 align-items="flex-start"
+                            text s.name line-clamp=1 text-align="left" align-self="stretch"
+                            text s.app font="-exact-caption2" color="-exact-tertiary-label" line-clamp=1 text-align="left" align-self="stretch"
                 column gap=6
-                  text "Recordings" role="heading" aria-level=2 font="-exact-headline"
+                  text "LIBRARY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
                   if stopError != "" and not pending(stopped)
                     text stopError font="-exact-footnote" color="-exact-system-red" testId="stop-error"
                   if library.items.length == 0
-                    text "Nothing recorded yet." color="-exact-secondary-label" testId="no-recordings"
+                    text "Nothing recorded yet." color="-exact-tertiary-label" testId="no-recordings"
                   for r in library.items key=r.id
-                    button press=choose(r.id) aria-pressed=(r.id == selected) testId=`recording-${r.id}` justify-content="flex-start"
-                      row gap=8 align-items="center" min-width=0
-                        image kindSymbol(r.kind) aria-hidden=true
-                        column min-width=0 align-items="flex-start"
+                    button press=choose(r.id) aria-pressed=(r.id == selected) testId=`recording-${r.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color=(r.id == selected ? "-exact-tertiary-background" : "transparent")
+                      row gap=10 align-items="center" min-width=0 flex=1
+                        column width=34 height=34 border-radius=9 background-color=(r.id == selected ? "-exact-system-blue" : "-exact-tertiary-fill") align-items="center" justify-content="center"
+                          image kindSymbol(r.kind) color=(r.id == selected ? "white" : "-exact-secondary-label") aria-hidden=true
+                        column min-width=0 flex=1 align-items="flex-start"
                           text r.name line-clamp=1 font-weight=(r.id == selected ? 600 : 400)
                           text `${kindLabel(r.kind)} · ${mmss(r.duration)}` font="-exact-caption1" color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-            // The editor: the framed preview over its settings.
-            scroll id="editor" flex=1 min-width=0 min-height=0 padding=20
-              match current
-                case none
-                  column flex=1 align-items="center" justify-content="center" gap=8 padding=40 testId="empty"
+
+            // ── The stage: the framed preview, the edit bar and the timeline.
+            match current
+              case none
+                column flex=1 min-width=0 align-items="center" justify-content="center" gap=10 padding=40 background-color="-exact-background" testId="empty"
+                  column width=72 height=72 border-radius=20 background-color="-exact-tertiary-background" align-items="center" justify-content="center"
                     image "symbol:sf/rectangle.dashed.badge.record" font="-exact-large-title" color="-exact-secondary-label" aria-hidden=true
-                    text "Record something to start" font="-exact-title3"
-                    text "Pick an area, a window, or a Simulator from the sidebar. A Simulator or emulator is cropped to its bezel." color="-exact-secondary-label" text-align="center" max-width="26rem"
-                case some(rec)
-                  column gap=16
-                    studio-preview clip=rec.id look=look aria-label="Preview" height=440 testId="preview"
-                    row flex-wrap="wrap" gap=24 align-items="flex-start"
-                      column gap=12 flex="1 1 260px" min-width=0
-                        row gap=8 align-items="center"
-                          text "Background" flex=1
-                          select value=background change=pickBackground aria-label="Background" testId="background"
-                            option "Ocean" value="ocean"
-                            option "Sunset" value="sunset"
-                            option "Mint" value="mint"
-                            option "Midnight" value="midnight"
-                            option "Graphite" value="graphite"
-                            option "Paper" value="paper"
-                        row gap=8 align-items="center"
-                          text "Shape" flex=1
-                          row role="radiogroup" aria-label="Shape"
-                            for a in ["16:9", "9:16", "1:1", "4:3", "auto"] key=a
-                              button role="radio" aria-checked=(aspect == a) press=pickAspect(a) testId=`aspect-${a}`
-                                text (a == "auto" ? "Fit" : a)
-                        row gap=8 align-items="center"
-                          text "Padding" width="6rem"
-                          input type="range" min=0 max=30 step=1 value=padding input=setPadding aria-label="Padding" flex=1 min-width=0 testId="padding"
-                        if not isDevice
-                          row gap=8 align-items="center"
-                            text "Corners" width="6rem"
-                            input type="range" min=0 max=48 step=1 value=radius input=setRadius aria-label="Corner radius" flex=1 min-width=0 testId="radius"
-                        row gap=8 align-items="center"
-                          text "Shadow" flex=1
-                          input type="checkbox" switch checked=shadow change=setShadow aria-label="Shadow" testId="shadow"
-                      column gap=12 flex="1 1 260px" min-width=0
-                        row gap=8 align-items="center"
-                          text "Zoom into clicks" flex=1
-                          input type="checkbox" switch checked=zoom change=setZoom aria-label="Zoom into clicks" testId="zoom"
-                        if zoom
-                          row gap=8 align-items="center"
-                            text "Zoom" flex=1
-                            row role="radiogroup" aria-label="Zoom level"
-                              for z in [1.5, 2, 2.5, 3] key=z
-                                button role="radio" aria-checked=(zoomLevel == z) press=pickZoom(z) testId=`zoom-${z}`
-                                  text `${z}×`
-                        if isDevice
-                          column gap=6
-                            text "Bezel crop" font="-exact-subheadline" color="-exact-secondary-label"
-                            row gap=6 flex-wrap="wrap"
-                              button press=trim("top", 0.005) buttonStyle="bordered" testId="trim-top"
-                                text "Trim top"
-                              button press=trim("bottom", 0.005) buttonStyle="bordered" testId="trim-bottom"
-                                text "Trim bottom"
-                              button press=trim("left", 0.005) buttonStyle="bordered" testId="trim-left"
-                                text "Trim left"
-                              button press=trim("right", 0.005) buttonStyle="bordered" testId="trim-right"
-                                text "Trim right"
-                              button press=trim("reset", 0) buttonStyle="bordered" testId="trim-reset"
-                                text "Whole window"
-                    row gap=10 align-items="center" flex-wrap="wrap"
-                      button press=exportIt buttonStyle="filled" disabled=pending(exported) testId="export"
-                        text (pending(exported) ? "Exporting…" : "Export MP4")
-                      if exportPath != ""
-                        button press=reveal buttonStyle="bordered" testId="reveal"
-                          text "Show in Finder"
-                      text exportLine flex=1 color="-exact-secondary-label" testId="export-line"
-                      button press=remove buttonStyle="bordered" testId="delete"
-                        text "Delete"
+                  text "Record something to start" font="-exact-title2" font-weight=600
+                  text "Drag out an area, or pick a window or a device in the sidebar. A Simulator or an emulator is cropped to its bezel, nothing more." color="-exact-secondary-label" text-align="center" max-width="28rem"
+              case some(rec)
+                column flex=1 min-width=0 min-height=0 gap=12 padding=16 background-color="-exact-background"
+                  studio-preview clip=rec.id look=look aria-label="Preview" flex=1 min-height=200 testId="preview"
+                  row gap=8 align-items="center" flex-wrap="wrap"
+                    button press=editDo("play") aria-label="Play or pause" buttonStyle="filled" testId="play"
+                      image "symbol:play-fill"
+                    column width=1 height=22 background-color="-exact-separator"
+                    button press=add("cut") buttonStyle="bordered" testId="add-cut"
+                      image "symbol:sf/scissors"
+                      text "Cut"
+                    button press=add("zoom") buttonStyle="bordered" testId="add-zoom"
+                      image "symbol:sf/plus.magnifyingglass"
+                      text "Zoom"
+                    button press=add("speed") buttonStyle="bordered" testId="add-speed"
+                      image "symbol:sf/gauge.with.dots.needle.67percent"
+                      text "Speed"
+                    button press=add("effect") buttonStyle="bordered" testId="add-effect"
+                      image "symbol:sparkles"
+                      text "Effect"
+                    column width=1 height=22 background-color="-exact-separator"
+                    button press=editDo("split") buttonStyle="bordered" disabled=(sel.track == "") testId="split"
+                      image "symbol:sf/square.split.1x2"
+                      text "Split"
+                    button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
+                      image "symbol:sf/cursorarrow.click.2"
+                      text "Zoom on Clicks"
+                    text `${mmss(summary.length)} of ${mmss(summary.source)}` flex=1 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
+                  studio-timeline clip=rec.id aria-label="Timeline" height=214 testId="timeline"
+
+            // ── The inspector: the selected segment, the frame, export.
+            if current != none
+              scroll width="19rem" min-height=0 background-color="-exact-secondary-background"
+                column gap=20 padding=16
+                  column gap=8
+                    button press=exportIt buttonStyle="filled" disabled=pending(exported) testId="export"
+                      image "symbol:sf/square.and.arrow.up"
+                      text (pending(exported) ? "Exporting…" : "Export MP4")
+                    if exportLine != ""
+                      row gap=8 align-items="center"
+                        text exportLine font="-exact-footnote" color="-exact-secondary-label" flex=1 testId="export-line"
+                        if exportPath != ""
+                          button press=reveal testId="reveal"
+                            text "Show" font="-exact-footnote"
+
+                  if sel.track != ""
+                    column gap=12 padding=14 border-radius=14 background-color="-exact-tertiary-background" testId="segment"
+                      row align-items="center" gap=8
+                        text trackLabel(sel.track) font="-exact-headline" flex=1
+                        text `${mmss(sel.start)}–${mmss(sel.end)}` font="-exact-footnote" font-variant-numeric="tabular-nums" color="-exact-secondary-label"
+                      if sel.track == "zoom"
+                        text "In" font="-exact-caption1" color="-exact-secondary-label"
+                        row role="radiogroup" aria-label="Zoom in"
+                          for z in [1.5, 2, 2.5, 3] key=z
+                            button role="radio" aria-checked=(sel.level == z) press=setNumber(z) testId=`level-${z}` flex=1
+                              text `${z}×`
+                        text "Out" font="-exact-caption1" color="-exact-secondary-label"
+                        row role="radiogroup" aria-label="Zoom out"
+                          for z in [0.5, 0.7, 0.85] key=z
+                            button role="radio" aria-checked=(sel.level == z) press=setNumber(z) testId=`level-${z}` flex=1
+                              text `${z}×`
+                      if sel.track == "speed"
+                        text "Slow down" font="-exact-caption1" color="-exact-secondary-label"
+                        row role="radiogroup" aria-label="Slow down"
+                          for r in [0.25, 0.5, 0.75] key=r
+                            button role="radio" aria-checked=(sel.rate == r) press=setNumber(r) testId=`rate-${r}` flex=1
+                              text `${r}×`
+                        text "Speed up" font="-exact-caption1" color="-exact-secondary-label"
+                        row role="radiogroup" aria-label="Speed up"
+                          for r in [1.5, 2, 4, 8] key=r
+                            button role="radio" aria-checked=(sel.rate == r) press=setNumber(r) testId=`rate-${r}` flex=1
+                              text `${r}×`
+                      if sel.track == "effect"
+                        row role="radiogroup" aria-label="Effect"
+                          for k in ["spotlight", "highlight", "blur", "mono"] key=k
+                            button role="radio" aria-checked=(sel.kind == k) press=setKind(k) testId=`effect-${k}` flex=1
+                              text effectLabel(k)
+                      if sel.track == "cut"
+                        text "This part is left out of the video. Drag its edges on the timeline." font="-exact-footnote" color="-exact-secondary-label"
+                      row gap=8
+                        button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
+                          text "Split Here"
+                        button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
+                          text "Remove"
+                  else
+                    column gap=6 padding=14 border-radius=14 background-color="-exact-tertiary-background"
+                      text "Timeline" font="-exact-headline"
+                      text `${countLine(summary.cuts, "cut", "cuts")} · ${countLine(summary.zooms, "zoom", "zooms")} · ${countLine(summary.speeds, "speed change", "speed changes")} · ${countLine(summary.effects, "effect", "effects")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
+                      text "Add a segment at the playhead from the bar above, then drag it or its edges. Click one to change it; Delete removes it, Space plays." font="-exact-footnote" color="-exact-tertiary-label"
+
+                  column gap=12
+                    text "BACKGROUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                    row gap=8 flex-wrap="wrap" role="radiogroup" aria-label="Background" appearance="none"
+                      for b in ["ocean", "sunset", "mint", "midnight", "graphite", "paper"] key=b
+                        button role="radio" aria-checked=(background == b) aria-label=b press=pickBackground(b) testId=`bg-${b}` padding=3 border-radius=13 border-width=2 border-style="solid" border-color=(background == b ? "-exact-system-blue" : "transparent")
+                          image `assets/swatches/${b}.png` width=36 height=36 border-radius=10 aria-hidden=true
+
+                  column gap=12
+                    text "FRAME" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                    row role="radiogroup" aria-label="Shape"
+                      for a in ["16:9", "9:16", "1:1", "4:3", "auto"] key=a
+                        button role="radio" aria-checked=(aspect == a) press=pickAspect(a) testId=`aspect-${a}` flex=1
+                          text (a == "auto" ? "Fit" : a)
+                    column gap=4
+                      row
+                        text "Padding" flex=1
+                        text `${padding}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                      input type="range" min=0 max=30 step=1 value=padding input=setPadding aria-label="Padding" testId="padding"
+                    if not isDevice
+                      column gap=4
+                        row
+                          text "Corners" flex=1
+                          text `${radius}` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                        input type="range" min=0 max=48 step=1 value=radius input=setRadius aria-label="Corner radius" testId="radius"
+                    row align-items="center"
+                      text "Shadow" flex=1
+                      input type="checkbox" switch checked=shadow change=setShadow aria-label="Shadow" testId="shadow"
+
+                  if isDevice
+                    column gap=8
+                      text "BEZEL CROP" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                      text "Found automatically. Trim an edge if a sliver of window shows." font="-exact-footnote" color="-exact-tertiary-label"
+                      row gap=6
+                        button press=trim("top", 0.004) buttonStyle="bordered" flex=1 testId="trim-top"
+                          text "Trim Top"
+                        button press=trim("bottom", 0.004) buttonStyle="bordered" flex=1 testId="trim-bottom"
+                          text "Trim Bottom"
+                      row gap=6
+                        button press=trim("left", 0.004) buttonStyle="bordered" flex=1 testId="trim-left"
+                          text "Trim Left"
+                        button press=trim("right", 0.004) buttonStyle="bordered" flex=1 testId="trim-right"
+                          text "Trim Right"
+                      button press=trim("reset", 0) testId="trim-reset"
+                        text "Use the whole window" font="-exact-footnote"
+
+                  row gap=8
+                    button press=editDo("clear") buttonStyle="bordered" flex=1 testId="clear"
+                      text "Clear Edits"
+                    button press=remove buttonStyle="bordered" flex=1 testId="delete"
+                      text "Delete"
