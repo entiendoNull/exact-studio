@@ -66,7 +66,7 @@ final class Studio: ExactModule {
     private static let emptySummary: [String: Any] = [
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "moves": 0, "length": 0, "source": 0, "playing": false,
         "device": false, "found": false, "cursorDrawn": false, "baseScale": 100,
-        "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "thickness": 5, "edge": "metal",
+        "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "angleMove": "", "thickness": 5, "edge": "metal",
     ]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {

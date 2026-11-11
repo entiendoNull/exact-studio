@@ -73,7 +73,12 @@ final class Editor {
     func seek(source t: Double) {
         let out = map.output(min(max(t, 0), duration))
         player.seek(to: CMTime(seconds: out, preferredTimescale: 6000), toleranceBefore: .zero, toleranceAfter: .zero)
+        settled?.cancel()
+        let tell = DispatchWorkItem { [weak self] in self?.onChange() }
+        settled = tell
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: tell)
     }
+    private var settled: DispatchWorkItem?
 
     func togglePlay() {
         endSample(returning: false)
@@ -493,7 +498,9 @@ final class Editor {
         var t = next.three
         let n = Double(value)
         // An angle or a pose goes to the selected move (switching 3D on); else it is the base angle.
-        if var m = selectedMove, ["tilt", "turn", "roll", "preset"].contains(field) {
+        // An angle or a pose goes where the angle on screen comes from: the selected move, else the
+        // move in effect at the playhead (switching 3D on); only before any such move, the base angle.
+        if var m = selectedMove ?? angleMove, ["tilt", "turn", "roll", "preset"].contains(field) {
             let now = framing.pose(at: m.t).angles
             var a = m.angles ?? now
             switch field {
@@ -526,6 +533,19 @@ final class Editor {
         }
         next.three = t
         if live { edits = next; redraw() } else { apply(next) }
+    }
+
+    /// The move whose 3D angle shows at the playhead: one travelling now, else the last to land; nil before any.
+    var angleMove: Move? {
+        let t = playhead
+        let turning = edits.moves.filter { $0.angles != nil }.sorted { $0.t < $1.t }
+        if let m = turning.first(where: { t > $0.t - $0.duration && t < $0.t }) { return m }
+        return turning.last { $0.t <= t + 0.001 }
+    }
+
+    private var angleTarget: Angles {
+        if let m = selectedMove ?? angleMove { return m.angles ?? framing.pose(at: m.t).angles }
+        return Angles(tilt: edits.three.tilt, turn: edits.three.turn, roll: edits.three.roll)
     }
 
     /// A named 3D pose.
@@ -820,8 +840,11 @@ final class Editor {
                 "moves": edits.moves.count, "length": map.outputDuration, "source": duration, "playing": isPlaying,
                 "device": meta.isDevice, "found": meta.device == true, "cursorDrawn": meta.drawsCursor,
                 "baseScale": (edits.base.scale * 100).rounded(),
-                "threeOn": edits.three.on, "tilt": edits.three.tilt.rounded(), "turn": edits.three.turn.rounded(),
-                "roll": edits.three.roll.rounded(), "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge]
+                "threeOn": edits.three.on,
+                // The angle the 3D controls edit: the move's in effect at the playhead, else the base.
+                "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),
+                "angleMove": (selectedMove ?? angleMove).map { Editor.stamp($0.t) } ?? "",
+                "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge]
     }
 }
 

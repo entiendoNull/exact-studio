@@ -76,6 +76,7 @@ shape Summary
   tilt: number
   turn: number
   roll: number
+  angleMove: string
   thickness: number
   edge: string
 
@@ -777,7 +778,7 @@ component ExactStudio
                             option "Aluminum" value="aluminum"
                             option "Glass" value="glass"
                             option "Matte" value="matte"
-                      text "⌥-drag the video in the preview to turn it in your hand." font="-exact-caption1" color="-exact-tertiary-label"
+                      text (summary.angleMove != "" ? `Angle and pose edit the move at ${summary.angleMove}, which sets the angle here. ⌥-drag the video to turn it.` : "⌥-drag the video in the preview to turn it in your hand.") font="-exact-caption1" color="-exact-tertiary-label" testId="angle-note"
 
                   column gap=10
                     button press=toggleSection("cursor") appearance="none" aria-expanded=openCursor testId="sec-cursor" padding-top=2 padding-bottom=2
