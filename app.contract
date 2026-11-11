@@ -350,10 +350,10 @@ component ExactStudio
             // ── The sidebar: what to record, and what has been recorded.
             scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
               if cardLeft
-                column padding=16 width="23rem" box-sizing="border-box"
+                column padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box"
                   SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
               else
-                column gap=22 padding=16 width="23rem" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
+                column gap=30 padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
                   if status.recording
                     column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background" testId="recording"
                       row gap=10 align-items="center"
@@ -572,7 +572,7 @@ component ExactStudio
             // ── The inspector: the selected segment, the frame, export.
             if current != none
               scroll width=(rightOpen ? "25rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="inspector"
-                column gap=20 padding=16 width="25rem" box-sizing="border-box" opacity=(rightOpen ? 1 : 0) transition="opacity 200ms ease"
+                column gap=30 padding="20px 24px 32px 20px" width="calc(25rem - 15px)" box-sizing="border-box" opacity=(rightOpen ? 1 : 0) transition="opacity 200ms ease"
                   column gap=8
                     button press=exportIt buttonStyle="filled" disabled=pending(exported) testId="export"
                       image "symbol:sf/square.and.arrow.up"
@@ -611,13 +611,13 @@ component ExactStudio
                       if openHelp
                         text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
 
-                  column gap=12
+                  column gap=16
                     button press=toggleSection("bg") appearance="none" aria-expanded=openBg testId="sec-bg" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "BACKGROUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
                         image (openBg ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
                     if openBg
-                      row gap=8 flex-wrap="wrap" role="radiogroup" aria-label="Background" appearance="none"
+                      row gap=12 flex-wrap="wrap" role="radiogroup" aria-label="Background" appearance="none"
                         for b in gradients key=b
                           button role="radio" aria-checked=(background == b) aria-label=b press=pickBackground(b) testId=`bg-${b}` padding=3 border-radius=13 border-width=2 border-style="solid" border-color=(background == b ? "-exact-system-blue" : "transparent")
                             image `assets/swatches/${b}.png` width=34 height=34 border-radius=10 aria-hidden=true
@@ -650,7 +650,7 @@ component ExactStudio
                           button press=swapCustom testId="custom-swap"
                             text "Swap Colours" font="-exact-footnote"
 
-                  column gap=12
+                  column gap=16
                     button press=toggleSection("frame") appearance="none" aria-expanded=openFrame testId="sec-frame" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "FRAME" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
@@ -675,7 +675,7 @@ component ExactStudio
                         text "Shadow" flex=1
                         input type="checkbox" switch checked=shadow change=setShadow aria-label="Shadow" testId="shadow"
 
-                  column gap=10
+                  column gap=16
                     button press=toggleSection("3d") appearance="none" aria-expanded=open3d testId="sec-3d" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "3D" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
@@ -718,7 +718,7 @@ component ExactStudio
                             option "Matte" value="matte"
                       text (summary.angleMove != "" ? `Angle and pose edit the move at ${summary.angleMove}, which sets the angle here. ⌥-drag the video to turn it.` : "⌥-drag the video in the preview to turn it in your hand.") font="-exact-caption1" color="-exact-tertiary-label" testId="angle-note"
 
-                  column gap=10
+                  column gap=16
                     button press=toggleSection("cursor") appearance="none" aria-expanded=openCursor testId="sec-cursor" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "CURSOR" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
@@ -743,7 +743,7 @@ component ExactStudio
                       else
                         text "This recording has the system cursor in its picture. New recordings leave it out, so it can be hidden, resized and animated here." font="-exact-footnote" color="-exact-tertiary-label"
 
-                  column gap=10
+                  column gap=16
                     button press=toggleSection("device") appearance="none" aria-expanded=openDevice testId="sec-device" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "DEVICE" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
@@ -808,7 +808,7 @@ component SettingsCard
     threeField: action
     threeNumber: action
   view
-    column gap=12 padding=14 border-radius=14 background-color="-exact-tertiary-background" testId="segment"
+    column gap=18 padding=20 border-radius=16 background-color="-exact-tertiary-background" testId="segment"
       row align-items="center" gap=8
         text kindTitle(sel.kind, sel.level, sel.rate) font="-exact-headline" flex=1 testId="segment-title"
         if sel.kind == "clip" and sel.removed
