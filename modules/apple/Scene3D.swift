@@ -119,10 +119,35 @@ final class Stage3D {
         slab.geometry = s
     }
 
+    private var buttonKey = ""
+
+    /// The side buttons: rounded metal pieces, set into the middle of the body's depth and
+    /// standing out from its edge by the width the silhouette shows.
+    private func place(_ buttons: [CGRect], around rect: CGRect, depth: CGFloat) {
+        let key = "\(buttons)|\(rect.size)|\(depth)"
+        guard key != buttonKey else { return }
+        buttonKey = key
+        slab.childNodes.forEach { $0.removeFromParentNode() }
+        for b in buttons {
+            // Sunk a little into the body so no gap shows at an angle.
+            let sink = min(b.width, depth * 0.3)
+            let box = SCNBox(width: b.width + sink, height: b.height, length: depth * 0.42, chamferRadius: min(b.width, depth * 0.2) * 0.9)
+            // The edge's own material, so a change of finish reaches the buttons too.
+            box.materials = [side]
+            let node = SCNNode(geometry: box)
+            let leftSide = b.midX < rect.midX
+            let cx = (leftSide ? b.minX + (b.width + sink) / 2 : b.maxX - (b.width + sink) / 2) - rect.midX
+            // In the slab's geometry its middle depth is z = 0.
+            node.position = SCNVector3(cx, b.midY - rect.midY, 0)
+            slab.addChildNode(node)
+        }
+    }
+
     /// The subject turned in 3D, as an image the size of the canvas (transparent around it).
     /// `face` is the subject's finished picture over `rect` (its place on the canvas, Core Image coordinates);
     /// `outline` is the slab's shape in the same coordinates.
-    func render(face: CIImage, rect: CGRect, outline: CGPath, canvas: CGSize, three: ThreeD, scale: CGFloat = 1) -> CIImage? {
+    /// `buttons` stand out from the body's sides (a device's), in the same coordinates.
+    func render(face: CIImage, rect: CGRect, outline: CGPath, buttons: [CGRect] = [], canvas: CGSize, three: ThreeD, scale: CGFloat = 1) -> CIImage? {
         lock.lock(); defer { lock.unlock() }
         // The face as a texture, exactly the slab's front.
         guard let tex = images.createCGImage(face, from: rect) else { return nil }
@@ -134,6 +159,7 @@ final class Stage3D {
         guard let local = outline.copy(using: &centre) else { return nil }
         let depth = max(1, CGFloat(three.thickness) * rect.width)
         shape(local, size: rect.size, depth: depth)
+        place(buttons, around: rect, depth: depth)
         // SCNShape spans its front face's texture over the outline's bounding box; keep it on the subject's rectangle.
         let bb = local.boundingBox
         front.diffuse.contentsTransform = SCNMatrix4MakeScale(rect.width / max(bb.width, 1), rect.height / max(bb.height, 1), 1)

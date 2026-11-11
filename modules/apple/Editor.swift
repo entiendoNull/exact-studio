@@ -492,6 +492,25 @@ final class Editor {
         var next = edits
         var t = next.three
         let n = Double(value)
+        // An angle or a pose goes to the selected move (switching 3D on); else it is the base angle.
+        if var m = selectedMove, ["tilt", "turn", "roll", "preset"].contains(field) {
+            let now = framing.pose(at: m.t).angles
+            var a = m.angles ?? now
+            switch field {
+            case "tilt": if let n { a.tilt = min(max(n, -80), 80) }
+            case "turn": if let n { a.turn = min(max(n, -80), 80) }
+            case "roll": if let n { a.roll = min(max(n, -180), 180) }
+            default: a = Editor.pose(value)
+            }
+            m.angles = a
+            next.moves = next.moves.map { $0.id == m.id ? m : $0 }
+            next.three.on = true
+            if live { edits = next; redraw() } else {
+                apply(next)
+                if field == "preset" { sample(m.t - m.duration - 0.3, m.t + 0.4) }
+            }
+            return
+        }
         switch field {
         case "on": t.on = value == "true"
         case "tilt": if let n { t.tilt = min(max(n, -80), 80) }
@@ -501,18 +520,30 @@ final class Editor {
         case "edge": t.edge = value
         case "preset":
             t.on = true
-            switch value {
-            case "hero": (t.tilt, t.turn, t.roll) = (12, -28, 0)
-            case "lean-left": (t.tilt, t.turn, t.roll) = (0, -38, 0)
-            case "lean-right": (t.tilt, t.turn, t.roll) = (0, 38, 0)
-            case "lay-back": (t.tilt, t.turn, t.roll) = (48, 0, 0)
-            case "tumble": (t.tilt, t.turn, t.roll) = (22, 32, -12)
-            default: (t.tilt, t.turn, t.roll) = (0, 0, 0)
-            }
+            let a = Editor.pose(value)
+            (t.tilt, t.turn, t.roll) = (a.tilt, a.turn, a.roll)
         default: return
         }
         next.three = t
         if live { edits = next; redraw() } else { apply(next) }
+    }
+
+    /// A named 3D pose.
+    static func pose(_ name: String) -> Angles {
+        switch name {
+        case "hero": return Angles(tilt: 12, turn: -28, roll: 0)
+        case "lean-left": return Angles(tilt: 0, turn: -38, roll: 0)
+        case "lean-right": return Angles(tilt: 0, turn: 38, roll: 0)
+        case "lay-back": return Angles(tilt: 48, turn: 0, roll: 0)
+        case "tumble": return Angles(tilt: 22, turn: 32, roll: -12)
+        default: return Angles()
+        }
+    }
+
+    /// Whether the selected move sets a 3D angle of its own, and the angle it lands at.
+    private var moveAngles: (Bool, Angles) {
+        guard let m = selectedMove else { return (false, Angles()) }
+        return (m.angles != nil, m.angles ?? framing.pose(at: m.t).angles)
     }
 
     // MARK: Placement and moves
@@ -536,7 +567,7 @@ final class Editor {
     func place(_ to: Placement, live: Bool = false) {
         var next = edits
         if let m = moveAtPlayhead {
-            next.moves = next.moves.map { $0.id == m.id ? Move(id: m.id, t: m.t, to: to, style: m.style, duration: m.duration) : $0 }
+            next.moves = next.moves.map { $0.id == m.id ? Move(id: m.id, t: m.t, to: to, style: m.style, duration: m.duration, angles: m.angles) : $0 }
         } else if !next.moves.isEmpty && !live {
             let m = Move(id: Editor.newID("m"), t: playhead, to: to, style: lastStyle, duration: lastDuration)
             next.moves.append(m)
@@ -632,9 +663,12 @@ final class Editor {
         let t0 = playhead
         let room = duration - t0
         guard room > 1.5 else { return refuse("Move the playhead earlier: a pattern needs some room after it.") }
-        func m(_ dt: Double, _ p: Placement, _ style: String, _ d: Double) -> Move {
-            Move(id: Editor.newID("m"), t: min(duration, t0 + dt * min(1, room / 6)), to: p, style: style, duration: d * min(1, room / 6))
+        func m(_ dt: Double, _ p: Placement, _ style: String, _ d: Double, _ a: Angles? = nil) -> Move {
+            Move(id: Editor.newID("m"), t: min(duration, t0 + dt * min(1, room / 6)), to: p, style: style, duration: d * min(1, room / 6), angles: a)
         }
+        // A 3D pattern keeps the subject where it is and only turns it.
+        let here = placementNow
+        let face = Angles()
         let c = Placement(), l = Editor.preset("left")!, r = Editor.preset("right")!
         var add: [Move]
         switch name {
@@ -648,12 +682,23 @@ final class Editor {
             add = [m(6.0, Placement(x: 0.52, y: 0.48, scale: 1.12), "linear", 6.0)]
         case "bounce": // Pop between the sides.
             add = [m(1.0, l, "pop", 0.8), m(2.8, r, "pop", 0.8), m(4.6, c, "pop", 0.8)]
+        case "turntable": // Swing to one side, then the other, then face front.
+            add = [m(1.5, here, "smooth", 1.5, Angles(tilt: 6, turn: -35)), m(4.0, here, "smooth", 2.5, Angles(tilt: 6, turn: 35)), m(6.0, here, "smooth", 1.8, face)]
+        case "orbit": // One full turn about the vertical.
+            add = [m(3.2, here, "spin", 3.2, Angles(tilt: 8, turn: 0))]
+        case "reveal": // Up from lying back into a hero angle.
+            add = [m(0.01, here, "linear", 0.01, Angles(tilt: 62, turn: 0)), m(1.7, here, "spring", 1.6, Editor.pose("hero"))]
+        case "flip": // In edge-on, springing to face front.
+            add = [m(0.01, here, "linear", 0.01, Angles(tilt: 0, turn: -88)), m(1.3, here, "spring", 1.2, face)]
+        case "float": // A slow drift between gentle angles.
+            add = [m(2.0, here, "smooth", 2.0, Angles(tilt: 8, turn: -14)), m(4.0, here, "smooth", 2.0, Angles(tilt: -5, turn: 14, roll: 3)), m(6.0, here, "smooth", 2.0, face)]
         default: return
         }
         var next = edits
         next.moves.removeAll { mv in add.contains { abs($0.t - mv.t) < 0.15 } }
         add = add.filter { $0.t <= duration }
         next.moves += add
+        if add.contains(where: { $0.angles != nil }) { next.three.on = true }
         apply(next)
         if let first = add.last { select("m:" + first.id) }
     }
@@ -673,7 +718,7 @@ final class Editor {
 
     func moveTime(_ id: String, to t: Double, live: Bool) {
         var next = edits
-        next.moves = next.moves.map { $0.id == id ? Move(id: $0.id, t: min(max(t, 0), duration), to: $0.to, style: $0.style, duration: $0.duration) : $0 }
+        next.moves = next.moves.map { $0.id == id ? Move(id: $0.id, t: min(max(t, 0), duration), to: $0.to, style: $0.style, duration: $0.duration, angles: $0.angles) : $0 }
         if live { edits = next; redraw() } else { apply(next) }
     }
 
@@ -749,7 +794,7 @@ final class Editor {
         var out: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "",
                                   "removed": false, "first": false, "last": false, "transition": "cut", "text": "", "size": 0,
                                   "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "", "rotation": 0,
-                                  "moveStyle": "", "duration": 0, "scale": 0, "problem": problem]
+                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "problem": problem]
         if let s = selectedSegment {
             out.merge(["id": s.id, "kind": s.kind, "level": s.level ?? 0, "rate": s.rate ?? 0, "start": s.start, "end": s.end,
                        "startText": Editor.stamp(s.start), "endText": Editor.stamp(s.end), "text": s.text ?? "",
@@ -757,7 +802,9 @@ final class Editor {
                        "animIn": s.animIn ?? "", "animOut": s.animOut ?? "", "loop": s.loop ?? "", "rotation": s.rotation ?? 0]) { $1 }
         } else if let m = selectedMove {
             out.merge(["id": "m:" + m.id, "kind": "move", "start": m.t, "end": m.t, "startText": Editor.stamp(m.t), "endText": Editor.stamp(m.t),
-                       "moveStyle": m.style, "duration": m.duration, "scale": (m.to.scale * 100).rounded()]) { $1 }
+                       "moveStyle": m.style, "duration": m.duration, "scale": (m.to.scale * 100).rounded(),
+                       "tilt": moveAngles.1.tilt.rounded(), "turn": moveAngles.1.turn.rounded(), "roll": moveAngles.1.roll.rounded(),
+                       "hasAngles": moveAngles.0]) { $1 }
         } else if let p = selectedPiece {
             let all = pieces
             out.merge(["id": p.id, "kind": "clip", "start": p.start, "end": p.end, "startText": Editor.stamp(p.start), "endText": Editor.stamp(p.end),

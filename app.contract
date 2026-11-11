@@ -53,6 +53,10 @@ shape SegmentInfo
   moveStyle: string
   duration: number
   scale: number
+  tilt: number
+  turn: number
+  roll: number
+  hasAngles: bool
   problem: string
 
 shape Summary
@@ -429,6 +433,22 @@ component ExactStudio
                       button press=pattern("drift") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-drift"
                         text "Slow Push In"
                         text "A gentle zoom over six seconds"
+                      hr
+                      button press=pattern("turntable") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-turntable"
+                        text "3D Turntable"
+                        text "Swings to each side, then faces front"
+                      button press=pattern("orbit") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-orbit"
+                        text "3D Orbit"
+                        text "One full turn around"
+                      button press=pattern("reveal") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-reveal"
+                        text "3D Hero Reveal"
+                        text "Rises from lying back into a hero angle"
+                      button press=pattern("flip") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-flip"
+                        text "3D Flip In"
+                        text "Turns in from edge-on with a spring"
+                      button press=pattern("float") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-float"
+                        text "3D Float"
+                        text "Drifts between gentle angles"
                     button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
                       image "symbol:sf/cursorarrow.click.2"
                       text "Zoom on Clicks"
@@ -587,7 +607,27 @@ component ExactStudio
                             text "Size" flex=1
                             text `${sel.scale}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
                           input type="range" min=20 max=250 step=1 value=sel.scale change=moveNumber("scale") aria-label="Size" testId="move-scale"
-                        text "With this move selected, drag the video in the preview to set where it lands." font="-exact-caption1" color="-exact-tertiary-label"
+                        text (sel.hasAngles ? "3D angle it lands at" : "3D angle (keeps the one before)") font="-exact-caption1" color="-exact-secondary-label"
+                        row gap=6 flex-wrap="wrap"
+                          for p in ["hero", "lean-left", "lean-right", "lay-back", "tumble", "face"] key=p
+                            button press=threeField("preset", p) buttonStyle="bordered" testId=`move-three-${p}`
+                              text poseLabel(p)
+                        column gap=4
+                          row
+                            text "Tilt" flex=1
+                            text `${sel.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-80 max=80 step=1 value=sel.tilt change=threeNumber("tilt") aria-label="Tilt" testId="move-tilt"
+                        column gap=4
+                          row
+                            text "Turn" flex=1
+                            text `${sel.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-80 max=80 step=1 value=sel.turn change=threeNumber("turn") aria-label="Turn" testId="move-turn"
+                        column gap=4
+                          row
+                            text "Roll" flex=1
+                            text `${sel.roll}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                          input type="range" min=-45 max=45 step=1 value=sel.roll change=threeNumber("roll") aria-label="Roll" testId="move-roll"
+                        text "With this move selected, drag the video in the preview to set where it lands, and ⌥-drag to set its 3D angle. Spin turns it a full circle in 3D." font="-exact-caption1" color="-exact-tertiary-label"
                       if sel.kind == "clip"
                         button press=editDo("remove") buttonStyle=(sel.removed ? "bordered" : "filled") testId="piece-remove"
                           text (sel.removed ? "Restore This Part" : "Remove This Part")

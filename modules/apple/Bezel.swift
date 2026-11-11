@@ -146,6 +146,68 @@ enum Bezel {
                                          w: Double(bw) / Double(w), h: Double(bh) / Double(h)), mask: cg)
     }
 
+    /// A device's body read from its silhouette: the main block (the side buttons
+    /// left out), its corner radius as a share of its width, and each button that
+    /// stands out from its sides. Rectangles are unit coordinates of the mask, origin top-left.
+    struct Body: Equatable { var rect: UnitRect; var radius: Double; var buttons: [UnitRect] }
+
+    static func body(_ mask: CGImage) -> Body? {
+        let w = mask.width, h = mask.height
+        guard w > 20, h > 20,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w,
+                                  space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue),
+              let data = ctx.data else { return nil }
+        ctx.draw(mask, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let px = data.assumingMemoryBound(to: UInt8.self)
+        // Each row's outermost device pixels (the bitmap's first row is the image's top).
+        var lefts = [Int?](repeating: nil, count: h), rights = [Int?](repeating: nil, count: h)
+        for y in 0..<h {
+            var lo = -1, hi = -1
+            for x in 0..<w where px[y * w + x] > 127 { if lo < 0 { lo = x }; hi = x }
+            if lo >= 0 { lefts[y] = lo; rights[y] = hi }
+        }
+        guard let top = lefts.firstIndex(where: { $0 != nil }), let bottom = lefts.lastIndex(where: { $0 != nil }), bottom - top > h / 3 else { return nil }
+        // The body's sides: the median edge of the middle rows, which the buttons don't move.
+        let middle = (top + (bottom - top) / 5)...(bottom - (bottom - top) / 5)
+        let ls = middle.compactMap { lefts[$0] }.sorted(), rs = middle.compactMap { rights[$0] }.sorted()
+        guard !ls.isEmpty else { return nil }
+        let left = ls[ls.count * 7 / 10], right = rs[rs.count * 3 / 10]
+        guard right - left > w / 3 else { return nil }
+        // The corner: how far down from the top the outline takes to reach the side.
+        var corner = 0
+        for y in top...bottom { if let l = lefts[y], l <= left + 1 { corner = y - top; break } }
+        // The buttons: runs of rows with device pixels beyond the body's sides.
+        func runs(_ beyond: (Int) -> Int?) -> [UnitRect] {
+            var out: [UnitRect] = [], start = -1, edge = 0, gap = 0
+            let minimum = max(4, (bottom - top) / 80)
+            for y in top...bottom + 1 {
+                let b = y <= bottom ? beyond(y) : nil
+                if let b {
+                    if start < 0 { start = y; edge = b }
+                    edge = b < 0 ? min(edge, b) : max(edge, b)
+                    gap = 0
+                } else if start >= 0 {
+                    gap += 1
+                    if gap > 2 || y > bottom {
+                        let end = y - gap
+                        if end - start + 1 >= minimum {
+                            let x0 = edge < 0 ? left + edge : right, x1 = edge < 0 ? left : right + edge
+                            out.append(UnitRect(x: Double(x0) / Double(w), y: Double(start) / Double(h),
+                                                w: Double(max(1, x1 - x0)) / Double(w), h: Double(end - start + 1) / Double(h)))
+                        }
+                        start = -1; gap = 0
+                    }
+                }
+            }
+            return out
+        }
+        let leftButtons = runs { y in guard let l = lefts[y], l < left - 2 else { return nil }; return l - left }
+        let rightButtons = runs { y in guard let r = rights[y], r > right + 2 else { return nil }; return r - right }
+        let bw = Double(right - left + 1)
+        return Body(rect: UnitRect(x: Double(left) / Double(w), y: Double(top) / Double(h), w: bw / Double(w), h: Double(bottom - top + 1) / Double(h)),
+                    radius: min(0.3, Double(corner) / bw), buttons: leftButtons + rightButtons)
+    }
+
     /// The same over an image (a frame taken from a finished recording).
     static func outline(_ image: CGImage) -> Outline? {
         let w = image.width, h = image.height

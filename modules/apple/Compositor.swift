@@ -124,6 +124,13 @@ struct Move: Codable, Equatable {
     /// "smooth", "linear", "spring", "zoom", "swipe", "fade", "spin" or "pop".
     var style = "smooth"
     var duration = 0.8
+    /// The 3D angle it lands at; none keeps the angle it had.
+    var angles: Angles?
+}
+
+/// A 3D angle in degrees: `tilt` leans the top away, `turn` swings the right side away, `roll` turns it flat.
+struct Angles: Codable, Equatable {
+    var tilt = 0.0, turn = 0.0, roll = 0.0
 }
 
 /// One part of the clip between two split points.
@@ -260,6 +267,17 @@ enum Masks {
         guard let img = CIImage(contentsOf: url) else { return nil }
         cache[url.path] = img
         return img
+    }
+
+    private static var bodies: [String: Bezel.Body] = [:]
+    /// The device's body read from its silhouette, for the 3D slab.
+    static func body(_ url: URL) -> Bezel.Body? {
+        lock.lock(); defer { lock.unlock() }
+        if let hit = bodies[url.path] { return hit }
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil), let cg = CGImageSourceCreateImageAtIndex(src, 0, nil),
+              let b = Bezel.body(cg) else { return nil }
+        bodies[url.path] = b
+        return b
     }
 }
 
@@ -487,7 +505,14 @@ extension CIImage {
 // MARK: - Framing
 
 /// Where the subject is at an instant: its placement, a turn, and an opacity.
-struct Pose { var x: Double, y: Double, scale: Double, rotation: Double = 0, opacity: Double = 1 }
+struct Pose {
+    var x: Double, y: Double, scale: Double, rotation: Double = 0, opacity: Double = 1
+    /// The 3D angle, used only when the subject is drawn in 3D.
+    var angles = Angles()
+}
+
+/// The device's body on the canvas, for the 3D slab: its block, corner radius and buttons.
+struct BodyOnCanvas { let rect: CGRect; let radius: CGFloat; let buttons: [CGRect] }
 
 /// One recording's framing: everything per frame except the frame itself.
 struct Framing {
@@ -504,12 +529,14 @@ struct Framing {
 
     var crop: UnitRect { meta.crop }
 
-    /// The device's silhouette, when the recording has one.
+    /// The device's silhouette, when the recording has one, and the body read from it.
     private let silhouette: CIImage?
+    private let deviceBody: Bezel.Body?
 
     init(meta: RecordingMeta, look: Look, edits: Edits, cursor: [Point], folder: URL? = nil) {
         self.meta = meta
         silhouette = meta.mask.flatMap { name in folder.flatMap { Masks.image($0.appendingPathComponent(name)) } }
+        deviceBody = meta.mask.flatMap { name in folder.flatMap { Masks.body($0.appendingPathComponent(name)) } }
         self.look = look
         self.edits = edits
         let crop = meta.crop
@@ -551,13 +578,40 @@ struct Framing {
 
     func pose(at t: Double) -> Pose {
         var from = edits.base
+        var angles = Angles(tilt: edits.three.tilt, turn: edits.three.turn, roll: edits.three.roll)
         for m in moves {
             let start = m.t - m.duration
-            if t >= m.t { from = m.to; continue }
+            let next = m.angles ?? angles
+            if t >= m.t { from = m.to; angles = next; continue }
             guard t > start, m.duration > 0 else { break }
-            return Framing.blend(from, m.to, u: (t - start) / m.duration, style: m.style, fill: fill)
+            var p = Framing.blend(from, m.to, u: (t - start) / m.duration, style: m.style, fill: fill)
+            p.angles = Framing.turn(angles, next, u: (t - start) / m.duration, style: m.style, inDepth: edits.three.on)
+            // In 3D a spin is a turn about the vertical, not a turn in the picture's plane.
+            if edits.three.on && m.style == "spin" { p.rotation = 0 }
+            return p
         }
-        return Pose(x: from.x, y: from.y, scale: from.scale)
+        var p = Pose(x: from.x, y: from.y, scale: from.scale)
+        p.angles = angles
+        return p
+    }
+
+    /// The 3D angle on the way from `a` to `b`, eased as the move's style eases its place.
+    static func turn(_ a: Angles, _ b: Angles, u: Double, style: String, inDepth: Bool) -> Angles {
+        func mix(_ e: Double) -> Angles { Angles(tilt: a.tilt + (b.tilt - a.tilt) * e, turn: a.turn + (b.turn - a.turn) * e, roll: a.roll + (b.roll - a.roll) * e) }
+        switch style {
+        case "linear": return mix(Ease.clamp(u))
+        case "spring", "pop": return mix(Ease.spring(u))
+        case "zoom":
+            // Face on while it fills the frame.
+            let flat = Angles()
+            return u < 0.5 ? turn(a, flat, u: u * 2, style: "smooth", inDepth: inDepth) : turn(flat, b, u: u * 2 - 1, style: "smooth", inDepth: inDepth)
+        case "swipe", "fade": return u < 0.5 ? a : b
+        case "spin":
+            var m = mix(Ease.inOut(u))
+            if inDepth { m.turn += 360 * Ease.inOut(u) }
+            return m
+        default: return mix(Ease.inOut(u))
+        }
     }
 
     static func blend(_ a: Placement, _ b: Placement, u: Double, style: String, fill: Double) -> Pose {
@@ -698,6 +752,18 @@ struct Framing {
             cut.backgroundImage = CIImage.empty()
             cut.maskImage = m
             subjectImage = cut.outputImage!.cropped(to: subject)
+            // The body and buttons from the silhouette's own coordinates onto the canvas.
+            var body: BodyOnCanvas?
+            if edits.three.on, let d = deviceBody {
+                let onCanvas = { (u: UnitRect) -> CGRect in
+                    CGRect(x: at.minX + u.x * at.width, y: at.maxY - (u.y + u.h) * at.height, width: u.w * at.width, height: u.h * at.height).applying(toSubject)
+                }
+                let r = onCanvas(d.rect).intersection(subject)
+                if !r.isNull, r.width > 4, r.height > 4 {
+                    body = BodyOnCanvas(rect: r, radius: CGFloat(d.radius) * r.width, buttons: d.buttons.map(onCanvas))
+                }
+            }
+            return finish(subjectImage, at: t, opacity: opacity, texts: texts, source: source, body: body)
         } else {
             subjectImage = shaped(subjectImage, source: source)
         }
@@ -747,12 +813,22 @@ struct Framing {
     }
 
     /// The cut subject placed, zoomed and shadowed over the background, with the texts.
-    private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool, source: CIImage) -> CIImage {
+    private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool, source: CIImage, body: BodyOnCanvas? = nil) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let minSide = min(canvas.width, canvas.height)
-        // In 3D the subject is a slab drawn by SceneKit; the rest is the flat path's.
-        if edits.three.on, let body = Stage3D.shared.render(face: subjectImage, rect: subject, outline: outline, canvas: canvas, three: edits.three) {
-            return place(body, shadowFrom: body, lift: (abs(edits.three.tilt) + abs(edits.three.turn)) / 90, at: t, opacity: opacity, texts: texts, source: source)
+        // In 3D the subject is a slab drawn by SceneKit, at the pose's angle; the rest is the flat path's.
+        if edits.three.on {
+            var three = edits.three
+            let a = pose(at: t).angles
+            three.tilt = a.tilt; three.turn = a.turn; three.roll = a.roll
+            let rect = body?.rect ?? subject
+            let path = body.map { b in
+                CGPath(roundedRect: b.rect, cornerWidth: max(0.5, min(b.radius, b.rect.width / 2 - 0.5)), cornerHeight: max(0.5, min(b.radius, b.rect.width / 2 - 0.5)), transform: nil)
+            } ?? outline
+            if let drawn = Stage3D.shared.render(face: subjectImage, rect: rect, outline: path, buttons: body?.buttons ?? [], canvas: canvas, three: three) {
+                let lift = min(1.5, (abs(a.tilt) + abs(a.turn.truncatingRemainder(dividingBy: 180))) / 90)
+                return place(drawn, shadowFrom: drawn, lift: lift, at: t, opacity: opacity, texts: texts, source: source)
+            }
         }
         // The subject and its shadow are one layer; placement and zoom move it over a still background.
         var layer = subjectImage

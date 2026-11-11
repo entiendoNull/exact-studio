@@ -228,7 +228,7 @@ final class TimelineView: NSView {
             NSColor.systemTeal.withAlphaComponent(selected ? 0.75 : 0.45).setFill()
             NSBezierPath(roundedRect: bar, xRadius: 6, yRadius: 6).fill()
             let name = (["smooth": "Smooth", "linear": "Linear", "spring": "Spring", "zoom": "Zoom through", "swipe": "Swipe",
-                         "fade": "Fade", "spin": "Spin", "pop": "Pop"][m.style] ?? m.style) as NSString
+                         "fade": "Fade", "spin": "Spin", "pop": "Pop"][m.style] ?? m.style) + (m.angles != nil ? " · 3D" : "") as NSString
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
             if bar.width > name.size(withAttributes: attrs).width + 16 { name.draw(at: CGPoint(x: bar.minX + 6, y: bar.minY - 1), withAttributes: attrs) }
             let d = diamond(m.t)

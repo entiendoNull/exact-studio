@@ -61,7 +61,7 @@ final class Studio: ExactModule {
     private static let emptySelection: [String: Any] = [
         "id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "", "removed": false, "first": false,
         "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
-        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "problem": "",
+        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "problem": "",
     ]
     private static let emptySummary: [String: Any] = [
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "moves": 0, "length": 0, "source": 0, "playing": false,
@@ -443,7 +443,9 @@ final class PlayerHost: NSView {
             // ⌥-drag turns it in 3D (switching 3D on); a plain drag moves it.
             if e.modifierFlags.contains(.option) {
                 if !editor.edits.three.on { editor.setThree("on", "true", live: true) }
-                drag = .turn(u, editor.edits.three.tilt, editor.edits.three.turn)
+                // From the angle it shows now (the selected move's while one is selected).
+                let a = editor.framing.pose(at: editor.selectedMove?.t ?? editor.playhead).angles
+                drag = .turn(u, a.tilt, a.turn)
             } else {
                 drag = .subject(u, editor.placementNow)
             }
@@ -491,7 +493,9 @@ final class PlayerHost: NSView {
         guard let editor, let drag else { return }
         switch drag {
         case .subject: editor.endPlace()
-        case .turn: editor.setThree("turn", String(editor.edits.three.turn))
+        case .turn:
+            let a = editor.framing.pose(at: editor.selectedMove?.t ?? editor.playhead).angles
+            editor.setThree("turn", String(a.turn))
         case let .text(id, _, _):
             if let s = editor.edits.texts.first(where: { $0.id == id }) { editor.dragText(id, x: s.x ?? 0.5, y: s.y ?? 0.5, live: false) }
         }
