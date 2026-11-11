@@ -16,12 +16,20 @@ final class ColorWell: ExactNativeInstance {
     }
 
     override var view: ExactNativeView { well }
+    override var focusTarget: ExactNativeView? { well }
 
     override func setProps(_ props: [String: String]) throws {
         let next = props["hex"] ?? "#000000"
         guard next != hex else { return }
         hex = next
         if let c = Backgrounds.hex(next) { well.color = NSColor(ciColor: c) }
+    }
+
+    /// The agent's `type <well> #RRGGBB` picks that colour, as the person would in the panel.
+    override func agentInput(_ input: ExactNativeInput) throws {
+        guard case let .text(t) = input, let c = Backgrounds.hex(t) else { throw ExactNativeRefusal("studio-color takes a colour as #RRGGBB") }
+        well.color = NSColor(ciColor: c)
+        picked()
     }
 
     @objc private func picked() {
