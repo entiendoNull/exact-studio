@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exact-studio/edits.schema.json",
+  "title": "Exact Studio edits.json",
+  "description": "A recording's timeline. Every time is in seconds of the recording. See docs/edits.md.",
+  "type": "object",
+  "properties": {
+    "splits": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "Where the clip is cut, sorted"
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "description": "The start of each clip part left out (0 or a split)"
+    },
+    "transitions": {
+      "type": "object",
+      "additionalProperties": {
+        "enum": [
+          "crossfade",
+          "fade"
+        ]
+      },
+      "description": "Keyed by the end of a kept part, in milliseconds"
+    },
+    "lanes": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "base": {
+      "type": "object",
+      "properties": {
+        "x": {
+          "type": "number",
+          "description": "Centre, 0\u20131 of the frame's width"
+        },
+        "y": {
+          "type": "number",
+          "description": "Centre, 0\u20131 of the frame's height, from the top"
+        },
+        "scale": {
+          "type": "number",
+          "description": "1 fills the frame inside the padding"
+        }
+      },
+      "additionalProperties": false
+    },
+    "moves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "t": {
+            "type": "number",
+            "description": "Seconds of the recording it lands at"
+          },
+          "to": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number",
+                "description": "Centre, 0\u20131 of the frame's width"
+              },
+              "y": {
+                "type": "number",
+                "description": "Centre, 0\u20131 of the frame's height, from the top"
+              },
+              "scale": {
+                "type": "number",
+                "description": "1 fills the frame inside the padding"
+              }
+            },
+            "additionalProperties": false
+          },
+          "style": {
+            "enum": [
+              "smooth",
+              "linear",
+              "spring",
+              "zoom",
+              "swipe",
+              "fade",
+              "spin",
+              "pop"
+            ]
+          },
+          "duration": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Seconds it travels before t"
+          },
+          "angles": {
+            "type": "object",
+            "properties": {
+              "tilt": {
+                "type": "number"
+              },
+              "turn": {
+                "type": "number"
+              },
+              "roll": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Degrees: tilt leans the top away, turn swings the right side away, roll turns it flat."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "t",
+          "to"
+        ]
+      }
+    },
+    "three": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "tilt": {
+          "type": "number"
+        },
+        "turn": {
+          "type": "number"
+        },
+        "roll": {
+          "type": "number"
+        },
+        "thickness": {
+          "type": "number",
+          "description": "A share of the width"
+        },
+        "edge": {
+          "enum": [
+            "metal",
+            "aluminum",
+            "glass",
+            "matte"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "zoom",
+              "speed",
+              "text",
+              "3d",
+              "spotlight",
+              "highlight",
+              "blur",
+              "mono"
+            ]
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Seconds of the recording"
+          },
+          "end": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Seconds of the recording; at least 0.1 after start"
+          },
+          "lane": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "level": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "zoom: above 1 in, below 1 out"
+          },
+          "rate": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "speed: 0.5 is half speed"
+          },
+          "scope": {
+            "enum": [
+              "video",
+              "frame"
+            ],
+            "description": "blur, mono: the video, or the whole frame"
+          },
+          "tilt": {
+            "type": "number"
+          },
+          "turn": {
+            "type": "number"
+          },
+          "roll": {
+            "type": "number"
+          },
+          "style": {
+            "type": "string",
+            "description": "text: plain, pill, box, outline, shadow; 3d: hold, orbit"
+          },
+          "text": {
+            "type": "string"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "size": {
+            "type": "number",
+            "description": "text: height as a share of the frame's"
+          },
+          "color": {
+            "enum": [
+              "white",
+              "black",
+              "yellow",
+              "pink",
+              "blue",
+              "mint"
+            ]
+          },
+          "weight": {
+            "enum": [
+              "regular",
+              "bold",
+              "heavy",
+              "rounded"
+            ]
+          },
+          "animIn": {
+            "enum": [
+              "letters",
+              "letters-pop",
+              "drop",
+              "typewriter",
+              "pop",
+              "spin",
+              "slide",
+              "rise",
+              "blur",
+              "fade",
+              "none"
+            ]
+          },
+          "animOut": {
+            "enum": [
+              "fade",
+              "fall",
+              "letters",
+              "pop",
+              "sink",
+              "blur",
+              "none"
+            ]
+          },
+          "loop": {
+            "enum": [
+              "none",
+              "wave",
+              "pulse",
+              "float",
+              "wiggle"
+            ]
+          },
+          "rotation": {
+            "type": "number",
+            "description": "text: degrees"
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "start",
+          "end"
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

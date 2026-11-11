@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exact-studio/look.schema.json",
+  "title": "Exact Studio look.json",
+  "description": "A recording's frame. See docs/edits.md.",
+  "type": "object",
+  "properties": {
+    "background": {
+      "enum": [
+        "ocean",
+        "sunset",
+        "mint",
+        "midnight",
+        "graphite",
+        "paper",
+        "peach",
+        "lagoon",
+        "berry",
+        "aurora",
+        "ember",
+        "lavender",
+        "citrus",
+        "forest",
+        "sky",
+        "rose",
+        "dusk",
+        "steel",
+        "candy",
+        "deepsea",
+        "sand",
+        "neon",
+        "glow",
+        "noir",
+        "custom",
+        "video"
+      ]
+    },
+    "aspect": {
+      "enum": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "4:3",
+        "auto"
+      ]
+    },
+    "padding": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 40,
+      "description": "Percent of the frame's shorter side"
+    },
+    "radius": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Output pixels"
+    },
+    "shadow": {
+      "type": "boolean"
+    },
+    "cursor": {
+      "type": "boolean"
+    },
+    "cursorSize": {
+      "type": "number",
+      "description": "A scale; 1.5 is 150%"
+    },
+    "clickEffect": {
+      "type": "boolean"
+    },
+    "smoothCursor": {
+      "type": "boolean"
+    },
+    "customA": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "customB": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "customAngle": {
+      "type": "number",
+      "description": "Degrees, as CSS's linear-gradient"
+    },
+    "customRadial": {
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

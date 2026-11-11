@@ -50,7 +50,14 @@ final class Editor {
             edits = Edits()
         }
         map = TimeMap(duration: meta.duration, edits: edits)
-        state = RenderState(Framing(meta: meta, look: Look(), edits: edits, cursor: cursor, folder: Library.recordings.appendingPathComponent(id)))
+        let folder = Library.recordings.appendingPathComponent(id)
+        // The recording's own look; a recording without one starts from the last look used.
+        if let data = try? Data(contentsOf: folder.appendingPathComponent("look.json")), let saved = try? JSONDecoder().decode(Look.self, from: data) {
+            look = saved
+        } else if let last = UserDefaults.standard.data(forKey: "ExactStudio.lastLook"), let saved = try? JSONDecoder().decode(Look.self, from: last) {
+            look = saved
+        }
+        state = RenderState(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
         player.actionAtItemEnd = .pause
         rebuild(keepTime: false)
         // A device recording without its silhouette yet (made before there was one): find it now.
@@ -58,6 +65,100 @@ final class Editor {
         playing = player.observe(\.timeControlStatus) { [weak self] _, _ in
             DispatchQueue.main.async { self?.notify() }
         }
+        stamps = Editor.stamps(folder)
+        watcher = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkDisk() }
+    }
+
+    deinit { watcher?.invalidate() }
+
+    // MARK: Edits made outside the app
+
+    /// The files an agent or the CLI may change, and when each last changed.
+    private static let watched = ["edits.json", "look.json", "meta.json"]
+    private var stamps: [String: Date] = [:]
+    private var watcher: Timer?
+
+    private static func stamps(_ folder: URL) -> [String: Date] {
+        var out: [String: Date] = [:]
+        for name in watched {
+            if let d = try? FileManager.default.attributesOfItem(atPath: folder.appendingPathComponent(name).path)[.modificationDate] as? Date { out[name] = d }
+        }
+        return out
+    }
+
+    /// A file changed on disk: take what it now says, if it differs from what is open.
+    /// The app's own saves read back equal and change nothing.
+    private func checkDisk() {
+        let now = Editor.stamps(folder)
+        guard now != stamps else { return }
+        stamps = now
+        let read = { (name: String) in try? Data(contentsOf: self.folder.appendingPathComponent(name)) }
+        var timing = false, drawn = false
+        if let data = read("edits.json"), let disk = try? JSONDecoder().decode(Edits.self, from: data), disk != edits {
+            timing = Editor.timing(disk) != Editor.timing(edits)
+            edits = disk
+            drawn = true
+            if !selected.isEmpty, selectedSegment == nil, selectedMove == nil, selectedPiece == nil { selected = "" }
+        }
+        if let data = read("look.json"), let disk = try? JSONDecoder().decode(Look.self, from: data), disk != look {
+            look = disk
+            drawn = true
+        }
+        if let data = read("meta.json"), let disk = try? JSONDecoder().decode(RecordingMeta.self, from: data),
+           (try? JSONEncoder().encode(disk)) != (try? JSONEncoder().encode(meta)) {
+            meta = disk
+            timing = true
+        }
+        guard timing || drawn else { return }
+        problem = ""
+        timing ? rebuild(keepTime: true) : refresh()
+        notify()
+    }
+
+    // MARK: The look
+
+    private func saveLook() {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(look) else { return }
+        try? data.write(to: folder.appendingPathComponent("look.json"))
+        stamps = Editor.stamps(folder)
+        UserDefaults.standard.set(data, forKey: "ExactStudio.lastLook")
+    }
+
+    /// Set one field of the look and save it beside the recording.
+    func setLookField(_ field: String, _ value: String) {
+        var l = look
+        let n = Double(value), b = value == "true"
+        switch field {
+        case "background": l.background = value
+        case "aspect": l.aspect = value
+        case "padding": if let n { l.padding = min(max(n, 0), 40) }
+        case "radius": if let n { l.radius = min(max(n, 0), 80) }
+        case "shadow": l.shadow = b
+        case "cursor": l.cursor = b
+        case "cursorSize": if let n { l.cursorSize = min(max(n / 100, 0.3), 5) }
+        case "clickEffect": l.clickEffect = b
+        case "smoothCursor": l.smoothCursor = b
+        case "customA": l.customA = value; l.background = "custom"
+        case "customB": l.customB = value; l.background = "custom"
+        case "customAngle": if let n { l.customAngle = n }
+        case "customRadial": l.customRadial = b
+        case "swapCustom": (l.customA, l.customB) = (l.customB, l.customA)
+        default: return
+        }
+        guard l != look else { return }
+        look = l
+        saveLook()
+        refresh()
+        notify()
+    }
+
+    var lookInfo: [String: Any] {
+        ["background": look.background, "aspect": look.aspect, "padding": look.padding.rounded(), "radius": look.radius.rounded(),
+         "shadow": look.shadow, "cursor": look.cursor, "cursorSize": (look.cursorSize * 100).rounded(), "clickEffect": look.clickEffect,
+         "smoothCursor": look.smoothCursor, "customA": look.customA, "customB": look.customB, "customAngle": look.customAngle.rounded(),
+         "customRadial": look.customRadial]
     }
 
     func listen(_ owner: AnyObject, _ body: @escaping () -> Void) { listeners[ObjectIdentifier(owner)] = body }
@@ -224,7 +325,11 @@ final class Editor {
     // MARK: Editing
 
     private func save() {
-        try? JSONEncoder().encode(edits).write(to: folder.appendingPathComponent("edits.json"))
+        // Pretty and sorted, so a person or an agent can read it and a diff stays small.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try? encoder.encode(edits).write(to: folder.appendingPathComponent("edits.json"))
+        stamps = Editor.stamps(folder)
     }
 
     private static func timing(_ e: Edits) -> String {
@@ -901,6 +1006,15 @@ final class Editor {
                 "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),
                 "angleMove": (selectedMove ?? angleMove).map { Editor.stamp($0.t) } ?? "",
                 "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge]
+    }
+}
+
+extension Editor {
+    static var defaultLook: [String: Any] {
+        let l = Look()
+        return ["background": l.background, "aspect": l.aspect, "padding": l.padding, "radius": l.radius, "shadow": l.shadow, "cursor": l.cursor,
+                "cursorSize": l.cursorSize * 100, "clickEffect": l.clickEffect, "smoothCursor": l.smoothCursor, "customA": l.customA,
+                "customB": l.customB, "customAngle": l.customAngle, "customRadial": l.customRadial]
     }
 }
 

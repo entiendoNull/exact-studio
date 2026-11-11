@@ -28,6 +28,21 @@ shape Recording
 shape RecordingList
   items: Recording[]
 
+shape LookInfo
+  background: string
+  aspect: string
+  padding: number
+  radius: number
+  shadow: bool
+  cursor: bool
+  cursorSize: number
+  clickEffect: bool
+  smoothCursor: bool
+  customA: string
+  customB: string
+  customAngle: number
+  customRadial: bool
+
 shape SegmentInfo
   id: string
   kind: string
@@ -114,19 +129,6 @@ routes nav
 
 component ExactStudio
   state selected = ""
-  state background = "ocean" persist
-  state aspect = "16:9" persist
-  state padding = 8 persist
-  state radius = 14 persist
-  state shadow = true persist
-  state cursorOn = true persist
-  state cursorSize = 150 persist
-  state clickEffect = true persist
-  state smoothCursor = true persist
-  state customA = "#6A11CB" persist
-  state customB = "#2575FC" persist
-  state customAngle = 135 persist
-  state customRadial = false persist
   state openPlace = true persist
   state openHelp = false persist
   state openBg = true persist
@@ -143,6 +145,8 @@ component ExactStudio
   resource library = recordings() as shape RecordingList else empty()
   resource sel = editSelection(selected) as shape SegmentInfo else empty()
   resource summary = editSummary(selected) as shape Summary else empty()
+  // The recording's own look (look.json beside it).
+  resource lk = recordingLook(selected) as shape LookInfo else empty()
   mutation started as shape Reply then afterStart
   mutation stopped as shape Stopped refreshes library then afterStop
   mutation exported as shape Exported
@@ -156,6 +160,19 @@ component ExactStudio
   derive displays = sources.items.filter(s => s.kind == "display")
   derive windows = sources.items.filter(s => s.kind == "window")
   derive gradients = ["ocean", "sunset", "mint", "midnight", "graphite", "paper", "peach", "lagoon", "berry", "aurora", "ember", "lavender", "citrus", "forest", "sky", "rose", "dusk", "steel", "candy", "deepsea", "sand", "neon", "glow", "noir"]
+  derive background = lk.background
+  derive aspect = lk.aspect
+  derive padding = lk.padding
+  derive radius = lk.radius
+  derive shadow = lk.shadow
+  derive cursorOn = lk.cursor
+  derive cursorSize = lk.cursorSize
+  derive clickEffect = lk.clickEffect
+  derive smoothCursor = lk.smoothCursor
+  derive customA = lk.customA
+  derive customB = lk.customB
+  derive customAngle = lk.customAngle
+  derive customRadial = lk.customRadial
   derive look = `{"background":"${background}","customA":"${customA}","customB":"${customB}","customAngle":${customAngle},"customRadial":${customRadial},"aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow},"cursor":${cursorOn},"cursorSize":${cursorSize / 100},"clickEffect":${clickEffect},"smoothCursor":${smoothCursor}}`
   derive startError = match started { case some(r) => r.error, case none => "" }
   derive stopError = match stopped { case some(r) => r.error, case none => "" }
@@ -187,15 +204,15 @@ component ExactStudio
   action choose(id: string)
     selected = id
   action pickBackground(v: string)
-    background = v
+    send edited = editClip(selected, "look", "background", 0, v)
   action pickAspect(v: string)
-    aspect = v
+    send edited = editClip(selected, "look", "aspect", 0, v)
   action setPadding(v: number)
-    padding = round(v)
+    send edited = editClip(selected, "look", "padding", 0, `${round(v)}`)
   action setRadius(v: number)
-    radius = round(v)
+    send edited = editClip(selected, "look", "radius", 0, `${round(v)}`)
   action setShadow(v: bool)
-    shadow = v
+    send edited = editClip(selected, "look", "shadow", 0, `${v}`)
   action exportIt
     send exported = exportRecording(selected, look)
   action reveal
@@ -229,26 +246,23 @@ component ExactStudio
     if name == "3d"
       open3d = not open3d
   action setCustomA(v: string)
-    customA = v
-    background = "custom"
+    send edited = editClip(selected, "look", "customA", 0, v)
   action setCustomB(v: string)
-    customB = v
-    background = "custom"
+    send edited = editClip(selected, "look", "customB", 0, v)
   action setCustomAngle(v: number)
-    customAngle = round(v)
+    send edited = editClip(selected, "look", "customAngle", 0, `${round(v)}`)
   action setCustomRadial(v: bool)
-    customRadial = v
+    send edited = editClip(selected, "look", "customRadial", 0, `${v}`)
   action swapCustom
-    customA = customB
-    customB = customA
+    send edited = editClip(selected, "look", "swapCustom", 0, "")
   action setCursorOn(v: bool)
-    cursorOn = v
+    send edited = editClip(selected, "look", "cursor", 0, `${v}`)
   action setCursorSize(v: number)
-    cursorSize = round(v)
+    send edited = editClip(selected, "look", "cursorSize", 0, `${round(v)}`)
   action setClickEffect(v: bool)
-    clickEffect = v
+    send edited = editClip(selected, "look", "clickEffect", 0, `${v}`)
   action setSmoothCursor(v: bool)
-    smoothCursor = v
+    send edited = editClip(selected, "look", "smoothCursor", 0, `${v}`)
   action textField(field: string, v: string)
     send edited = editClip(selected, "text", field, 0, v)
   action textNumber(field: string, v: number)

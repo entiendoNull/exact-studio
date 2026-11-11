@@ -30,6 +30,11 @@ const sources: Sources = {
     native.watch('edits');
     return native.call({ op: 'summary', id }) as Result<'editSummary'>;
   },
+  recordingLook: async ([id], _store, _storage, native): Promise<Result<'recordingLook'>> => {
+    if (!native?.available) return { background: 'ocean', aspect: '16:9', padding: 8, radius: 14, shadow: true, cursor: true, cursorSize: 150, clickEffect: true, smoothCursor: true, customA: '#6A11CB', customB: '#2575FC', customAngle: 135, customRadial: false };
+    native.watch('edits');
+    return native.call({ op: 'look', id }) as Result<'recordingLook'>;
+  },
   editClip: ([id, what, track, number, kind], _store, _storage, native) =>
     later(native, { op: 'edit', id, do: what, track, number, kind }, { ok: false }),
   startRecording: ([source], _store, _storage, native) =>

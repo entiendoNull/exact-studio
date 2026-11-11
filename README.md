@@ -15,6 +15,21 @@ A macOS screen recorder built with [Exact](https://github.com/expo/exact). It re
 - **Zoom on clicks**: a new recording starts with no zooms; the button adds one around each group of clicks.
 - **Export** an MP4 to `~/Movies/Exact Studio/`.
 
+## For agents
+
+Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions, effects, texts, zooms, speed, moves, 3D) and `look.json` (background, shape, padding, cursor). Edit them directly; the app reloads them within a second. `./exact-studio` checks and renders with the app's own renderer:
+
+```sh
+./exact-studio list
+./exact-studio show latest
+./exact-studio validate latest
+./exact-studio frame latest 4.5     # .exact/frame.png
+./exact-studio export latest
+./exact-studio template latest hero
+```
+
+[`docs/edits.md`](docs/edits.md) documents every field; [`schema/`](schema) has the JSON Schemas; the `edit-recording` skill (`.claude/skills/`) is the workflow.
+
 ## Run
 
 ```sh
@@ -33,6 +48,7 @@ The app uses the Exact checkout at `../exact`. The first recording asks for Scre
 - `modules/apple/Timeline.swift`: the timeline view.
 - `modules/apple/Templates.swift`: the ready-made edits.
 - `modules/apple/Scene3D.swift`: the 3D stage: the slab, its materials, lights and camera.
+- `cli/main.swift`, `exact-studio`: the command-line tool.
 - `modules/apple/Studio.swift`: the module's ops, the menu bar item, the preview view, export.
 
 Recordings are kept in `~/Movies/Exact Studio/Recordings/<id>/` as `capture.mov` (HEVC with alpha), `meta.json`, `cursor.json` and `edits.json`.

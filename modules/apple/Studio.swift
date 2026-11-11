@@ -89,6 +89,8 @@ final class Studio: ExactModule {
             return ["recording": recorder != nil, "name": recorder?.name ?? "", "kind": recorder?.kind.rawValue ?? ""]
         case "selection":
             return editor(request["id"] as? String ?? "")?.selection ?? Self.emptySelection
+        case "look":
+            return editor(request["id"] as? String ?? "")?.lookInfo ?? Editor.defaultLook
         case "summary":
             return editor(request["id"] as? String ?? "")?.summary ?? Self.emptySummary
         default:
@@ -119,7 +121,7 @@ final class Studio: ExactModule {
             edit(request)
             reply.send(["ok": true])
         case "export":
-            export(id: request["id"] as? String ?? "", look: Look.parse(request["look"] as? String ?? "{}"), reply: reply)
+            export(id: request["id"] as? String ?? "", reply: reply)
         case "delete":
             let id = request["id"] as? String ?? ""
             guard !id.isEmpty, !id.contains("/") else { return reply.send(["ok": false, "error": "No such recording."]) }
@@ -168,6 +170,7 @@ final class Studio: ExactModule {
         case "seg": e.setSegment(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "template": e.applyTemplate(r["kind"] as? String ?? "")
         case "undo-template": e.undoTemplate()
+        case "look": e.setLookField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "three": e.setThree(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "add-move": e.addMove()
         case "pattern": e.pattern(r["kind"] as? String ?? "")
@@ -286,10 +289,10 @@ final class Studio: ExactModule {
         context.changed("recordings")
     }
 
-    private func export(id: String, look: Look, reply: ExactReply) {
+    private func export(id: String, reply: ExactReply) {
         guard let e = editor(id) else { return reply.send(["ok": false, "error": "No such recording.", "path": ""]) }
         let made: (AVAsset, AVMutableVideoComposition)
-        do { made = try e.exportable(look: look) } catch { return reply.send(["ok": false, "error": "\(error)", "path": ""]) }
+        do { made = try e.exportable(look: e.look) } catch { return reply.send(["ok": false, "error": "\(error)", "path": ""]) }
         guard let session = AVAssetExportSession(asset: made.0, presetName: AVAssetExportPresetHighestQuality) else {
             return reply.send(["ok": false, "error": "This Mac can’t export that.", "path": ""])
         }
@@ -338,7 +341,7 @@ final class Preview: ExactNativeInstance {
             host.attach(editor)
         }
         studio.active = next
-        editor?.setLook(Look.parse(props["look"] ?? "{}"))
+        // The look is the recording's own (look.json); the view only shows and sets it.
     }
 
     override func destroy() {

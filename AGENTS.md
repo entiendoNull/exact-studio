@@ -28,3 +28,10 @@ command confused you, record it: `bun exact.mjs feedback note "<what happened>"`
 exact2's commit and the last exit code, never output or code. `bun exact.mjs feedback status` says
 whether notes are sent and whether to keep a diary; under `never`, skip all of this.
 <!-- exact:end -->
+
+## Editing recordings as files
+
+Recordings are folders of plain files: `edits.json` is the timeline, `look.json` the frame. Agents
+edit them directly and use `./exact-studio` (list, show, validate, frame, export, template) to
+check and render with the app's own renderer. `docs/edits.md` is the format; the
+`edit-recording` skill is the workflow. The app reloads changed files within a second.
