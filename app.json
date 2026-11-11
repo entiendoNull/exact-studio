@@ -1,0 +1,33 @@
+{
+  "$schema": "../exact/scripts/app.schema.json",
+  "name": "Exact Studio",
+  "short_name": "Exact Studio",
+  "id": "com.entiendonull.exactstudio",
+  "start_url": "/",
+  "display": "standalone",
+  "app": {
+    "id": "com.entiendonull.exactstudio",
+    "name": "Exact Studio"
+  },
+  "host": {
+    "web": {},
+    "macos": {
+      "minimumOS": "14.0",
+      "window": {
+        "width": 1180,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 640
+      }
+    }
+  },
+  "deploy": {
+    "store": {
+      "web": "0",
+      "macos": "0"
+    }
+  },
+  "modules": [
+    "studio-preview"
+  ]
+}

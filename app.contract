@@ -1,0 +1,253 @@
+// Exact Studio: record an area, a window, or a Simulator or Android emulator
+// cropped to its bezel; then frame it on a background, zoom into clicks, and
+// export. Capture, framing and export are the native module's
+// (modules/apple/); this view picks and adjusts.
+shape Status
+  recording: bool
+  name: string
+  kind: string
+
+shape Source
+  id: string
+  name: string
+  app: string
+  kind: string
+
+shape SourceList
+  items: Source[]
+  allowed: bool
+
+shape Recording
+  id: string
+  name: string
+  kind: string
+  created: number
+  duration: number
+
+shape RecordingList
+  items: Recording[]
+
+shape Reply
+  ok: bool
+  error: string
+
+shape Stopped
+  ok: bool
+  error: string
+  id: string
+
+shape Exported
+  ok: bool
+  error: string
+  path: string
+
+shape Done
+  ok: bool
+
+fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
+fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
+fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
+fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
+
+routes nav
+  home "/"
+
+component ExactStudio
+  state selected = ""
+  state background = "ocean" persist
+  state aspect = "16:9" persist
+  state padding = 8 persist
+  state radius = 14 persist
+  state shadow = true persist
+  state zoom = true persist
+  state zoomLevel = 2 persist
+  state startedAt = 0
+  state now = 0
+  state listed = 0
+  resource status = recorderStatus() as shape Status else empty()
+  resource sources = captureSources(listed) as shape SourceList else empty()
+  resource library = recordings() as shape RecordingList else empty()
+  mutation started as shape Reply then afterStart
+  mutation stopped as shape Stopped refreshes library then afterStop
+  mutation exported as shape Exported
+  mutation deleted as shape Reply refreshes library
+  mutation revealed as shape Done
+  mutation nudged as shape Done refreshes library
+  derive current = first(library.items.filter(r => r.id == selected))
+  derive isDevice = match current { case some(r) => r.kind == "simulator" or r.kind == "emulator", case none => false }
+  derive look = `{"background":"${background}","aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow},"zoom":${zoom},"zoomLevel":${zoomLevel}}`
+  derive startError = match started { case some(r) => r.error, case none => "" }
+  derive stopError = match stopped { case some(r) => r.error, case none => "" }
+  derive exportLine = match exported { case some(r) => (r.ok ? "Exported." : r.error), case none => "" }
+  derive exportPath = match exported { case some(r) => r.path, case none => "" }
+  task tick when status.recording
+    every(500, step)
+
+  action step
+    now = performanceNow()
+  action refresh
+    listed = listed + 1
+  action record(source: string)
+    send started = startRecording(source)
+  action afterStart
+    startedAt = performanceNow()
+    now = performanceNow()
+  action stop
+    send stopped = stopRecording()
+  action afterStop
+    match stopped
+      case some(r)
+        if r.ok
+          selected = r.id
+      case none
+        selected = selected
+  action choose(id: string)
+    selected = id
+  action pickBackground(v: string)
+    background = v
+  action pickAspect(v: string)
+    aspect = v
+  action setPadding(v: number)
+    padding = round(v)
+  action setRadius(v: number)
+    radius = round(v)
+  action setShadow(v: bool)
+    shadow = v
+  action setZoom(v: bool)
+    zoom = v
+  action pickZoom(v: number)
+    zoomLevel = v
+  action exportIt
+    send exported = exportRecording(selected, look)
+  action reveal
+    send revealed = revealFile(exportPath)
+  action remove
+    send deleted = deleteRecording(selected)
+    selected = ""
+  action trim(edge: string, by: number)
+    send nudged = nudgeCrop(selected, edge, by)
+
+  view
+    main testId="root" navigationKey=`${top(nav).id}` width="100%" height="100%"
+      for e in stack(nav) key=e.id
+        column navigationKey=`${e.id}` navigationScroll="editor" position="absolute" inset=0 display="flex" flex-direction="column"
+          header display="flex" align-items="center"
+            text "Exact Studio" role="heading" aria-level=1 flex=1
+          row flex=1 min-height=0
+            // The sidebar: what to record, and what has been recorded.
+            scroll width="19rem" min-height=0 padding=16 background-color="-exact-secondary-background"
+              column gap=20
+                if status.recording
+                  column gap=10 padding=14 border-radius=12 background-color="-exact-background" testId="recording"
+                    row gap=8 align-items="center"
+                      image "symbol:sf/record.circle.fill" color="-exact-system-red" aria-hidden=true
+                      text "Recording" font="-exact-headline"
+                      text mmss(max(0, (now - startedAt) / 1000)) font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="elapsed"
+                    text status.name font="-exact-footnote" color="-exact-secondary-label" line-clamp=2
+                    button press=stop buttonStyle="filled" disabled=pending(stopped) testId="stop"
+                      text "Stop Recording"
+                else
+                  column gap=8
+                    row align-items="center"
+                      text "Record" role="heading" aria-level=2 font="-exact-headline" flex=1
+                      button press=refresh aria-label="Refresh sources" testId="refresh"
+                        image "symbol:refresh"
+                    button press=record("area") buttonStyle="filled" disabled=pending(started) testId="record-area"
+                      text "Record an Area…"
+                    if not sources.allowed and not pending(sources)
+                      text "Allow Exact Studio under System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-secondary-label" testId="permission"
+                    if startError != "" and not pending(started)
+                      text startError font="-exact-footnote" color="-exact-system-red" testId="start-error"
+                    for s in sources.items key=s.id
+                      button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` justify-content="flex-start"
+                        row gap=8 align-items="center" min-width=0
+                          image kindSymbol(s.kind) aria-hidden=true
+                          column min-width=0 align-items="flex-start"
+                            text s.name line-clamp=1
+                            if s.app != ""
+                              text (s.kind == "simulator" or s.kind == "emulator" ? `${s.app} · bezel crop` : s.app) font="-exact-caption1" color="-exact-secondary-label" line-clamp=1
+                column gap=6
+                  text "Recordings" role="heading" aria-level=2 font="-exact-headline"
+                  if stopError != "" and not pending(stopped)
+                    text stopError font="-exact-footnote" color="-exact-system-red" testId="stop-error"
+                  if library.items.length == 0
+                    text "Nothing recorded yet." color="-exact-secondary-label" testId="no-recordings"
+                  for r in library.items key=r.id
+                    button press=choose(r.id) aria-pressed=(r.id == selected) testId=`recording-${r.id}` justify-content="flex-start"
+                      row gap=8 align-items="center" min-width=0
+                        image kindSymbol(r.kind) aria-hidden=true
+                        column min-width=0 align-items="flex-start"
+                          text r.name line-clamp=1 font-weight=(r.id == selected ? 600 : 400)
+                          text `${kindLabel(r.kind)} · ${mmss(r.duration)}` font="-exact-caption1" color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+            // The editor: the framed preview over its settings.
+            scroll id="editor" flex=1 min-width=0 min-height=0 padding=20
+              match current
+                case none
+                  column flex=1 align-items="center" justify-content="center" gap=8 padding=40 testId="empty"
+                    image "symbol:sf/rectangle.dashed.badge.record" font="-exact-large-title" color="-exact-secondary-label" aria-hidden=true
+                    text "Record something to start" font="-exact-title3"
+                    text "Pick an area, a window, or a Simulator from the sidebar. A Simulator or emulator is cropped to its bezel." color="-exact-secondary-label" text-align="center" max-width="26rem"
+                case some(rec)
+                  column gap=16
+                    studio-preview clip=rec.id look=look aria-label="Preview" height=440 testId="preview"
+                    row flex-wrap="wrap" gap=24 align-items="flex-start"
+                      column gap=12 flex="1 1 260px" min-width=0
+                        row gap=8 align-items="center"
+                          text "Background" flex=1
+                          select value=background change=pickBackground aria-label="Background" testId="background"
+                            option "Ocean" value="ocean"
+                            option "Sunset" value="sunset"
+                            option "Mint" value="mint"
+                            option "Midnight" value="midnight"
+                            option "Graphite" value="graphite"
+                            option "Paper" value="paper"
+                        row gap=8 align-items="center"
+                          text "Shape" flex=1
+                          row role="radiogroup" aria-label="Shape"
+                            for a in ["16:9", "9:16", "1:1", "4:3", "auto"] key=a
+                              button role="radio" aria-checked=(aspect == a) press=pickAspect(a) testId=`aspect-${a}`
+                                text (a == "auto" ? "Fit" : a)
+                        row gap=8 align-items="center"
+                          text "Padding" width="6rem"
+                          input type="range" min=0 max=30 step=1 value=padding input=setPadding aria-label="Padding" flex=1 min-width=0 testId="padding"
+                        if not isDevice
+                          row gap=8 align-items="center"
+                            text "Corners" width="6rem"
+                            input type="range" min=0 max=48 step=1 value=radius input=setRadius aria-label="Corner radius" flex=1 min-width=0 testId="radius"
+                        row gap=8 align-items="center"
+                          text "Shadow" flex=1
+                          input type="checkbox" switch checked=shadow change=setShadow aria-label="Shadow" testId="shadow"
+                      column gap=12 flex="1 1 260px" min-width=0
+                        row gap=8 align-items="center"
+                          text "Zoom into clicks" flex=1
+                          input type="checkbox" switch checked=zoom change=setZoom aria-label="Zoom into clicks" testId="zoom"
+                        if zoom
+                          row gap=8 align-items="center"
+                            text "Zoom" flex=1
+                            row role="radiogroup" aria-label="Zoom level"
+                              for z in [1.5, 2, 2.5, 3] key=z
+                                button role="radio" aria-checked=(zoomLevel == z) press=pickZoom(z) testId=`zoom-${z}`
+                                  text `${z}×`
+                        if isDevice
+                          column gap=6
+                            text "Bezel crop" font="-exact-subheadline" color="-exact-secondary-label"
+                            row gap=6 flex-wrap="wrap"
+                              button press=trim("top", 0.005) buttonStyle="bordered" testId="trim-top"
+                                text "Trim top"
+                              button press=trim("bottom", 0.005) buttonStyle="bordered" testId="trim-bottom"
+                                text "Trim bottom"
+                              button press=trim("left", 0.005) buttonStyle="bordered" testId="trim-left"
+                                text "Trim left"
+                              button press=trim("right", 0.005) buttonStyle="bordered" testId="trim-right"
+                                text "Trim right"
+                              button press=trim("reset", 0) buttonStyle="bordered" testId="trim-reset"
+                                text "Whole window"
+                    row gap=10 align-items="center" flex-wrap="wrap"
+                      button press=exportIt buttonStyle="filled" disabled=pending(exported) testId="export"
+                        text (pending(exported) ? "Exporting…" : "Export MP4")
+                      if exportPath != ""
+                        button press=reveal buttonStyle="bordered" testId="reveal"
+                          text "Show in Finder"
+                      text exportLine flex=1 color="-exact-secondary-label" testId="export-line"
+                      button press=remove buttonStyle="bordered" testId="delete"
+                        text "Delete"

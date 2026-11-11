@@ -1,0 +1,4 @@
+test "the editor is empty until something is recorded"
+  expect tree has "root"
+  expect tree has "empty"
+  expect text "no-recordings" == "Nothing recorded yet."
