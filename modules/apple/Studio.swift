@@ -39,9 +39,23 @@ final class Studio: ExactModule {
     private var picker: AreaPicker?
     private var statusItem: NSStatusItem?
     private var editors: [String: Editor] = [:]
+    private var keys: Any?
+    /// The recording the preview shows: Space plays and pauses it.
+    var active = ""
+
+    override func destroy() {
+        if let keys { NSEvent.removeMonitor(keys) }
+        keys = nil
+    }
 
     required init(context: ExactModuleContext) {
         super.init(context: context)
+        keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self, e.keyCode == 49, e.modifierFlags.intersection([.command, .option, .control]).isEmpty,
+                  !(NSApp.keyWindow?.firstResponder is NSText), let editor = self.editors[self.active] else { return e }
+            editor.togglePlay()
+            return nil
+        }
         if context.agent {
             Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true)
             print("exact-studio library: \(Library.root.path)")
@@ -320,6 +334,7 @@ final class Preview: ExactNativeInstance {
             clip = next
             host.attach(editor)
         }
+        studio.active = next
         editor?.setLook(Look.parse(props["look"] ?? "{}"))
     }
 

@@ -144,44 +144,36 @@ final class TimelineView: NSView {
         let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor(white: 1, alpha: 0.7)]
         drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7))
 
-        // The clip: a filmstrip.
-        let clipRect = CGRect(x: trackRect.minX, y: clipTop, width: trackRect.width, height: clipHeight)
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(roundedRect: clipRect, xRadius: 8, yRadius: 8).addClip()
-        NSColor(white: 1, alpha: 0.08).setFill()
-        clipRect.fill()
-        if !thumbs.isEmpty, let ctx = NSGraphicsContext.current?.cgContext {
-            let slot = clipRect.width / CGFloat(thumbs.count)
-            for (i, img) in thumbs.enumerated() {
-                let cell = CGRect(x: clipRect.minX + CGFloat(i) * slot, y: clipRect.minY, width: slot, height: clipRect.height)
-                let k = max(cell.width / CGFloat(img.width), cell.height / CGFloat(img.height))
-                let w = CGFloat(img.width) * k, h = CGFloat(img.height) * k
-                ctx.saveGState()
-                ctx.clip(to: cell)
-                // The view is flipped: draw the image upright.
-                ctx.translateBy(x: cell.midX, y: cell.midY)
-                ctx.scaleBy(x: 1, y: -1)
-                ctx.draw(img, in: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
-                ctx.restoreGState()
-            }
-            NSColor(white: 0, alpha: 0.25).setFill()
-            clipRect.fill()
-        }
-        NSGraphicsContext.restoreGraphicsState()
-
-        // The clip's parts: a gap at each split; a removed part hatched and dimmed.
+        // The clip: each part its own rounded block of filmstrip, a clear gap between parts,
+        // a scissors pin over each split; a removed part dark and hatched.
+        let gap: CGFloat = 4
+        let amber = NSColor(srgbRed: 0.93, green: 0.63, blue: 0.22, alpha: 1)
         for piece in editor.pieces {
-            let r = CGRect(x: x(piece.start) + (piece.start > 0 ? 2 : 0), y: clipTop,
-                           width: max(2, x(piece.end) - x(piece.start) - (piece.start > 0 ? 2 : 0) - (piece.end < d ? 2 : 0)), height: clipHeight)
-            if piece.start > 0 {
-                // The gap itself, cut through the filmstrip.
-                NSColor(calibratedWhite: 0.085, alpha: 1).setFill()
-                CGRect(x: x(piece.start) - 2, y: clipTop - 1, width: 4, height: clipHeight + 2).fill()
+            let r = CGRect(x: x(piece.start) + (piece.start > 0 ? gap : 0), y: clipTop,
+                           width: max(3, x(piece.end) - x(piece.start) - (piece.start > 0 ? gap : 0) - (piece.end < d ? gap : 0)), height: clipHeight)
+            let shape = NSBezierPath(roundedRect: r, xRadius: 9, yRadius: 9)
+            NSGraphicsContext.saveGraphicsState()
+            shape.addClip()
+            NSColor(white: 1, alpha: 0.08).setFill()
+            r.fill()
+            if !thumbs.isEmpty, let ctx = NSGraphicsContext.current?.cgContext {
+                // The filmstrip runs across the whole clip; each block shows its own stretch of it.
+                let slot = trackRect.width / CGFloat(thumbs.count)
+                for (i, img) in thumbs.enumerated() {
+                    let cell = CGRect(x: trackRect.minX + CGFloat(i) * slot, y: clipTop, width: slot, height: clipHeight)
+                    guard cell.intersects(r) else { continue }
+                    let k = max(cell.width / CGFloat(img.width), cell.height / CGFloat(img.height))
+                    let w = CGFloat(img.width) * k, h = CGFloat(img.height) * k
+                    ctx.saveGState()
+                    ctx.clip(to: cell)
+                    ctx.translateBy(x: cell.midX, y: cell.midY)
+                    ctx.scaleBy(x: 1, y: -1)
+                    ctx.draw(img, in: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
+                    ctx.restoreGState()
+                }
             }
             if piece.removed {
-                NSGraphicsContext.saveGraphicsState()
-                NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).addClip()
-                NSColor(calibratedWhite: 0.06, alpha: 0.82).setFill()
+                NSColor(calibratedWhite: 0.06, alpha: 0.84).setFill()
                 r.fill()
                 NSColor.systemRed.withAlphaComponent(0.35).setStroke()
                 var hx = r.minX - r.height
@@ -192,10 +184,37 @@ final class TimelineView: NSView {
                     line.stroke()
                     hx += 9
                 }
-                NSGraphicsContext.restoreGraphicsState()
-                title("Removed", in: r)
+            } else {
+                // A warm wash, so the kept parts read as clip blocks.
+                amber.withAlphaComponent(0.22).setFill()
+                r.fill()
             }
-            stroke(r, selected: editor.selected == piece.id)
+            NSGraphicsContext.restoreGraphicsState()
+            (piece.removed ? NSColor(white: 1, alpha: 0.12) : amber.withAlphaComponent(0.9)).setStroke()
+            shape.lineWidth = 1.5
+            shape.stroke()
+            if piece.removed { title("Removed", in: r) }
+            if editor.selected == piece.id {
+                NSColor.white.setStroke()
+                let sel = NSBezierPath(roundedRect: r.insetBy(dx: -1.5, dy: -1.5), xRadius: 10, yRadius: 10)
+                sel.lineWidth = 2.5
+                sel.stroke()
+            }
+        }
+        // The scissors pins.
+        for split in editor.edits.splits where split > 0.001 && split < d - 0.001 {
+            let cx = x(split), pin = CGRect(x: cx - 9, y: clipTop - 22, width: 18, height: 18)
+            let path = NSBezierPath(ovalIn: pin)
+            let tip = NSBezierPath()
+            tip.move(to: CGPoint(x: cx - 5, y: pin.maxY - 3)); tip.line(to: CGPoint(x: cx, y: pin.maxY + 4)); tip.line(to: CGPoint(x: cx + 5, y: pin.maxY - 3)); tip.close()
+            amber.setFill()
+            path.fill(); tip.fill()
+            if let icon = NSImage(systemSymbolName: "scissors", accessibilityDescription: "Cut")?.withSymbolConfiguration(.init(pointSize: 9, weight: .bold)) {
+                let tinted = icon.copy() as! NSImage
+                tinted.lockFocus(); NSColor(white: 0.1, alpha: 1).set(); CGRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop); tinted.unlockFocus()
+                tinted.draw(in: CGRect(x: cx - tinted.size.width / 2, y: pin.midY - tinted.size.height / 2, width: tinted.size.width, height: tinted.size.height),
+                            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            }
         }
 
         // Transitions across removed parts: a badge on the gap they bridge.
@@ -225,8 +244,9 @@ final class TimelineView: NSView {
         for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) {
             let selected = editor.selected == "m:" + m.id
             let bar = CGRect(x: x(m.t - m.duration), y: my + 7, width: max(2, x(m.t) - x(m.t - m.duration)), height: mh - 14)
-            NSColor.systemTeal.withAlphaComponent(selected ? 0.75 : 0.45).setFill()
+            NSColor.systemTeal.withAlphaComponent(selected ? 0.85 : 0.45).setFill()
             NSBezierPath(roundedRect: bar, xRadius: 6, yRadius: 6).fill()
+            if selected { stroke(bar.insetBy(dx: -2, dy: -3), selected: true) }
             let name = (["smooth": "Smooth", "linear": "Linear", "spring": "Spring", "zoom": "Zoom through", "swipe": "Swipe",
                          "fade": "Fade", "spin": "Spin", "pop": "Pop"][m.style] ?? m.style) + (m.angles != nil ? " · 3D" : "") as NSString
             let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
@@ -355,11 +375,22 @@ final class TimelineView: NSView {
 
     private func hit(_ p: CGPoint) -> Segment? {
         guard let editor else { return nil }
-        let near = { (s: Segment) in p.x >= self.x(s.start) - 3 && p.x <= self.x(s.end) + 3 }
-        guard p.y >= laneY(0) else { return nil }
-        let l = lane(at: p.y)
-        guard p.y <= laneY(l) + Self.laneHeight else { return nil }
-        return editor.edits.segments.last { $0.lane == l && near($0) }
+        let near = { (s: Segment) in p.x >= self.x(s.start) - 4 && p.x <= self.x(s.end) + 4 }
+        // The lane under the pointer, counting the gaps between lanes as half each neighbour's.
+        guard p.y >= laneY(0) - Self.laneGap / 2 else { return nil }
+        let l = min(max(0, Int(((p.y - laneY(0) + Self.laneGap / 2) / (Self.laneHeight + Self.laneGap)).rounded(.down))), lanesShown - 1)
+        let onLane = editor.edits.segments.filter { $0.lane == l && near($0) }
+        // The selected one first, then the shortest (a short segment over a long one stays reachable).
+        return onLane.first { $0.id == editor.selected } ?? onLane.min { ($0.end - $0.start) < ($1.end - $1.start) }
+    }
+
+    /// The move under the pointer on the motion track: its diamond, else its travel bar.
+    private func moveHit(_ p: CGPoint) -> Move? {
+        guard let editor else { return nil }
+        if let m = editor.edits.moves.first(where: { diamond($0.t).insetBy(dx: -5, dy: -6).contains(p) }) { return m }
+        let at = t(p.x)
+        let slop = Double(6 / max(trackRect.width, 1)) * editor.duration
+        return editor.edits.moves.filter { at >= $0.t - $0.duration - slop && at <= $0.t + slop }.min { abs($0.t - at) < abs($1.t - at) }
     }
 
     override func mouseDown(with e: NSEvent) {
@@ -368,8 +399,8 @@ final class TimelineView: NSView {
         let p = convert(e.locationInWindow, from: nil)
         moved = false
         if addLaneRect.contains(p) { editor.addLane(); return }
-        if p.y >= Self.motionTop, p.y <= Self.motionTop + Self.motionHeight {
-            if let m = editor.edits.moves.first(where: { diamond($0.t).insetBy(dx: -4, dy: -4).contains(p) }) {
+        if p.y >= Self.motionTop - Self.laneGap / 2, p.y <= Self.motionTop + Self.motionHeight + Self.laneGap / 2 {
+            if let m = moveHit(p) {
                 editor.select("m:" + m.id)
                 editor.seek(source: m.t)
                 drag = .retime(m.id)
