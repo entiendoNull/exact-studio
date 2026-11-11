@@ -341,6 +341,9 @@ final class PlayerHost: NSView {
         player.videoGravity = .resizeAspect
         player.backgroundColor = NSColor.clear.cgColor
         layer?.addSublayer(player)
+        still.contentsGravity = .resizeAspect
+        still.isHidden = true
+        layer?.addSublayer(still)
         for l in [outline, guides] {
             l.fillColor = nil
             l.lineWidth = 1.5
@@ -352,10 +355,27 @@ final class PlayerHost: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    /// The last frame, held over the player while a rebuild replaces the playback.
+    private let still = CALayer()
+
     func attach(_ editor: Editor?) {
         self.editor?.unlisten(self)
         self.editor = editor
         player.player = editor?.player
+        editor?.freeze = { [weak self] image in
+            guard let self else { return }
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            self.still.contents = image
+            self.still.frame = self.player.videoRect.width > 0 ? self.player.videoRect : self.bounds
+            self.still.isHidden = false
+            CATransaction.commit()
+        }
+        editor?.thaw = { [weak self] in
+            CATransaction.begin(); CATransaction.setAnimationDuration(0.12)
+            self?.still.isHidden = true
+            self?.still.contents = nil
+            CATransaction.commit()
+        }
         editor?.listen(self) { [weak self] in self?.drawOverlay() }
         drawOverlay()
     }

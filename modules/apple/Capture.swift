@@ -5,6 +5,7 @@
 #if os(macOS)
 import AppKit
 import AVFoundation
+import ImageIO
 import ScreenCaptureKit
 
 enum SourceKind: String { case display, window, simulator, emulator }
@@ -260,6 +261,7 @@ private final class PickerView: NSView {
 
 /// One recording in progress.
 final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
+    private static let stills = CIContext()
     let id: String
     let folder: URL
     let kind: SourceKind
@@ -276,7 +278,10 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private var lastTime: Double = 0
     private var crop: UnitRect = .full
     private var cornerRadius: Double?
+    private var mask: String?
     private var detected = false
+    private var frames = 0
+    private let finding = DispatchGroup()
     private var cursor: [(Double, CGPoint)] = []
     private var clicks: [(Double, CGPoint)] = []
     private var releases: [(Double, CGPoint)] = []
@@ -341,14 +346,23 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
             firstTime = pts.seconds
             writer.startSession(atSourceTime: pts)
         }
-        if !detected && (kind == .simulator || kind == .emulator) {
+        frames += 1
+        // A few frames in, once the window has drawn: find the device's silhouette, off this queue.
+        if !detected && frames >= 10 && (kind == .simulator || kind == .emulator) {
             detected = true
-            // A transparent window around the device, else its dark bezel on an opaque one.
-            if let found = Bezel.detect(buffer) {
-                crop = found
-            } else if let outline = Bezel.outline(buffer) {
-                crop = outline.rect
-                cornerRadius = outline.radius
+            let image = CIImage(cvPixelBuffer: buffer)
+            if let cg = Recorder.stills.createCGImage(image, from: image.extent) {
+                finding.enter()
+                DispatchQueue.global(qos: .userInitiated).async { [self] in
+                    defer { finding.leave() }
+                    if let found = Bezel.silhouette(cg), let name = Library.saveMask(found.mask, in: folder) {
+                        queue.async { self.crop = found.rect; self.mask = name }
+                    } else if let outline = Bezel.outline(cg) {
+                        queue.async { self.crop = outline.rect; self.cornerRadius = outline.radius }
+                    } else if let alpha = Bezel.detect(buffer) {
+                        queue.async { self.crop = alpha }
+                    }
+                }
             }
         }
         lastTime = pts.seconds
@@ -363,6 +377,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
             monitor = nil
         }
         try? await stream.stopCapture()
+        // Let the silhouette search land first.
+        await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in finding.notify(queue: queue) { k.resume() } }
         return try await withCheckedThrowingContinuation { (k: CheckedContinuation<RecordingMeta, Error>) in
             queue.async {
                 guard let first = self.firstTime else {
@@ -378,7 +394,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
                 let meta = RecordingMeta(id: self.id, name: self.name, kind: self.kind.rawValue,
                                          created: Date().timeIntervalSince1970 * 1000, duration: self.lastTime - first,
                                          width: self.pixelSize.width, height: self.pixelSize.height, crop: self.crop, clicks: clicks,
-                                         releases: releases, cornerRadius: self.cornerRadius, device: nil, cursorBaked: false)
+                                         releases: releases, cornerRadius: self.cornerRadius, device: nil, mask: self.mask, maskRect: self.mask == nil ? nil : self.crop, cursorBaked: false)
                 self.writer.finishWriting {
                     do {
                         try Library.write(meta, cursor: cursor, in: self.folder)
@@ -487,6 +503,14 @@ enum Library {
     static func all() -> [RecordingMeta] {
         let ids = (try? FileManager.default.contentsOfDirectory(atPath: recordings.path)) ?? []
         return ids.compactMap(meta).sorted { $0.created > $1.created }
+    }
+
+    /// A silhouette written beside the recording, under a new name each time so no cache holds the old one.
+    static func saveMask(_ mask: CGImage, in folder: URL) -> String? {
+        let name = "mask-\(Int(Date().timeIntervalSince1970 * 1000)).png"
+        guard let dest = CGImageDestinationCreateWithURL(folder.appendingPathComponent(name) as CFURL, "public.png" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, mask, nil)
+        return CGImageDestinationFinalize(dest) ? name : nil
     }
 
     static func save(_ meta: RecordingMeta) throws {

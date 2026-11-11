@@ -227,11 +227,28 @@ struct RecordingMeta: Codable {
     var cornerRadius: Double?
     /// Set when a device was found in an area or window recording.
     var device: Bool?
+    /// The device's silhouette beside the capture (a grey image over the crop): the shape the frame is cut to.
+    var mask: String?
+    /// Where the silhouette lies in the frame (unit), which a later trim of `crop` leaves alone.
+    var maskRect: UnitRect?
     /// False when the system cursor was left out of the picture (so one is drawn).
     var cursorBaked: Bool?
 
     var isDevice: Bool { kind == "simulator" || kind == "emulator" || device == true }
     var drawsCursor: Bool { cursorBaked == false }
+}
+
+/// Silhouette masks, loaded once per file.
+enum Masks {
+    private static var cache: [String: CIImage] = [:]
+    private static let lock = NSLock()
+    static func image(_ url: URL) -> CIImage? {
+        lock.lock(); defer { lock.unlock() }
+        if let hit = cache[url.path] { return hit }
+        guard let img = CIImage(contentsOf: url) else { return nil }
+        cache[url.path] = img
+        return img
+    }
 }
 
 // MARK: - Easing
@@ -427,8 +444,12 @@ struct Framing {
 
     var crop: UnitRect { meta.crop }
 
-    init(meta: RecordingMeta, look: Look, edits: Edits, cursor: [Point]) {
+    /// The device's silhouette, when the recording has one.
+    private let silhouette: CIImage?
+
+    init(meta: RecordingMeta, look: Look, edits: Edits, cursor: [Point], folder: URL? = nil) {
         self.meta = meta
+        silhouette = meta.mask.flatMap { name in folder.flatMap { Masks.image($0.appendingPathComponent(name)) } }
         self.look = look
         self.edits = edits
         let crop = meta.crop
@@ -605,6 +626,26 @@ struct Framing {
         }
 
         // The subject's shape.
+        if meta.isDevice, let shape = silhouette {
+            // The silhouette lies where it was found; a trim of the crop only cuts into it.
+            let r = meta.maskRect ?? crop
+            let at = CGRect(x: e.minX + r.x * e.width, y: e.minY + (1 - r.y - r.h) * e.height, width: r.w * e.width, height: r.h * e.height)
+            let m = shape.transformed(by: CGAffineTransform(scaleX: at.width / shape.extent.width, y: at.height / shape.extent.height)
+                .concatenating(CGAffineTransform(translationX: at.minX, y: at.minY)))
+                .transformed(by: toSubject)
+            let cut = CIFilter.blendWithMask()
+            cut.inputImage = subjectImage
+            cut.backgroundImage = CIImage.empty()
+            cut.maskImage = m
+            subjectImage = cut.outputImage!.cropped(to: subject)
+        } else {
+            subjectImage = shaped(subjectImage, source: source)
+        }
+        return finish(subjectImage, at: t, opacity: opacity, texts: texts)
+    }
+
+    /// The subject cut to a rounded rectangle, or (a device without a silhouette) to its own alpha.
+    private func shaped(_ subjectImage: CIImage, source: CIImage) -> CIImage {
         let mask: CIImage
         if meta.isDevice, let r = meta.cornerRadius {
             let g = CIFilter.roundedRectangleGenerator()
@@ -627,8 +668,13 @@ struct Framing {
         cut.inputImage = subjectImage
         cut.backgroundImage = CIImage.empty()
         cut.maskImage = mask
-        subjectImage = cut.outputImage!.cropped(to: subject)
+        return cut.outputImage!.cropped(to: subject)
+    }
 
+    /// The cut subject placed, zoomed and shadowed over the background, with the texts.
+    private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool) -> CIImage {
+        let canvasRect = CGRect(origin: .zero, size: canvas)
+        let minSide = min(canvas.width, canvas.height)
         // The subject and its shadow are one layer; placement and zoom move it over a still background.
         var layer = subjectImage
         if look.shadow {

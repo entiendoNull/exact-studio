@@ -620,13 +620,12 @@ component ExactStudio
                     else
                       text "This recording has the system cursor in its picture. New recordings leave it out, so it can be hidden, resized and animated here." font="-exact-footnote" color="-exact-tertiary-label"
 
-                  if not summary.device
-                    column gap=8
-                      text "DEVICE" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                      button press=editDo("find-device") buttonStyle="bordered" testId="find-device"
-                        image "symbol:sf/iphone"
-                        text "Find a Device in the Picture"
-                      text "Crops to a Simulator’s bezel when the recording shows one with its window around it." font="-exact-caption1" color="-exact-tertiary-label"
+                  column gap=8
+                    text "DEVICE" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                    button press=editDo("find-device") buttonStyle="bordered" testId="find-device"
+                      image "symbol:sf/iphone"
+                      text (summary.device ? "Fit to the Phone Again" : "Find a Device in the Picture")
+                    text "Cuts the video to the phone’s own outline, side buttons included, leaving its window out." font="-exact-caption1" color="-exact-tertiary-label"
                   if isDevice
                     column gap=8
                       text "BEZEL CROP" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6

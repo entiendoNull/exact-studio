@@ -50,9 +50,11 @@ final class Editor {
             edits = Edits(segments: Edits.autoZooms(meta.clicks, duration: meta.duration))
         }
         map = TimeMap(duration: meta.duration, edits: edits)
-        state = RenderState(Framing(meta: meta, look: Look(), edits: edits, cursor: cursor))
+        state = RenderState(Framing(meta: meta, look: Look(), edits: edits, cursor: cursor, folder: Library.recordings.appendingPathComponent(id)))
         player.actionAtItemEnd = .pause
         rebuild(keepTime: false)
+        // A device recording without its silhouette yet (made before there was one): find it now.
+        if meta.isDevice && meta.mask == nil && meta.crop == .full { findDevice(quietly: true) }
         playing = player.observe(\.timeControlStatus) { [weak self] _, _ in
             DispatchQueue.main.async { self?.notify() }
         }
@@ -83,16 +85,37 @@ final class Editor {
 
     func setLook(_ look: Look) {
         guard look != self.look else { return }
-        let canvasChanged = look.aspect != self.look.aspect || look.padding != self.look.padding
         self.look = look
-        canvasChanged ? rebuild(keepTime: true) : redraw()
+        refresh()
     }
 
     private func setMeta(_ m: RecordingMeta) {
         meta = m
         try? Library.save(m)
-        rebuild(keepTime: true)
+        refresh()
         notify()
+    }
+
+    /// Redraw in place when the output keeps its size (padding, colours, a trim);
+    /// rebuild only when the canvas itself changes (the frame's shape).
+    private func refresh() {
+        let next = Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder)
+        next.canvas == state.current.canvas ? redraw() : rebuild(keepTime: true)
+    }
+
+    // MARK: Holding the picture through a rebuild
+
+    /// The preview's hooks: show a still while the playback is replaced, then let it go.
+    var freeze: (CGImage) -> Void = { _ in }
+    var thaw: () -> Void = {}
+    private var output: AVPlayerItemVideoOutput?
+    private static let stills = CIContext()
+
+    private func still() -> CGImage? {
+        guard let item = player.currentItem, let output,
+              let buffer = output.copyPixelBuffer(forItemTime: item.currentTime(), itemTimeForDisplay: nil) else { return nil }
+        let image = CIImage(cvPixelBuffer: buffer)
+        return Editor.stills.createCGImage(image, from: image.extent)
     }
 
     func setCrop(_ crop: UnitRect) {
@@ -105,20 +128,29 @@ final class Editor {
     private func rebuild(keepTime: Bool) {
         let at = keepTime ? playhead : 0
         let wasPlaying = isPlaying
-        state.update(Framing(meta: meta, look: look, edits: edits, cursor: cursor))
+        let held = keepTime ? still() : nil
+        if let held { freeze(held) }
+        state.update(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
         guard let (mix, composition, map) = try? Composition.make(asset: asset, meta: meta, edits: edits, state: state) else { return }
         self.map = map
         self.composition = composition
         let item = AVPlayerItem(asset: mix)
         item.videoComposition = composition
+        let out = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        item.add(out)
+        output = out
         player.replaceCurrentItem(with: item)
-        seek(source: at)
+        let target = CMTime(seconds: map.output(min(max(at, 0), duration)), preferredTimescale: 6000)
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            // The new frame takes a moment to reach the screen after the seek lands.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { if held != nil { self?.thaw() } }
+        }
         if wasPlaying { player.play() }
     }
 
     /// The framing swapped and the frame drawn again; the timing stays.
     private func redraw() {
-        state.update(Framing(meta: meta, look: look, edits: edits, cursor: cursor))
+        state.update(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
         // A fresh copy of the same composition makes the player ask for the frame again.
         if let c = composition?.mutableCopy() as? AVMutableVideoComposition {
             player.currentItem?.videoComposition = c
@@ -128,7 +160,7 @@ final class Editor {
 
     /// A separate composition for export, at this editor's edits and the look asked for.
     func exportable(look: Look) throws -> (AVAsset, AVMutableVideoComposition) {
-        let own = RenderState(Framing(meta: meta, look: look, edits: edits, cursor: cursor))
+        let own = RenderState(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
         let (mix, composition, _) = try Composition.make(asset: asset, meta: meta, edits: edits, state: own)
         return (mix, composition)
     }
@@ -442,7 +474,7 @@ final class Editor {
         pendingPlace = placing
         var shown = e
         shown.moves.append(Move(id: "live", t: playhead, to: placing, style: "linear", duration: 0.001))
-        state.update(Framing(meta: meta, look: look, edits: shown, cursor: cursor))
+        state.update(Framing(meta: meta, look: look, edits: shown, cursor: cursor, folder: folder))
         if let c = composition?.mutableCopy() as? AVMutableVideoComposition { player.currentItem?.videoComposition = c }
     }
 
@@ -587,24 +619,36 @@ final class Editor {
 
     /// Look for a device's bezel in the picture (an area or window recording of
     /// a Simulator): crop to it and cut to its rounded corners.
-    func findDevice() {
+    func findDevice(quietly: Bool = false) {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
         let at = CMTime(seconds: min(1, duration / 2), preferredTimescale: 600)
-        guard let image = try? generator.copyCGImage(at: at, actualTime: nil),
-              let outline = Bezel.outline(image) else { return refuse("No device found in the picture: it looks for a phone’s dark bezel.") }
+        guard let image = try? generator.copyCGImage(at: at, actualTime: nil) else { return quietly ? () : refuse("Couldn’t read a frame of the recording.") }
         var m = meta
-        m.crop = outline.rect
-        m.cornerRadius = outline.radius
+        if let found = Bezel.silhouette(image), let name = Library.saveMask(found.mask, in: folder) {
+            if let old = m.mask { try? FileManager.default.removeItem(at: folder.appendingPathComponent(old)) }
+            m.crop = found.rect
+            m.mask = name
+            m.maskRect = found.rect
+            m.cornerRadius = nil
+        } else if let outline = Bezel.outline(image) {
+            m.crop = outline.rect
+            m.cornerRadius = outline.radius
+        } else {
+            return quietly ? () : refuse("No device found in the picture: it looks for a phone on its window’s panel.")
+        }
         m.device = true
         setMeta(m)
     }
 
     func forgetDevice() {
         var m = meta
+        if let old = m.mask { try? FileManager.default.removeItem(at: folder.appendingPathComponent(old)) }
         m.crop = .full
         m.cornerRadius = nil
+        m.mask = nil
+        m.maskRect = nil
         m.device = nil
         setMeta(m)
     }
