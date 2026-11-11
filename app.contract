@@ -136,6 +136,14 @@ component ExactStudio
   state openCursor = false persist
   state openDevice = true persist
   state open3d = true persist
+  state leftOpen = true persist
+  state rightOpen = true persist
+  // Where the settings of the selection show: "dock", "float", "overlay" or "left".
+  state panelMode = "dock" persist
+  state panelX = 24 persist
+  // The timeline's height, set by dragging the handle under the preview; the preview takes the rest.
+  state timelineH = 330 persist
+  state panelY = 24 persist
   state startedAt = 0
   state now = 0
   state listed = 0
@@ -159,6 +167,8 @@ component ExactStudio
   derive devices = sources.items.filter(s => s.kind == "simulator" or s.kind == "emulator")
   derive displays = sources.items.filter(s => s.kind == "display")
   derive windows = sources.items.filter(s => s.kind == "window")
+  derive cardLeft = panelMode == "left" and sel.id != ""
+  derive leftShown = leftOpen or cardLeft
   derive gradients = ["ocean", "sunset", "mint", "midnight", "graphite", "paper", "peach", "lagoon", "berry", "aurora", "ember", "lavender", "citrus", "forest", "sky", "rose", "dusk", "steel", "candy", "deepsea", "sand", "neon", "glow", "noir"]
   derive background = lk.background
   derive aspect = lk.aspect
@@ -230,6 +240,32 @@ component ExactStudio
     send edited = editClip(selected, "set", "", 0, k)
   action editDo(what: string)
     send edited = editClip(selected, what, "", 0, "")
+  action toggleLeft
+    if panelMode == "left"
+      panelMode = "dock"
+      leftOpen = true
+    else
+      leftOpen = not leftOpen
+  action toggleRight
+    rightOpen = not rightOpen
+  action setPanel(m: string)
+    panelMode = m
+    if m == "left"
+      leftOpen = false
+    if m == "dock"
+      rightOpen = true
+  action resizeStage(dx: number, dy: number)
+    timelineH = min(max(timelineH - dy, 150), 720)
+  action resetStage
+    timelineH = 330
+  action dragPanel(dx: number, dy: number)
+    panelX = max(0, panelX + dx)
+    panelY = max(0, panelY + dy)
+  action dropPanel(vx: number, vy: number)
+    panelX = round(panelX)
+    panelY = round(panelY)
+  action closePanel
+    send edited = editClip(selected, "deselect", "", 0, "")
   action toggleSection(name: string)
     if name == "place"
       openPlace = not openPlace
@@ -300,84 +336,98 @@ component ExactStudio
         column navigationKey=`${e.id}` navigationScroll="sidebar" position="absolute" inset=0 display="flex" flex-direction="column"
           header display="flex" align-items="center"
             text "Exact Studio" role="heading" aria-level=1 flex=1
+            button press=toggleLeft aria-label=(leftOpen ? "Hide the sidebar" : "Show the sidebar") testId="toggle-left"
+              image "symbol:sf/sidebar.left"
+            button popovertarget="panel-menu" aria-label="Where settings show" testId="panel-menu-button"
+              image "symbol:sf/rectangle.on.rectangle"
+            column id="panel-menu" popover="auto" role="menu" aria-label="Show the selection's settings"
+              for m in ["dock", "float", "overlay", "left"] key=m
+                button press=setPanel(m) popovertarget="panel-menu" popovertargetaction="hide" role="menuitemradio" aria-checked=(panelMode == m) testId=`menu-panel-${m}`
+                  text (m == "dock" ? "Docked on the Right" : m == "float" ? "Floating" : m == "overlay" ? "Lightbox over the Video" : "On the Left")
+            button press=toggleRight aria-label=(rightOpen ? "Hide the inspector" : "Show the inspector") testId="toggle-right"
+              image "symbol:sf/sidebar.right"
           row flex=1 min-height=0
             // ── The sidebar: what to record, and what has been recorded.
-            scroll id="sidebar" width="21rem" min-height=0 background-color="-exact-secondary-background"
-              column gap=22 padding=16
-                if status.recording
-                  column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background" testId="recording"
-                    row gap=10 align-items="center"
-                      column width=12 height=12 border-radius=6 background-color="-exact-system-red"
-                      text "Recording" font="-exact-headline" flex=1
-                      text mmss(max(0, (now - startedAt) / 1000)) font="-exact-title2" font-variant-numeric="tabular-nums" testId="elapsed"
-                    text status.name font="-exact-footnote" color="-exact-secondary-label" line-clamp=2
-                    button press=stop buttonStyle="filled" disabled=pending(stopped) testId="stop"
-                      text "Stop Recording"
-                    text "Or press Stop in the menu bar." font="-exact-caption1" color="-exact-tertiary-label"
-                else
-                  column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background"
-                    row gap=12 align-items="center"
-                      column width=40 height=40 border-radius=20 background-color="-exact-system-red" align-items="center" justify-content="center"
-                        image "symbol:sf/record.circle" color="white" font="-exact-title3" aria-hidden=true
-                      column flex=1 min-width=0
-                        text "New Recording" font="-exact-headline"
-                        text "Pick what to capture" font="-exact-footnote" color="-exact-secondary-label"
-                    button press=record("area") buttonStyle="filled" disabled=pending(started) testId="record-area"
-                      image "symbol:sf/rectangle.dashed"
-                      text "Drag Out an Area"
-                    if not sources.allowed and not pending(sources)
-                      text "Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-system-orange" testId="permission"
-                    if startError != "" and not pending(started)
-                      text startError font="-exact-footnote" color="-exact-system-red" testId="start-error"
-                  if devices.length > 0
-                    column gap=6
-                      text "SIMULATORS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                      for s in devices key=s.id
-                        button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color="-exact-tertiary-background"
+            scroll id="sidebar" width=(leftShown ? "21rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
+              if cardLeft
+                column padding=16 width="21rem"
+                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
+              else
+                column gap=22 padding=16 width="21rem" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
+                  if status.recording
+                    column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background" testId="recording"
+                      row gap=10 align-items="center"
+                        column width=12 height=12 border-radius=6 background-color="-exact-system-red"
+                        text "Recording" font="-exact-headline" flex=1
+                        text mmss(max(0, (now - startedAt) / 1000)) font="-exact-title2" font-variant-numeric="tabular-nums" testId="elapsed"
+                      text status.name font="-exact-footnote" color="-exact-secondary-label" line-clamp=2
+                      button press=stop buttonStyle="filled" disabled=pending(stopped) testId="stop"
+                        text "Stop Recording"
+                      text "Or press Stop in the menu bar." font="-exact-caption1" color="-exact-tertiary-label"
+                  else
+                    column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background"
+                      row gap=12 align-items="center"
+                        column width=40 height=40 border-radius=20 background-color="-exact-system-red" align-items="center" justify-content="center"
+                          image "symbol:sf/record.circle" color="white" font="-exact-title3" aria-hidden=true
+                        column flex=1 min-width=0
+                          text "New Recording" font="-exact-headline"
+                          text "Pick what to capture" font="-exact-footnote" color="-exact-secondary-label"
+                      button press=record("area") buttonStyle="filled" disabled=pending(started) testId="record-area"
+                        image "symbol:sf/rectangle.dashed"
+                        text "Drag Out an Area"
+                      if not sources.allowed and not pending(sources)
+                        text "Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-system-orange" testId="permission"
+                      if startError != "" and not pending(started)
+                        text startError font="-exact-footnote" color="-exact-system-red" testId="start-error"
+                    if devices.length > 0
+                      column gap=6
+                        text "SIMULATORS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                        for s in devices key=s.id
+                          button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color="-exact-tertiary-background"
+                            row gap=10 align-items="center" min-width=0 flex=1
+                              column width=34 height=34 border-radius=9 background-color="-exact-system-blue" align-items="center" justify-content="center"
+                                image "symbol:sf/iphone" color="white" aria-hidden=true
+                              column min-width=0 flex=1 align-items="flex-start"
+                                text s.name line-clamp=1 font-weight=500 text-align="left" align-self="stretch"
+                                text `${s.app} · fits the bezel` font="-exact-caption1" color="-exact-system-teal" line-clamp=1
+                              image "symbol:sf/record.circle" color="-exact-system-red" aria-hidden=true
+                    column gap=4
+                      row align-items="center"
+                        text "DISPLAYS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1
+                        button press=refresh aria-label="Refresh sources" testId="refresh"
+                          image "symbol:refresh"
+                      for s in displays key=s.id
+                        button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
                           row gap=10 align-items="center" min-width=0 flex=1
-                            column width=34 height=34 border-radius=9 background-color="-exact-system-blue" align-items="center" justify-content="center"
-                              image "symbol:sf/iphone" color="white" aria-hidden=true
+                            image "symbol:sf/display" color="-exact-secondary-label" aria-hidden=true
+                            text s.name line-clamp=1 flex=1 text-align="left"
+                    column gap=4
+                      row align-items="center"
+                        text "WINDOWS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1
+                        if windows.length > 6
+                          button press=toggleWindows testId="all-windows"
+                            text (allWindows ? "Fewer" : `All ${windows.length}`) font="-exact-caption1"
+                      for s in (allWindows ? windows : windows.slice(0, 6)) key=s.id
+                        button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
+                          row gap=10 align-items="center" min-width=0 flex=1
+                            image "symbol:sf/macwindow" color="-exact-secondary-label" aria-hidden=true
                             column min-width=0 flex=1 align-items="flex-start"
-                              text s.name line-clamp=1 font-weight=500 text-align="left" align-self="stretch"
-                              text `${s.app} · fits the bezel` font="-exact-caption1" color="-exact-system-teal" line-clamp=1
-                            image "symbol:sf/record.circle" color="-exact-system-red" aria-hidden=true
-                  column gap=4
-                    row align-items="center"
-                      text "DISPLAYS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1
-                      button press=refresh aria-label="Refresh sources" testId="refresh"
-                        image "symbol:refresh"
-                    for s in displays key=s.id
-                      button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
+                              text s.name line-clamp=1 text-align="left" align-self="stretch"
+                              text s.app font="-exact-caption2" color="-exact-tertiary-label" line-clamp=1 text-align="left" align-self="stretch"
+                  column gap=6
+                    text "LIBRARY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                    if stopError != "" and not pending(stopped)
+                      text stopError font="-exact-footnote" color="-exact-system-red" testId="stop-error"
+                    if library.items.length == 0
+                      text "Nothing recorded yet." color="-exact-tertiary-label" testId="no-recordings"
+                    for r in library.items key=r.id
+                      button press=choose(r.id) aria-pressed=(r.id == selected) testId=`recording-${r.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color=(r.id == selected ? "-exact-tertiary-background" : "transparent")
                         row gap=10 align-items="center" min-width=0 flex=1
-                          image "symbol:sf/display" color="-exact-secondary-label" aria-hidden=true
-                          text s.name line-clamp=1 flex=1 text-align="left"
-                  column gap=4
-                    row align-items="center"
-                      text "WINDOWS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1
-                      if windows.length > 6
-                        button press=toggleWindows testId="all-windows"
-                          text (allWindows ? "Fewer" : `All ${windows.length}`) font="-exact-caption1"
-                    for s in (allWindows ? windows : windows.slice(0, 6)) key=s.id
-                      button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
-                        row gap=10 align-items="center" min-width=0 flex=1
-                          image "symbol:sf/macwindow" color="-exact-secondary-label" aria-hidden=true
+                          column width=34 height=34 border-radius=9 background-color=(r.id == selected ? "-exact-system-blue" : "-exact-tertiary-fill") align-items="center" justify-content="center"
+                            image kindSymbol(r.kind) color=(r.id == selected ? "white" : "-exact-secondary-label") aria-hidden=true
                           column min-width=0 flex=1 align-items="flex-start"
-                            text s.name line-clamp=1 text-align="left" align-self="stretch"
-                            text s.app font="-exact-caption2" color="-exact-tertiary-label" line-clamp=1 text-align="left" align-self="stretch"
-                column gap=6
-                  text "LIBRARY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                  if stopError != "" and not pending(stopped)
-                    text stopError font="-exact-footnote" color="-exact-system-red" testId="stop-error"
-                  if library.items.length == 0
-                    text "Nothing recorded yet." color="-exact-tertiary-label" testId="no-recordings"
-                  for r in library.items key=r.id
-                    button press=choose(r.id) aria-pressed=(r.id == selected) testId=`recording-${r.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color=(r.id == selected ? "-exact-tertiary-background" : "transparent")
-                      row gap=10 align-items="center" min-width=0 flex=1
-                        column width=34 height=34 border-radius=9 background-color=(r.id == selected ? "-exact-system-blue" : "-exact-tertiary-fill") align-items="center" justify-content="center"
-                          image kindSymbol(r.kind) color=(r.id == selected ? "white" : "-exact-secondary-label") aria-hidden=true
-                        column min-width=0 flex=1 align-items="flex-start"
-                          text r.name line-clamp=1 font-weight=(r.id == selected ? 600 : 400) text-align="left" align-self="stretch"
-                          text `${kindLabel(r.kind)} · ${mmss(r.duration)}` font="-exact-caption1" color="-exact-secondary-label" font-variant-numeric="tabular-nums" text-align="left" align-self="stretch"
+                            text r.name line-clamp=1 font-weight=(r.id == selected ? 600 : 400) text-align="left" align-self="stretch"
+                            text `${kindLabel(r.kind)} · ${mmss(r.duration)}` font="-exact-caption1" color="-exact-secondary-label" font-variant-numeric="tabular-nums" text-align="left" align-self="stretch"
 
             // ── The stage: the framed preview, the edit bar and the timeline.
             match current
@@ -388,8 +438,11 @@ component ExactStudio
                   text "Record something to start" font="-exact-title2" font-weight=600
                   text "Drag out an area, or pick a window or a device in the sidebar. A Simulator or an emulator is cropped to its bezel, nothing more." color="-exact-secondary-label" text-align="center" max-width="28rem"
               case some(rec)
-                column flex=1 min-width=0 min-height=0 gap=12 padding=16 background-color="-exact-background"
+                column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease"
                   studio-preview clip=rec.id look=look aria-label="Preview" flex=1 min-height=200 testId="preview"
+                  // The handle: drag it to give the preview or the timeline more room.
+                  button pan=resizeStage press=resetStage appearance="none" aria-label="Resize the preview; click to reset" cursor="row-resize" align-self="stretch" display="flex" align-items="center" justify-content="center" height=12 margin-top=-6 margin-bottom=-6 testId="stage-handle"
+                    column width=56 height=5 border-radius=3 background-color="-exact-tertiary-label"
                   row gap=8 align-items="center" flex-wrap="wrap"
                     button press=editDo("play") aria-label=(summary.playing ? "Pause" : "Play") buttonStyle="filled" testId="play"
                       image (summary.playing ? "symbol:pause-fill" : "symbol:play-fill")
@@ -501,12 +554,25 @@ component ExactStudio
                       image "symbol:sf/cursorarrow.click.2"
                       text "Zoom on Clicks"
                     text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex=1 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
-                  studio-timeline clip=rec.id aria-label="Timeline" testId="timeline"
+                  studio-timeline clip=rec.id aria-label="Timeline" height=timelineH testId="timeline"
+                  if sel.id != "" and panelMode == "overlay"
+                    button press=closePanel appearance="none" aria-label="Close the settings" position="absolute" inset=0 background-color="#00000073" testId="lightbox-backdrop"
+                    column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
+                      scroll width="24rem" max-height="85%" pointer-events="auto" border-radius=16 box-shadow="0px 18px 60px #00000080" background-color="-exact-secondary-background"
+                        column padding=12
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
+                  if sel.id != "" and panelMode == "float"
+                    column position="absolute" left=panelX top=panelY width="22rem" max-height="80%" border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
+                      row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
+                        column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
+                      scroll flex=1 min-height=0
+                        column padding=12 padding-top=4
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
-              scroll width="22rem" min-height=0 background-color="-exact-secondary-background"
-                column gap=20 padding=16
+              scroll width=(rightOpen ? "22rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="inspector"
+                column gap=20 padding=16 width="22rem" opacity=(rightOpen ? 1 : 0) transition="opacity 200ms ease"
                   column gap=8
                     button press=exportIt buttonStyle="filled" disabled=pending(exported) testId="export"
                       image "symbol:sf/square.and.arrow.up"
@@ -522,211 +588,8 @@ component ExactStudio
                     row gap=8 padding=12 border-radius=12 background-color="-exact-tertiary-background" align-items="flex-start" testId="problem"
                       image "symbol:alert" color="-exact-system-orange" aria-hidden=true
                       text sel.problem font="-exact-footnote" flex=1
-                  if sel.id != ""
-                    column gap=12 padding=14 border-radius=14 background-color="-exact-tertiary-background" testId="segment"
-                      row align-items="center" gap=8
-                        text kindTitle(sel.kind, sel.level, sel.rate) font="-exact-headline" flex=1 testId="segment-title"
-                        if sel.kind == "clip" and sel.removed
-                          text "Removed" font="-exact-footnote" color="-exact-system-red"
-                      row gap=8
-                        column gap=4 flex=1 min-width=0
-                          text "Start" font="-exact-caption1" color="-exact-secondary-label"
-                          input value=sel.startText change=setStart disabled=(sel.kind == "clip" and sel.first) aria-label="Start" font-variant-numeric="tabular-nums" testId="start"
-                        column gap=4 flex=1 min-width=0
-                          text "End" font="-exact-caption1" color="-exact-secondary-label"
-                          input value=sel.endText change=setEnd disabled=(sel.kind == "clip" and sel.last) aria-label="End" font-variant-numeric="tabular-nums" testId="end"
-                      text "Type a time like 1.25 or 0:01.25 and press Return." font="-exact-caption1" color="-exact-tertiary-label"
-                      if sel.kind == "zoom"
-                        text "Zoom in" font="-exact-caption1" color="-exact-secondary-label"
-                        row role="radiogroup" aria-label="Zoom in"
-                          for z in [1.5, 2, 2.5, 3] key=z
-                            button role="radio" aria-checked=(sel.level == z) press=setNumber(z) testId=`level-${z}` flex=1
-                              text `${z}×`
-                        text "Zoom out" font="-exact-caption1" color="-exact-secondary-label"
-                        row role="radiogroup" aria-label="Zoom out"
-                          for z in [0.5, 0.7, 0.85] key=z
-                            button role="radio" aria-checked=(sel.level == z) press=setNumber(z) testId=`level-${z}` flex=1
-                              text `${z}×`
-                      if sel.kind == "speed"
-                        text "Slow down" font="-exact-caption1" color="-exact-secondary-label"
-                        row role="radiogroup" aria-label="Slow down"
-                          for r in [0.25, 0.5, 0.75] key=r
-                            button role="radio" aria-checked=(sel.rate == r) press=setNumber(r) testId=`rate-${r}` flex=1
-                              text `${r}×`
-                        text "Speed up" font="-exact-caption1" color="-exact-secondary-label"
-                        row role="radiogroup" aria-label="Speed up"
-                          for r in [1.5, 2, 4, 8] key=r
-                            button role="radio" aria-checked=(sel.rate == r) press=setNumber(r) testId=`rate-${r}` flex=1
-                              text `${r}×`
-                      if isVisual(sel.kind)
-                        row align-items="center" gap=8
-                          text "Effect" flex=1
-                          select value=sel.kind change=setKind aria-label="Effect" testId="effect-kind"
-                            option "Spotlight" value="spotlight"
-                            option "Cursor highlight" value="highlight"
-                            option "Blur" value="blur"
-                            option "Black & white" value="mono"
-                        if sel.kind == "blur" or sel.kind == "mono"
-                          text "Covers" font="-exact-caption1" color="-exact-secondary-label"
-                          row role="radiogroup" aria-label="Covers"
-                            button role="radio" aria-checked=(sel.scope != "frame") press=segField("scope", "video") flex=1 testId="scope-video"
-                              text "Video"
-                            button role="radio" aria-checked=(sel.scope == "frame") press=segField("scope", "frame") flex=1 testId="scope-frame"
-                              text "Whole Frame"
-                      if sel.kind == "3d"
-                        text "Turns in 3D over its span and back, even with Show in 3D off." font="-exact-caption1" color="-exact-tertiary-label"
-                        row role="radiogroup" aria-label="Turn style"
-                          button role="radio" aria-checked=(sel.style != "orbit") press=segField("style", "hold") flex=1 testId="turn-hold"
-                            text "Hold a Pose"
-                          button role="radio" aria-checked=(sel.style == "orbit") press=segField("style", "orbit") flex=1 testId="turn-orbit"
-                            text "Full Orbit"
-                        row gap=6 flex-wrap="wrap"
-                          for p in ["hero", "lean-left", "lean-right", "lay-back", "tumble"] key=p
-                            button press=segField("pose", p) buttonStyle="bordered" testId=`turn-${p}`
-                              text poseLabel(p)
-                        column gap=4
-                          row
-                            text "Tilt" flex=1
-                            text `${sel.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-80 max=80 step=1 value=sel.tilt change=segNumber("tilt") aria-label="Tilt" testId="turn-tilt"
-                        column gap=4
-                          row
-                            text "Turn" flex=1
-                            text `${sel.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-80 max=80 step=1 value=sel.turn change=segNumber("turn") aria-label="Turn" testId="turn-turn"
-                      if sel.kind == "text"
-                        column gap=4
-                          text "Words" font="-exact-caption1" color="-exact-secondary-label"
-                          input value=sel.text change=textField("text") aria-label="Text" testId="text-words"
-                        column gap=4
-                          row
-                            text "Size" flex=1
-                            text `${round(sel.size)}` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=2 max=30 step=0.5 value=sel.size change=textNumber("size") aria-label="Text size" testId="text-size"
-                        column gap=4
-                          row
-                            text "Tilt" flex=1
-                            text `${sel.rotation}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-45 max=45 step=1 value=sel.rotation change=textNumber("rotation") aria-label="Tilt" testId="text-rotation"
-                        row gap=6 role="radiogroup" aria-label="Colour" appearance="none"
-                          for c in ["white", "black", "yellow", "pink", "blue", "mint"] key=c
-                            button role="radio" aria-checked=(sel.color == c) aria-label=c press=textField("color", c) testId=`text-color-${c}` width=26 height=26 border-radius=13 border-width=2 border-style="solid" border-color=(sel.color == c ? "-exact-system-blue" : "-exact-separator") background-color=(c == "white" ? "#ffffff" : c == "black" ? "#111111" : c == "yellow" ? "#ffd633" : c == "pink" ? "#ff458c" : c == "blue" ? "#408cff" : "#59ebb3")
-                        row role="radiogroup" aria-label="Weight"
-                          for w in ["regular", "bold", "heavy", "rounded"] key=w
-                            button role="radio" aria-checked=(sel.weight == w) press=textField("weight", w) testId=`text-weight-${w}` flex=1
-                              text (w == "regular" ? "Light" : w == "bold" ? "Bold" : w == "heavy" ? "Heavy" : "Round")
-                        row align-items="center" gap=8
-                          text "Shape" flex=1
-                          select value=sel.style change=textField("style") aria-label="Shape" testId="text-style"
-                            option "Plain" value="plain"
-                            option "Pill" value="pill"
-                            option "Box" value="box"
-                            option "Outline" value="outline"
-                            option "Soft shadow" value="shadow"
-                        row align-items="center" gap=8
-                          text "In" flex=1
-                          select value=sel.animIn change=textField("in") aria-label="Animation in" testId="text-in"
-                            option "Letters spring up" value="letters"
-                            option "Letters pop" value="letters-pop"
-                            option "Letters drop" value="drop"
-                            option "Typewriter" value="typewriter"
-                            option "Pop" value="pop"
-                            option "Spin in" value="spin"
-                            option "Slide in" value="slide"
-                            option "Rise" value="rise"
-                            option "Blur in" value="blur"
-                            option "Fade" value="fade"
-                            option "None" value="none"
-                        row align-items="center" gap=8
-                          text "Out" flex=1
-                          select value=sel.animOut change=textField("out") aria-label="Animation out" testId="text-out"
-                            option "Fade" value="fade"
-                            option "Letters fall" value="fall"
-                            option "Letters fade" value="letters"
-                            option "Pop away" value="pop"
-                            option "Sink" value="sink"
-                            option "Blur out" value="blur"
-                            option "None" value="none"
-                        row align-items="center" gap=8
-                          text "While shown" flex=1
-                          select value=sel.loop change=textField("loop") aria-label="While shown" testId="text-loop"
-                            option "Still" value="none"
-                            option "Wave" value="wave"
-                            option "Pulse" value="pulse"
-                            option "Float" value="float"
-                            option "Wiggle" value="wiggle"
-                        text "Drag the text in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
-                      if sel.kind == "move"
-                        text "Where it lands" font="-exact-caption1" color="-exact-secondary-label"
-                        row gap=6 flex-wrap="wrap"
-                          for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
-                            button press=placeAt(pl) buttonStyle="bordered" testId=`move-place-${pl}`
-                              text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
-                        row align-items="center" gap=8
-                          text "Style" flex=1
-                          select value=sel.moveStyle change=moveField("style") aria-label="Move style" testId="move-style"
-                            option "Smooth" value="smooth"
-                            option "Linear" value="linear"
-                            option "Spring" value="spring"
-                            option "Zoom through" value="zoom"
-                            option "Swipe" value="swipe"
-                            option "Fade" value="fade"
-                            option "Spin" value="spin"
-                            option "Pop" value="pop"
-                        text "Speed" font="-exact-caption1" color="-exact-secondary-label"
-                        row role="radiogroup" aria-label="Speed"
-                          for d in [0.4, 0.8, 1.4, 2.5] key=d
-                            button role="radio" aria-checked=(sel.duration == d) press=moveNumber("duration", d) testId=`move-speed-${d}` flex=1
-                              text (d == 0.4 ? "Fast" : d == 0.8 ? "Normal" : d == 1.4 ? "Slow" : "Calm")
-                        column gap=4
-                          row
-                            text "Size" flex=1
-                            text `${sel.scale}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=20 max=250 step=1 value=sel.scale change=moveNumber("scale") aria-label="Size" testId="move-scale"
-                        text (sel.hasAngles ? "3D angle it lands at" : "3D angle (keeps the one before)") font="-exact-caption1" color="-exact-secondary-label"
-                        row gap=6 flex-wrap="wrap"
-                          for p in ["hero", "lean-left", "lean-right", "lay-back", "tumble", "face"] key=p
-                            button press=threeField("preset", p) buttonStyle="bordered" testId=`move-three-${p}`
-                              text poseLabel(p)
-                        column gap=4
-                          row
-                            text "Tilt" flex=1
-                            text `${sel.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-80 max=80 step=1 value=sel.tilt change=threeNumber("tilt") aria-label="Tilt" testId="move-tilt"
-                        column gap=4
-                          row
-                            text "Turn" flex=1
-                            text `${sel.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-80 max=80 step=1 value=sel.turn change=threeNumber("turn") aria-label="Turn" testId="move-turn"
-                        column gap=4
-                          row
-                            text "Roll" flex=1
-                            text `${sel.roll}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-45 max=45 step=1 value=sel.roll change=threeNumber("roll") aria-label="Roll" testId="move-roll"
-                        text "With this move selected, drag the video in the preview to set where it lands, and ⌥-drag to set its 3D angle. Spin turns it a full circle in 3D." font="-exact-caption1" color="-exact-tertiary-label"
-                      if sel.kind == "clip"
-                        button press=editDo("remove") buttonStyle=(sel.removed ? "bordered" : "filled") testId="piece-remove"
-                          text (sel.removed ? "Restore This Part" : "Remove This Part")
-                        row gap=8
-                          button press=editDo("join-prev") buttonStyle="bordered" flex=1 disabled=sel.first testId="join-prev"
-                            text "Join Previous"
-                          button press=editDo("join-next") buttonStyle="bordered" flex=1 disabled=sel.last testId="join-next"
-                            text "Join Next"
-                        if not sel.removed and not sel.last
-                          row align-items="center" gap=8
-                            text "Into the next part" flex=1
-                            select value=sel.transition change=setTransition aria-label="Transition" testId="transition"
-                              option "Cut" value="cut"
-                              option "Crossfade" value="crossfade"
-                              option "Fade through" value="fade"
-                          text "Used where removed parts lie between this part and the next." font="-exact-caption1" color="-exact-tertiary-label"
-                      else
-                        row gap=8
-                          if sel.kind != "move"
-                            button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
-                              text "Split Here"
-                          button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
-                            text "Remove"
+                  if sel.id != "" and panelMode == "dock"
+                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
                   else
                     column gap=10
                       button press=toggleSection("place") appearance="none" aria-expanded=openPlace testId="sec-place" padding-top=2 padding-bottom=2
@@ -921,3 +784,237 @@ component ExactStudio
                       text "Clear Edits"
                     button press=remove buttonStyle="bordered" flex=1 testId="delete"
                       text "Delete"
+
+// The settings of what is selected: docked in the inspector, floating over the stage, a lightbox
+// over the video, or on the left; its header's menu moves it.
+component SettingsCard
+  props
+    sel: SegmentInfo
+    mode: string
+    setPanel: action
+    editDo: action
+    moveField: action
+    moveNumber: action
+    placeAt: action
+    segField: action
+    segNumber: action
+    setEnd: action
+    setKind: action
+    setNumber: action
+    setStart: action
+    setTransition: action
+    textField: action
+    textNumber: action
+    threeField: action
+    threeNumber: action
+  view
+    column gap=12 padding=14 border-radius=14 background-color="-exact-tertiary-background" testId="segment"
+      row align-items="center" gap=8
+        text kindTitle(sel.kind, sel.level, sel.rate) font="-exact-headline" flex=1 testId="segment-title"
+        if sel.kind == "clip" and sel.removed
+          text "Removed" font="-exact-footnote" color="-exact-system-red"
+        button popovertarget="panel-place" aria-label="Where this panel shows" testId="panel-place-button"
+          image "symbol:sf/rectangle.on.rectangle"
+        column id="panel-place" popover="auto" role="menu" aria-label="Show this panel"
+          for m in ["dock", "float", "overlay", "left"] key=m
+            button press=setPanel(m) popovertarget="panel-place" popovertargetaction="hide" role="menuitemradio" aria-checked=(mode == m) testId=`panel-${m}`
+              text (m == "dock" ? "Docked on the Right" : m == "float" ? "Floating" : m == "overlay" ? "Lightbox over the Video" : "On the Left")
+      row gap=8
+        column gap=4 flex=1 min-width=0
+          text "Start" font="-exact-caption1" color="-exact-secondary-label"
+          input value=sel.startText change=setStart disabled=(sel.kind == "clip" and sel.first) aria-label="Start" font-variant-numeric="tabular-nums" testId="start"
+        column gap=4 flex=1 min-width=0
+          text "End" font="-exact-caption1" color="-exact-secondary-label"
+          input value=sel.endText change=setEnd disabled=(sel.kind == "clip" and sel.last) aria-label="End" font-variant-numeric="tabular-nums" testId="end"
+      text "Type a time like 1.25 or 0:01.25 and press Return." font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "zoom"
+        text "Zoom in" font="-exact-caption1" color="-exact-secondary-label"
+        row role="radiogroup" aria-label="Zoom in"
+          for z in [1.5, 2, 2.5, 3] key=z
+            button role="radio" aria-checked=(sel.level == z) press=setNumber(z) testId=`level-${z}` flex=1
+              text `${z}×`
+        text "Zoom out" font="-exact-caption1" color="-exact-secondary-label"
+        row role="radiogroup" aria-label="Zoom out"
+          for z in [0.5, 0.7, 0.85] key=z
+            button role="radio" aria-checked=(sel.level == z) press=setNumber(z) testId=`level-${z}` flex=1
+              text `${z}×`
+      if sel.kind == "speed"
+        text "Slow down" font="-exact-caption1" color="-exact-secondary-label"
+        row role="radiogroup" aria-label="Slow down"
+          for r in [0.25, 0.5, 0.75] key=r
+            button role="radio" aria-checked=(sel.rate == r) press=setNumber(r) testId=`rate-${r}` flex=1
+              text `${r}×`
+        text "Speed up" font="-exact-caption1" color="-exact-secondary-label"
+        row role="radiogroup" aria-label="Speed up"
+          for r in [1.5, 2, 4, 8] key=r
+            button role="radio" aria-checked=(sel.rate == r) press=setNumber(r) testId=`rate-${r}` flex=1
+              text `${r}×`
+      if isVisual(sel.kind)
+        row align-items="center" gap=8
+          text "Effect" flex=1
+          select value=sel.kind change=setKind aria-label="Effect" testId="effect-kind"
+            option "Spotlight" value="spotlight"
+            option "Cursor highlight" value="highlight"
+            option "Blur" value="blur"
+            option "Black & white" value="mono"
+        if sel.kind == "blur" or sel.kind == "mono"
+          text "Covers" font="-exact-caption1" color="-exact-secondary-label"
+          row role="radiogroup" aria-label="Covers"
+            button role="radio" aria-checked=(sel.scope != "frame") press=segField("scope", "video") flex=1 testId="scope-video"
+              text "Video"
+            button role="radio" aria-checked=(sel.scope == "frame") press=segField("scope", "frame") flex=1 testId="scope-frame"
+              text "Whole Frame"
+      if sel.kind == "3d"
+        text "Turns in 3D over its span and back, even with Show in 3D off." font="-exact-caption1" color="-exact-tertiary-label"
+        row role="radiogroup" aria-label="Turn style"
+          button role="radio" aria-checked=(sel.style != "orbit") press=segField("style", "hold") flex=1 testId="turn-hold"
+            text "Hold a Pose"
+          button role="radio" aria-checked=(sel.style == "orbit") press=segField("style", "orbit") flex=1 testId="turn-orbit"
+            text "Full Orbit"
+        row gap=6 flex-wrap="wrap"
+          for p in ["hero", "lean-left", "lean-right", "lay-back", "tumble"] key=p
+            button press=segField("pose", p) buttonStyle="bordered" testId=`turn-${p}`
+              text poseLabel(p)
+        column gap=4
+          row
+            text "Tilt" flex=1
+            text `${sel.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=-80 max=80 step=1 value=sel.tilt change=segNumber("tilt") aria-label="Tilt" testId="turn-tilt"
+        column gap=4
+          row
+            text "Turn" flex=1
+            text `${sel.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=-80 max=80 step=1 value=sel.turn change=segNumber("turn") aria-label="Turn" testId="turn-turn"
+      if sel.kind == "text"
+        column gap=4
+          text "Words" font="-exact-caption1" color="-exact-secondary-label"
+          input value=sel.text change=textField("text") aria-label="Text" testId="text-words"
+        column gap=4
+          row
+            text "Size" flex=1
+            text `${round(sel.size)}` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=2 max=30 step=0.5 value=sel.size change=textNumber("size") aria-label="Text size" testId="text-size"
+        column gap=4
+          row
+            text "Tilt" flex=1
+            text `${sel.rotation}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=-45 max=45 step=1 value=sel.rotation change=textNumber("rotation") aria-label="Tilt" testId="text-rotation"
+        row gap=6 role="radiogroup" aria-label="Colour" appearance="none"
+          for c in ["white", "black", "yellow", "pink", "blue", "mint"] key=c
+            button role="radio" aria-checked=(sel.color == c) aria-label=c press=textField("color", c) testId=`text-color-${c}` width=26 height=26 border-radius=13 border-width=2 border-style="solid" border-color=(sel.color == c ? "-exact-system-blue" : "-exact-separator") background-color=(c == "white" ? "#ffffff" : c == "black" ? "#111111" : c == "yellow" ? "#ffd633" : c == "pink" ? "#ff458c" : c == "blue" ? "#408cff" : "#59ebb3")
+        row role="radiogroup" aria-label="Weight"
+          for w in ["regular", "bold", "heavy", "rounded"] key=w
+            button role="radio" aria-checked=(sel.weight == w) press=textField("weight", w) testId=`text-weight-${w}` flex=1
+              text (w == "regular" ? "Light" : w == "bold" ? "Bold" : w == "heavy" ? "Heavy" : "Round")
+        row align-items="center" gap=8
+          text "Shape" flex=1
+          select value=sel.style change=textField("style") aria-label="Shape" testId="text-style"
+            option "Plain" value="plain"
+            option "Pill" value="pill"
+            option "Box" value="box"
+            option "Outline" value="outline"
+            option "Soft shadow" value="shadow"
+        row align-items="center" gap=8
+          text "In" flex=1
+          select value=sel.animIn change=textField("in") aria-label="Animation in" testId="text-in"
+            option "Letters spring up" value="letters"
+            option "Letters pop" value="letters-pop"
+            option "Letters drop" value="drop"
+            option "Typewriter" value="typewriter"
+            option "Pop" value="pop"
+            option "Spin in" value="spin"
+            option "Slide in" value="slide"
+            option "Rise" value="rise"
+            option "Blur in" value="blur"
+            option "Fade" value="fade"
+            option "None" value="none"
+        row align-items="center" gap=8
+          text "Out" flex=1
+          select value=sel.animOut change=textField("out") aria-label="Animation out" testId="text-out"
+            option "Fade" value="fade"
+            option "Letters fall" value="fall"
+            option "Letters fade" value="letters"
+            option "Pop away" value="pop"
+            option "Sink" value="sink"
+            option "Blur out" value="blur"
+            option "None" value="none"
+        row align-items="center" gap=8
+          text "While shown" flex=1
+          select value=sel.loop change=textField("loop") aria-label="While shown" testId="text-loop"
+            option "Still" value="none"
+            option "Wave" value="wave"
+            option "Pulse" value="pulse"
+            option "Float" value="float"
+            option "Wiggle" value="wiggle"
+        text "Drag the text in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "move"
+        text "Where it lands" font="-exact-caption1" color="-exact-secondary-label"
+        row gap=6 flex-wrap="wrap"
+          for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
+            button press=placeAt(pl) buttonStyle="bordered" testId=`move-place-${pl}`
+              text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
+        row align-items="center" gap=8
+          text "Style" flex=1
+          select value=sel.moveStyle change=moveField("style") aria-label="Move style" testId="move-style"
+            option "Smooth" value="smooth"
+            option "Linear" value="linear"
+            option "Spring" value="spring"
+            option "Zoom through" value="zoom"
+            option "Swipe" value="swipe"
+            option "Fade" value="fade"
+            option "Spin" value="spin"
+            option "Pop" value="pop"
+        text "Speed" font="-exact-caption1" color="-exact-secondary-label"
+        row role="radiogroup" aria-label="Speed"
+          for d in [0.4, 0.8, 1.4, 2.5] key=d
+            button role="radio" aria-checked=(sel.duration == d) press=moveNumber("duration", d) testId=`move-speed-${d}` flex=1
+              text (d == 0.4 ? "Fast" : d == 0.8 ? "Normal" : d == 1.4 ? "Slow" : "Calm")
+        column gap=4
+          row
+            text "Size" flex=1
+            text `${sel.scale}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=20 max=250 step=1 value=sel.scale change=moveNumber("scale") aria-label="Size" testId="move-scale"
+        text (sel.hasAngles ? "3D angle it lands at" : "3D angle (keeps the one before)") font="-exact-caption1" color="-exact-secondary-label"
+        row gap=6 flex-wrap="wrap"
+          for p in ["hero", "lean-left", "lean-right", "lay-back", "tumble", "face"] key=p
+            button press=threeField("preset", p) buttonStyle="bordered" testId=`move-three-${p}`
+              text poseLabel(p)
+        column gap=4
+          row
+            text "Tilt" flex=1
+            text `${sel.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=-80 max=80 step=1 value=sel.tilt change=threeNumber("tilt") aria-label="Tilt" testId="move-tilt"
+        column gap=4
+          row
+            text "Turn" flex=1
+            text `${sel.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=-80 max=80 step=1 value=sel.turn change=threeNumber("turn") aria-label="Turn" testId="move-turn"
+        column gap=4
+          row
+            text "Roll" flex=1
+            text `${sel.roll}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=-45 max=45 step=1 value=sel.roll change=threeNumber("roll") aria-label="Roll" testId="move-roll"
+        text "With this move selected, drag the video in the preview to set where it lands, and ⌥-drag to set its 3D angle. Spin turns it a full circle in 3D." font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "clip"
+        button press=editDo("remove") buttonStyle=(sel.removed ? "bordered" : "filled") testId="piece-remove"
+          text (sel.removed ? "Restore This Part" : "Remove This Part")
+        row gap=8
+          button press=editDo("join-prev") buttonStyle="bordered" flex=1 disabled=sel.first testId="join-prev"
+            text "Join Previous"
+          button press=editDo("join-next") buttonStyle="bordered" flex=1 disabled=sel.last testId="join-next"
+            text "Join Next"
+        if not sel.removed and not sel.last
+          row align-items="center" gap=8
+            text "Into the next part" flex=1
+            select value=sel.transition change=setTransition aria-label="Transition" testId="transition"
+              option "Cut" value="cut"
+              option "Crossfade" value="crossfade"
+              option "Fade through" value="fade"
+          text "Used where removed parts lie between this part and the next." font="-exact-caption1" color="-exact-tertiary-label"
+      else
+        row gap=8
+          if sel.kind != "move"
+            button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
+              text "Split Here"
+          button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
+            text "Remove"

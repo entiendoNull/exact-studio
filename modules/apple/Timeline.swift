@@ -69,8 +69,8 @@ final class TimelineView: NSView {
 
     private func changed() {
         needsDisplay = true
-        let h = max(Self.minimum, contentHeight + extra)
-        scrollY = min(max(scrollY, 0), max(0, contentHeight - h))
+        let h = contentHeight
+        scrollY = min(max(scrollY, 0), max(0, contentHeight - bounds.height))
         if h != lastHeight { lastHeight = h; onHeight(h) }
     }
 
@@ -87,9 +87,7 @@ final class TimelineView: NSView {
         needsDisplay = true
     }
 
-    override func resetCursorRects() {
-        addCursorRect(CGRect(x: 0, y: 0, width: bounds.width, height: Self.grip), cursor: .resizeUpDown)
-    }
+
 
     private func loadThumbs(_ editor: Editor) {
         guard thumbsFor != editor.id else { return }
@@ -154,8 +152,6 @@ final class TimelineView: NSView {
         NSBezierPath(roundedRect: bounds, xRadius: 14, yRadius: 14).fill()
         // The grip on the top edge, drawn over the content after it.
         defer {
-            NSColor(white: 1, alpha: resizing == nil ? 0.22 : 0.5).setFill()
-            NSBezierPath(roundedRect: CGRect(x: bounds.midX - 22, y: 3, width: 44, height: 4), xRadius: 2, yRadius: 2).fill()
             if bounds.height > 40, contentHeight > bounds.height + 1 {
                 // How far down the lanes are scrolled.
                 let track = bounds.height - 24, k = bounds.height / contentHeight
@@ -164,6 +160,8 @@ final class TimelineView: NSView {
             }
         }
         guard let editor else { return }
+        // The view's height is the person's (the handle above it): keep the scroll inside the content.
+        scrollY = min(max(scrollY, 0), max(0, contentHeight - bounds.height))
         NSGraphicsContext.current?.cgContext.translateBy(x: 0, y: -scrollY)
         let d = editor.duration
         let rulerTop = Self.rulerTop, rulerHeight = Self.rulerHeight, clipTop = Self.clipTop, clipHeight = Self.clipHeight
@@ -437,11 +435,6 @@ final class TimelineView: NSView {
         window?.makeFirstResponder(self)
         guard let editor else { return }
         // The top edge resizes the timeline (and so the preview above it); a double click resets it.
-        if convert(e.locationInWindow, from: nil).y < Self.grip {
-            if e.clickCount == 2 { extra = 0; UserDefaults.standard.set(0, forKey: "ExactStudio.timelineExtra"); changed(); return }
-            resizing = (e.locationInWindow.y, extra)
-            return
-        }
         let p = local(e)
         moved = false
         if addLaneRect.contains(p) { editor.addLane(); return }

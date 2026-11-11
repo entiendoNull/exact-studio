@@ -167,6 +167,7 @@ final class Studio: ExactModule {
         case "text": e.setText(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "move": e.setMoveField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "place": e.placePreset(r["kind"] as? String ?? "")
+        case "deselect": e.select("")
         case "seg": e.setSegment(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "template": e.applyTemplate(r["kind"] as? String ?? "")
         case "undo-template": e.undoTemplate()
