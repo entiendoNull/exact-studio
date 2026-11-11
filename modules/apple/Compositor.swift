@@ -53,7 +53,7 @@ struct Segment: Codable, Equatable {
     var rate: Double?
 
     static let visual = ["spotlight", "highlight", "blur", "mono"]
-    static let kinds = ["cut", "zoom", "speed"] + visual
+    static let kinds = ["zoom", "speed"] + visual
 
     /// Two segments may overlap in time unless they share a group: one zoom at
     /// a time, one speed at a time, one of each visual effect at a time.
@@ -62,23 +62,62 @@ struct Segment: Codable, Equatable {
     func overlaps(_ o: Segment) -> Bool { start < o.end - 0.0001 && o.start < end - 0.0001 }
 }
 
-/// A recording's edits, all in source seconds.
+/// One part of the clip between two split points.
+struct Piece: Equatable { var start: Double, end: Double, removed: Bool
+    var id: String { "p:\(Int((start * 1000).rounded()))" } }
+
+/// A recording's edits, all in source seconds: the clip's split points and
+/// which of its parts are removed, and the effect segments on their lanes.
 struct Edits: Codable, Equatable {
     var segments: [Segment] = []
+    /// Where the clip is split, sorted.
+    var splits: [Double] = []
+    /// The start of each removed part.
+    var removed: [Double] = []
+    /// Effect lanes, at least one; a lane may stay empty.
+    var lanes: Int = 1
 
-    var cuts: [Segment] { segments.filter { $0.kind == "cut" } }
+    init(segments: [Segment] = []) { self.segments = segments }
+
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, lanes }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
+        splits = try c.decodeIfPresent([Double].self, forKey: .splits) ?? []
+        removed = try c.decodeIfPresent([Double].self, forKey: .removed) ?? []
+        lanes = try c.decodeIfPresent(Int.self, forKey: .lanes) ?? 1
+        // Cuts were once segments: each becomes two splits and a removed part.
+        for cut in segments where cut.kind == "cut" {
+            splits += [cut.start, cut.end]
+            removed.append(cut.start)
+        }
+        segments.removeAll { $0.kind == "cut" }
+        splits = Array(Set(splits.filter { $0 > 0.001 })).sorted()
+        lanes = max(lanes, (segments.map(\.lane).max() ?? -1) + 1, 1)
+    }
+
+    static func same(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.0015 }
+
+    /// The clip's parts, in order.
+    func pieces(_ duration: Double) -> [Piece] {
+        let points = [0] + splits.filter { $0 > 0.001 && $0 < duration - 0.001 } + [duration]
+        return zip(points, points.dropFirst()).map { a, b in Piece(start: a, end: b, removed: removed.contains { Edits.same($0, a) }) }
+    }
+
+    /// The removed parts, as the time map takes them.
+    func cuts(_ duration: Double) -> [Segment] {
+        pieces(duration).filter(\.removed).map { Segment(id: $0.id, kind: "cut", start: $0.start, end: $0.end) }
+    }
     var zooms: [Segment] { segments.filter { $0.kind == "zoom" } }
     var speeds: [Segment] { segments.filter { $0.kind == "speed" } }
     var effects: [Segment] { segments.filter { Segment.visual.contains($0.kind) } }
-    /// The lanes in use, at least one.
-    var lanes: Int { max(1, (segments.filter { $0.kind != "cut" }.map(\.lane).max() ?? -1) + 1) }
 
     /// Why `s` cannot sit where it is, or nil when it can: a same-group
     /// segment overlapping it anywhere, or any segment overlapping it on its lane.
     func conflict(_ s: Segment) -> String? {
         for o in segments where o.id != s.id && o.overlaps(s) {
-            if o.group == s.group && s.kind != "cut" { return "Two \(Segment.noun(s.kind)) can’t overlap." }
-            if s.kind != "cut" && o.kind != "cut" && o.lane == s.lane { return "That lane is taken there; drop it on another lane." }
+            if o.group == s.group { return "Two \(Segment.noun(s.kind)) can’t overlap." }
+            if o.lane == s.lane { return "That lane is taken there; drop it on another lane." }
         }
         return nil
     }
@@ -338,12 +377,13 @@ struct TimeMap {
     init(duration: Double, edits: Edits) {
         self.duration = duration
         var marks = Set([0.0, duration])
-        for s in edits.cuts + edits.speeds { marks.insert(min(max(s.start, 0), duration)); marks.insert(min(max(s.end, 0), duration)) }
+        let cuts = edits.cuts(duration)
+        for s in cuts + edits.speeds { marks.insert(min(max(s.start, 0), duration)); marks.insert(min(max(s.end, 0), duration)) }
         let sorted = marks.sorted()
         var out: [Piece] = [], at = 0.0
         for (a, b) in zip(sorted, sorted.dropFirst()) where b - a > 0.001 {
             let m = (a + b) / 2
-            if edits.cuts.contains(where: { m > $0.start && m < $0.end }) { continue }
+            if cuts.contains(where: { m > $0.start && m < $0.end }) { continue }
             let rate = edits.speeds.last(where: { m > $0.start && m < $0.end })?.rate ?? 1
             if let last = out.last, last.rate == rate, abs(last.src1 - a) < 0.0005 {
                 out[out.count - 1].src1 = b

@@ -4,15 +4,17 @@
 // and "edits" (a recording's edits or selection changed).
 //
 //   call   {op: "status"}                       → {recording, name, kind}
-//          {op: "selection", id}                → {id, kind, level, rate, start, end, problem}
-//          {op: "summary", id}                  → {cuts, effects, lanes, length, source}
+//          {op: "selection", id}                → {id, kind ("clip" for a part of the clip), level, rate, start, end,
+//                                                   startText, endText, removed, first, last, problem}
+//          {op: "summary", id}                  → {parts, removed, effects, lanes, length, source}
 //   later  {op: "sources"}                      → {items: [{id, name, app, kind}], allowed}
 //          {op: "start", source}                → {ok, error}   source "area" opens the picker
 //          {op: "stop"}                         → {ok, error, id}
 //          {op: "recordings"}                   → {items: [{id, name, kind, created, duration}]}
 //          {op: "edit", id, do, track?, number?, kind?}  → {ok}
 //                 do: add (track: a kind, or zoom-in, zoom-out, slow, fast), set (number | kind),
-//                     delete, split, auto, clear, play
+//                     delete, split, auto, clear, play, split-clip, remove, join-prev, join-next,
+//                     add-lane, start / end (kind: the typed time)
 //          {op: "export", id, look}             → {ok, error, path}
 //          {op: "delete", id}                   → {ok, error}
 //          {op: "reveal", path}                 → {ok}
@@ -39,7 +41,10 @@ final class Studio: ExactModule {
 
     required init(context: ExactModuleContext) {
         super.init(context: context)
-        if context.agent { Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true) }
+        if context.agent {
+            Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true)
+            print("exact-studio library: \(Library.root.path)")
+        }
     }
 
     /// The open recording's editor, made on first use.
@@ -52,7 +57,8 @@ final class Studio: ExactModule {
         return e
     }
 
-    private static let emptySelection: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "problem": ""]
+    private static let emptySelection: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "",
+                                                        "removed": false, "first": false, "last": false, "problem": ""]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {
         switch request["op"] as? String {
@@ -61,7 +67,7 @@ final class Studio: ExactModule {
         case "selection":
             return editor(request["id"] as? String ?? "")?.selection ?? Self.emptySelection
         case "summary":
-            return editor(request["id"] as? String ?? "")?.summary ?? ["cuts": 0, "effects": 0, "lanes": 1, "length": 0, "source": 0]
+            return editor(request["id"] as? String ?? "")?.summary ?? ["parts": 1, "removed": 0, "effects": 0, "lanes": 1, "length": 0, "source": 0]
         default:
             throw ExactNativeRefusal("studio answers status, selection and summary")
         }
@@ -109,6 +115,14 @@ final class Studio: ExactModule {
         }
     }
 
+    /// "1.25", "0:01.25" or "1:02" as seconds; nil when it is none of those.
+    static func seconds(_ text: String?) -> Double? {
+        let t = (text ?? "").trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: "s", with: "")
+        let parts = t.split(separator: ":").map { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard !parts.isEmpty, parts.allSatisfy({ $0 != nil }) else { return nil }
+        return parts.reduce(0.0) { $0 * 60 + $1! }
+    }
+
     private func edit(_ r: [String: Any]) {
         guard let e = editor(r["id"] as? String ?? "") else { return }
         switch r["do"] as? String {
@@ -119,6 +133,13 @@ final class Studio: ExactModule {
         case "auto": e.autoZoom()
         case "clear": e.clearAll()
         case "play": e.togglePlay()
+        case "split-clip": e.splitClip()
+        case "remove": e.toggleRemoved()
+        case "join-prev": e.join(-1)
+        case "join-next": e.join(1)
+        case "add-lane": e.addLane()
+        case "start": e.setTimes(start: Self.seconds(r["kind"] as? String), end: nil)
+        case "end": e.setTimes(start: nil, end: Self.seconds(r["kind"] as? String))
         default: break
         }
     }

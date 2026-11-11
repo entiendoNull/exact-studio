@@ -28,7 +28,7 @@ final class TimelineView: NSView {
     private static let rulerTop: CGFloat = 10, rulerHeight: CGFloat = 20
     private static let clipTop: CGFloat = 34, clipHeight: CGFloat = 56
     private static let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
-    static func height(lanes: Int) -> CGFloat { clipTop + clipHeight + laneGap + CGFloat(lanes) * (laneHeight + laneGap) + 8 }
+    static func height(lanes: Int) -> CGFloat { clipTop + clipHeight + laneGap + CGFloat(lanes + 1) * (laneHeight + laneGap) + 4 }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -100,12 +100,13 @@ final class TimelineView: NSView {
         guard let d = editor?.duration, d > 0 else { return 0 }
         return Double(min(max((x - trackRect.minX) / trackRect.width, 0), 1)) * d
     }
+    private var addLaneRect: CGRect { CGRect(x: trackRect.minX, y: laneY(lanesShown), width: min(trackRect.width, 180), height: Self.laneHeight) }
+    private func removeRect(_ lane: Int) -> CGRect { CGRect(x: trackRect.maxX - 22, y: laneY(lane) + 7, width: 14, height: 14) }
     private func laneY(_ i: Int) -> CGFloat { Self.clipTop + Self.clipHeight + Self.laneGap + CGFloat(i) * (Self.laneHeight + Self.laneGap) }
     private func lane(at y: CGFloat) -> Int { max(0, Int((y - laneY(0)) / (Self.laneHeight + Self.laneGap))) }
 
     static func color(_ s: Segment) -> NSColor {
         switch s.kind {
-        case "cut": return .systemRed
         case "zoom": return (s.level ?? 2) < 1 ? .systemTeal : .systemBlue
         case "speed": return .systemOrange
         case "spotlight": return .systemPurple
@@ -165,38 +166,64 @@ final class TimelineView: NSView {
         }
         NSGraphicsContext.restoreGraphicsState()
 
-        // Cuts over the clip: hatched red.
-        for c in editor.edits.cuts {
-            let r = CGRect(x: x(c.start), y: clipTop, width: max(2, x(c.end) - x(c.start)), height: clipHeight)
-            NSGraphicsContext.saveGraphicsState()
-            NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).addClip()
-            NSColor.systemRed.withAlphaComponent(0.42).setFill()
-            r.fill()
-            NSColor(white: 0, alpha: 0.3).setStroke()
-            var hx = r.minX - r.height
-            while hx < r.maxX {
-                let line = NSBezierPath()
-                line.move(to: CGPoint(x: hx, y: r.maxY)); line.line(to: CGPoint(x: hx + r.height, y: r.minY))
-                line.lineWidth = 3
-                line.stroke()
-                hx += 10
+        // The clip's parts: a gap at each split; a removed part hatched and dimmed.
+        for piece in editor.pieces {
+            let r = CGRect(x: x(piece.start) + (piece.start > 0 ? 2 : 0), y: clipTop,
+                           width: max(2, x(piece.end) - x(piece.start) - (piece.start > 0 ? 2 : 0) - (piece.end < d ? 2 : 0)), height: clipHeight)
+            if piece.start > 0 {
+                // The gap itself, cut through the filmstrip.
+                NSColor(calibratedWhite: 0.085, alpha: 1).setFill()
+                CGRect(x: x(piece.start) - 2, y: clipTop - 1, width: 4, height: clipHeight + 2).fill()
             }
-            NSGraphicsContext.restoreGraphicsState()
-            stroke(r, selected: editor.selected == c.id)
-            title("Cut", in: r)
+            if piece.removed {
+                NSGraphicsContext.saveGraphicsState()
+                NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).addClip()
+                NSColor(calibratedWhite: 0.06, alpha: 0.82).setFill()
+                r.fill()
+                NSColor.systemRed.withAlphaComponent(0.35).setStroke()
+                var hx = r.minX - r.height
+                while hx < r.maxX {
+                    let line = NSBezierPath()
+                    line.move(to: CGPoint(x: hx, y: r.maxY)); line.line(to: CGPoint(x: hx + r.height, y: r.minY))
+                    line.lineWidth = 2
+                    line.stroke()
+                    hx += 9
+                }
+                NSGraphicsContext.restoreGraphicsState()
+                title("Removed", in: r)
+            }
+            stroke(r, selected: editor.selected == piece.id)
         }
 
         // The lanes.
-        let effects = editor.edits.segments.filter { $0.kind != "cut" }
+        let effects = editor.edits.segments
         for i in 0..<lanesShown {
             let y = laneY(i)
-            if i == 0 { drawLabel("Effects", symbol: "sparkles", y: y, height: Self.laneHeight, attrs: label, tint: .systemPurple) }
+            let empty = !effects.contains { $0.lane == i }
+            drawLabel(i == 0 ? "Effects" : "Lane \(i + 1)", symbol: "sparkles", y: y, height: Self.laneHeight, attrs: label, tint: i == 0 ? .systemPurple : NSColor(white: 1, alpha: 0.35))
             NSColor(white: 1, alpha: i < editor.edits.lanes ? 0.05 : 0.025).setFill()
             NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: y, width: trackRect.width, height: Self.laneHeight), xRadius: 7, yRadius: 7).fill()
+            if empty && editor.edits.lanes > 1 && i < editor.edits.lanes {
+                // An empty lane's ×, which removes it.
+                let xr = removeRect(i)
+                NSColor(white: 1, alpha: 0.12).setFill()
+                NSBezierPath(ovalIn: xr).fill()
+                ("×" as NSString).draw(at: CGPoint(x: xr.minX + 3.5, y: xr.minY - 1), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: NSColor(white: 1, alpha: 0.7)])
+            }
         }
+        // The row that adds a lane.
+        let add = addLaneRect
+        let addAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.controlAccentColor]
+        NSColor(white: 1, alpha: 0.03).setFill()
+        let addPath = NSBezierPath(roundedRect: add, xRadius: 7, yRadius: 7)
+        addPath.fill()
+        NSColor(white: 1, alpha: 0.12).setStroke()
+        addPath.setLineDash([4, 3], count: 2, phase: 0)
+        addPath.stroke()
+        ("+  Add effect lane" as NSString).draw(at: CGPoint(x: add.minX + 12, y: add.midY - 7), withAttributes: addAttrs)
         if effects.isEmpty {
             let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(white: 1, alpha: 0.35)]
-            ("No effects yet. Add one with the Add menu above." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: laneY(0) + 7), withAttributes: hint)
+            ("No effects yet. Add one with the Add button above." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: laneY(0) + 7), withAttributes: hint)
         }
         for seg in effects {
             let r = CGRect(x: x(seg.start), y: laneY(seg.lane) + 2, width: max(4, x(seg.end) - x(seg.start)), height: Self.laneHeight - 4)
@@ -266,7 +293,7 @@ final class TimelineView: NSView {
         case "highlight": return "Cursor highlight"
         case "blur": return "Blur"
         case "mono": return "Black & white"
-        default: return "Cut"
+        default: return "Effect"
         }
     }
 
@@ -282,11 +309,10 @@ final class TimelineView: NSView {
     private func hit(_ p: CGPoint) -> Segment? {
         guard let editor else { return nil }
         let near = { (s: Segment) in p.x >= self.x(s.start) - 3 && p.x <= self.x(s.end) + 3 }
-        if p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight { return editor.edits.cuts.last(where: near) }
         guard p.y >= laneY(0) else { return nil }
         let l = lane(at: p.y)
         guard p.y <= laneY(l) + Self.laneHeight else { return nil }
-        return editor.edits.segments.last { $0.kind != "cut" && $0.lane == l && near($0) }
+        return editor.edits.segments.last { $0.lane == l && near($0) }
     }
 
     override func mouseDown(with e: NSEvent) {
@@ -294,6 +320,15 @@ final class TimelineView: NSView {
         guard let editor else { return }
         let p = convert(e.locationInWindow, from: nil)
         moved = false
+        if addLaneRect.contains(p) { editor.addLane(); return }
+        if let i = (0..<editor.edits.lanes).first(where: { removeRect($0).insetBy(dx: -3, dy: -3).contains(p) }) { editor.removeLane(i); return }
+        if p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight, let piece = editor.pieces.first(where: { t(p.x) >= $0.start && t(p.x) <= $0.end }) {
+            // A part of the clip: select it, and seek there.
+            editor.select(piece.id)
+            drag = .scrub
+            editor.seek(source: t(p.x))
+            return
+        }
         if let s = hit(p) {
             editor.select(s.id)
             let edge: CGFloat = 7, wide = x(s.end) - x(s.start) > edge * 2
@@ -301,7 +336,7 @@ final class TimelineView: NSView {
             else if wide && x(s.end) - p.x < edge { drag = .right(s.id, s.start, s.end, s.lane) }
             else { drag = .move(s.id, s.start, s.end, t(p.x)) }
         } else {
-            if p.y > Self.clipTop { editor.select("") }
+            if p.y > Self.clipTop + Self.clipHeight { editor.select("") }
             drag = .scrub
             editor.seek(source: t(p.x))
         }
@@ -340,6 +375,7 @@ final class TimelineView: NSView {
         switch e.keyCode {
         case 51, 117: editor.deleteSelected()            // Delete, Forward Delete
         case 49: editor.togglePlay()                      // Space
+        case 1: editor.splitClip()                        // S
         case 123: editor.seek(source: editor.playhead - (e.modifierFlags.contains(.shift) ? 1 : 1.0 / 30))
         case 124: editor.seek(source: editor.playhead + (e.modifierFlags.contains(.shift) ? 1 : 1.0 / 30))
         default: super.keyDown(with: e)

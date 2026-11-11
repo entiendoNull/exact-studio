@@ -35,10 +35,16 @@ shape SegmentInfo
   rate: number
   start: number
   end: number
+  startText: string
+  endText: string
+  removed: bool
+  first: bool
+  last: bool
   problem: string
 
 shape Summary
-  cuts: number
+  parts: number
+  removed: number
   effects: number
   lanes: number
   length: number
@@ -65,7 +71,7 @@ fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn kindTitle(kind: string, level: number, rate: number): string = kind == "cut" ? "Cut" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "clip" ? "Clip Part" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
 fn countLine(n: number, one: string, many: string): string = n == 1 ? `1 ${one}` : `${n} ${many}`
@@ -158,6 +164,10 @@ component ExactStudio
     send edited = editClip(selected, "set", "", 0, k)
   action editDo(what: string)
     send edited = editClip(selected, what, "", 0, "")
+  action setStart(v: string)
+    send edited = editClip(selected, "start", "", 0, v)
+  action setEnd(v: string)
+    send edited = editClip(selected, "end", "", 0, v)
 
   view
     main testId="root" navigationKey=`${top(nav).id}` width="100%" height="100%"
@@ -289,18 +299,14 @@ component ExactStudio
                       button press=add("mono") popovertarget="add-menu" popovertargetaction="hide" testId="add-mono"
                         image "symbol:sf/circle.lefthalf.filled"
                         text "Black & White"
-                      hr
-                      button press=add("cut") popovertarget="add-menu" popovertargetaction="hide" destructive=true testId="add-cut"
-                        image "symbol:sf/scissors"
-                        text "Cut"
                     column width=1 height=22 background-color="-exact-separator"
-                    button press=editDo("split") buttonStyle="bordered" disabled=(sel.id == "") testId="split"
-                      image "symbol:sf/square.split.1x2"
-                      text "Split"
+                    button press=editDo("split-clip") buttonStyle="bordered" testId="split-clip"
+                      image "symbol:sf/scissors"
+                      text "Split Clip"
                     button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
                       image "symbol:sf/cursorarrow.click.2"
                       text "Zoom on Clicks"
-                    text `${mmss(summary.length)} of ${mmss(summary.source)}` flex=1 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
+                    text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex=1 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
                   studio-timeline clip=rec.id aria-label="Timeline" testId="timeline"
 
             // ── The inspector: the selected segment, the frame, export.
@@ -326,7 +332,16 @@ component ExactStudio
                     column gap=12 padding=14 border-radius=14 background-color="-exact-tertiary-background" testId="segment"
                       row align-items="center" gap=8
                         text kindTitle(sel.kind, sel.level, sel.rate) font="-exact-headline" flex=1 testId="segment-title"
-                        text `${mmss(sel.start)}–${mmss(sel.end)}` font="-exact-footnote" font-variant-numeric="tabular-nums" color="-exact-secondary-label"
+                        if sel.kind == "clip" and sel.removed
+                          text "Removed" font="-exact-footnote" color="-exact-system-red"
+                      row gap=8
+                        column gap=4 flex=1 min-width=0
+                          text "Start" font="-exact-caption1" color="-exact-secondary-label"
+                          input value=sel.startText change=setStart disabled=(sel.kind == "clip" and sel.first) aria-label="Start" font-variant-numeric="tabular-nums" testId="start"
+                        column gap=4 flex=1 min-width=0
+                          text "End" font="-exact-caption1" color="-exact-secondary-label"
+                          input value=sel.endText change=setEnd disabled=(sel.kind == "clip" and sel.last) aria-label="End" font-variant-numeric="tabular-nums" testId="end"
+                      text "Type a time like 1.25 or 0:01.25 and press Return." font="-exact-caption1" color="-exact-tertiary-label"
                       if sel.kind == "zoom"
                         text "Zoom in" font="-exact-caption1" color="-exact-secondary-label"
                         row role="radiogroup" aria-label="Zoom in"
@@ -357,18 +372,25 @@ component ExactStudio
                             option "Cursor highlight" value="highlight"
                             option "Blur" value="blur"
                             option "Black & white" value="mono"
-                      if sel.kind == "cut"
-                        text "This part is left out of the video. Drag its edges on the timeline." font="-exact-footnote" color="-exact-secondary-label"
-                      row gap=8
-                        button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
-                          text "Split Here"
-                        button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
-                          text "Remove"
+                      if sel.kind == "clip"
+                        button press=editDo("remove") buttonStyle=(sel.removed ? "bordered" : "filled") testId="piece-remove"
+                          text (sel.removed ? "Restore This Part" : "Remove This Part")
+                        row gap=8
+                          button press=editDo("join-prev") buttonStyle="bordered" flex=1 disabled=sel.first testId="join-prev"
+                            text "Join Previous"
+                          button press=editDo("join-next") buttonStyle="bordered" flex=1 disabled=sel.last testId="join-next"
+                            text "Join Next"
+                      else
+                        row gap=8
+                          button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
+                            text "Split Here"
+                          button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
+                            text "Remove"
                   else
                     column gap=6 padding=14 border-radius=14 background-color="-exact-tertiary-background"
                       text "Timeline" font="-exact-headline"
-                      text `${countLine(summary.cuts, "cut", "cuts")} · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
-                      text "Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Drag a segment to move it, or below the last lane for a new one. Delete removes the selected segment; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
+                      text `${countLine(summary.parts, "clip part", "clip parts")} (${summary.removed} removed) · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
+                      text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
 
                   column gap=12
                     text "BACKGROUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
