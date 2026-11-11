@@ -309,7 +309,7 @@ component ExactStudio
                       text startError font="-exact-footnote" color="-exact-system-red" testId="start-error"
                   if devices.length > 0
                     column gap=6
-                      text "DEVICES" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                      text "SIMULATORS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
                       for s in devices key=s.id
                         button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color="-exact-tertiary-background"
                           row gap=10 align-items="center" min-width=0 flex=1
