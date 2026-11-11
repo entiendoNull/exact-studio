@@ -492,8 +492,8 @@ component ExactStudio
                       text "Split Clip"
                     button popovertarget="motion-menu" buttonStyle="bordered" testId="motion"
                       image "symbol:sf/arrow.up.and.down.and.arrow.left.and.right"
-                      text "Motion"
-                    column id="motion-menu" popover="auto" role="menu" aria-label="Animate the video's place"
+                      text "Position"
+                    column id="motion-menu" popover="auto" role="menu" aria-label="Where the video sits, and how it moves"
                       button press=editDo("add-move") popovertarget="motion-menu" popovertargetaction="hide" testId="add-move"
                         image "symbol:sf/diamond"
                         text "Add Move Here"
@@ -601,7 +601,7 @@ component ExactStudio
                           for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
                             button press=placeAt(pl) buttonStyle="bordered" testId=`place-${pl}`
                               text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
-                        text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. Motion › Add Move Here, then drag, animates it.") font="-exact-caption1" color="-exact-tertiary-label"
+                        text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. Position › Add Move Here, then drag, animates it.") font="-exact-caption1" color="-exact-tertiary-label"
                     column gap=10
                       button press=toggleSection("help") appearance="none" aria-expanded=openHelp testId="sec-help" padding-top=2 padding-bottom=2
                         row align-items="center" gap=6 flex=1

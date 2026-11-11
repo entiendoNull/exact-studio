@@ -269,9 +269,9 @@ final class TimelineView: NSView {
             tag.draw(at: CGPoint(x: pill.minX + 7, y: pill.minY + 2.5), withAttributes: attrs)
         }
 
-        // The motion track: each move's travel, ending in a diamond where it lands.
+        // The position track: each move's travel, ending in a diamond where it lands.
         let my = Self.motionTop, mh = Self.motionHeight
-        drawLabel("Motion", symbol: "arrow.up.and.down.and.arrow.left.and.right", y: my, height: mh, attrs: label, tint: .systemTeal)
+        drawLabel("Position", symbol: "arrow.up.and.down.and.arrow.left.and.right", y: my, height: mh, attrs: label, tint: .systemTeal)
         NSColor(white: 1, alpha: 0.05).setFill()
         NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: my, width: trackRect.width, height: mh), xRadius: 7, yRadius: 7).fill()
         if editor.edits.moves.isEmpty {
@@ -303,7 +303,7 @@ final class TimelineView: NSView {
         for i in 0..<lanesShown {
             let y = laneY(i)
             let empty = !effects.contains { $0.lane == i }
-            drawLabel(i == 0 ? "Effects" : "Lane \(i + 1)", symbol: "sparkles", y: y, height: Self.laneHeight, attrs: label, tint: i == 0 ? .systemPurple : NSColor(white: 1, alpha: 0.35))
+            drawLabel("Lane \(i + 1)", symbol: "square.stack", y: y, height: Self.laneHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.5))
             NSColor(white: 1, alpha: i < editor.edits.lanes ? 0.05 : 0.025).setFill()
             NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: y, width: trackRect.width, height: Self.laneHeight), xRadius: 7, yRadius: 7).fill()
             if empty && editor.edits.lanes > 1 && i < editor.edits.lanes {
