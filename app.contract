@@ -53,9 +53,6 @@ shape SegmentInfo
   moveStyle: string
   duration: number
   scale: number
-  tilt: number
-  turn: number
-  rotate: number
   problem: string
 
 shape Summary
@@ -71,9 +68,6 @@ shape Summary
   found: bool
   cursorDrawn: bool
   baseScale: number
-  tilt: number
-  turn: number
-  rotate: number
 
 shape Reply
   ok: bool
@@ -99,7 +93,6 @@ fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kin
 fn kindTitle(kind: string, level: number, rate: number): string = kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
-fn depthLabel(p: string): string = p == "hero" ? "Hero" : p == "lean-left" ? "Lean Left" : p == "lean-right" ? "Lean Right" : p == "lay-back" ? "Lay Back" : "Flat"
 fn countLine(n: number, one: string, many: string): string = n == 1 ? `1 ${one}` : `${n} ${many}`
 
 routes nav
@@ -247,8 +240,6 @@ component ExactStudio
     send edited = editClip(selected, "move", field, 0, v)
   action moveNumber(field: string, v: number)
     send edited = editClip(selected, "move", field, 0, `${v}`)
-  action angleAt(field: string, v: number)
-    send edited = editClip(selected, "angle", field, 0, `${round(v)}`)
   action placeAt(name: string)
     send edited = editClip(selected, "place", "", 0, name)
   action pattern(name: string)
@@ -422,16 +413,6 @@ component ExactStudio
                       button press=pattern("drift") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-drift"
                         text "Slow Push In"
                         text "A gentle zoom over six seconds"
-                      hr
-                      button press=pattern("turntable") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-turntable"
-                        text "Turntable"
-                        text "Swings to each side in 3D, then faces front"
-                      button press=pattern("reveal") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-reveal"
-                        text "Hero Reveal"
-                        text "Rises from lying back into a hero angle"
-                      button press=pattern("float") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-float"
-                        text "Float"
-                        text "Drifts slowly between gentle angles"
                     button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
                       image "symbol:sf/cursorarrow.click.2"
                       text "Zoom on Clicks"
@@ -590,27 +571,7 @@ component ExactStudio
                             text "Size" flex=1
                             text `${sel.scale}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
                           input type="range" min=20 max=250 step=1 value=sel.scale change=moveNumber("scale") aria-label="Size" testId="move-scale"
-                        text "In depth" font="-exact-caption1" color="-exact-secondary-label"
-                        row gap=6 flex-wrap="wrap"
-                          for d in ["hero", "lean-left", "lean-right", "lay-back", "flat"] key=d
-                            button press=placeAt(d) buttonStyle="bordered" testId=`move-depth-${d}`
-                              text depthLabel(d)
-                        column gap=4
-                          row
-                            text "Tilt" flex=1
-                            text `${sel.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-70 max=70 step=1 value=sel.tilt change=moveNumber("tilt") aria-label="Tilt" testId="move-tilt"
-                        column gap=4
-                          row
-                            text "Turn" flex=1
-                            text `${sel.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-70 max=70 step=1 value=sel.turn change=moveNumber("turn") aria-label="Turn" testId="move-turn"
-                        column gap=4
-                          row
-                            text "Rotate" flex=1
-                            text `${sel.rotate}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-45 max=45 step=1 value=sel.rotate change=moveNumber("rotation") aria-label="Rotate" testId="move-rotate"
-                        text "With this move selected, drag the video in the preview to set where it lands; ⌥-drag turns it in depth." font="-exact-caption1" color="-exact-tertiary-label"
+                        text "With this move selected, drag the video in the preview to set where it lands." font="-exact-caption1" color="-exact-tertiary-label"
                       if sel.kind == "clip"
                         button press=editDo("remove") buttonStyle=(sel.removed ? "bordered" : "filled") testId="piece-remove"
                           text (sel.removed ? "Restore This Part" : "Remove This Part")
@@ -645,26 +606,7 @@ component ExactStudio
                           for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
                             button press=placeAt(pl) buttonStyle="bordered" testId=`place-${pl}`
                               text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
-                        row gap=6 flex-wrap="wrap"
-                          for d in ["hero", "lean-left", "lean-right", "lay-back", "flat"] key=d
-                            button press=placeAt(d) buttonStyle="bordered" testId=`depth-${d}`
-                              text depthLabel(d)
-                        column gap=4
-                          row
-                            text "Tilt" flex=1
-                            text `${summary.tilt}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-70 max=70 step=1 value=summary.tilt change=angleAt("tilt") aria-label="Tilt" testId="tilt"
-                        column gap=4
-                          row
-                            text "Turn" flex=1
-                            text `${summary.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-70 max=70 step=1 value=summary.turn change=angleAt("turn") aria-label="Turn" testId="turn"
-                        column gap=4
-                          row
-                            text "Rotate" flex=1
-                            text `${summary.rotate}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                          input type="range" min=-45 max=45 step=1 value=summary.rotate change=angleAt("rotation") aria-label="Rotate" testId="rotate"
-                        text (summary.moves == 0 ? "Drag the video in the preview to move it, ⌥-drag to turn it in depth, scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. Motion › Add Move Here, then drag, animates it.") font="-exact-caption1" color="-exact-tertiary-label"
+                        text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. Motion › Add Move Here, then drag, animates it.") font="-exact-caption1" color="-exact-tertiary-label"
                     column gap=10
                       button press=toggleSection("help") appearance="none" aria-expanded=openHelp testId="sec-help" padding-top=2 padding-bottom=2
                         row align-items="center" gap=6 flex=1
