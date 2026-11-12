@@ -25,6 +25,7 @@ JSON Schemas: [`schema/edits.schema.json`](../schema/edits.schema.json), [`schem
 ./exact-studio validate latest           # exit 1 with one line per problem
 ./exact-studio frame latest 4.5          # .exact/frame.png: the frame at 4.5 s of the video
 ./exact-studio export latest             # ~/Movies/Exact Studio/<name> <id>.mp4
+./exact-studio export latest --quality 720p   # best (default), 1080p, 720p or small
 ```
 
 `frame` and `export` use the app's own renderer, so what they show is what the app exports.

@@ -41,8 +41,8 @@ const sources: Sources = {
     later(native, { op: 'start', source }, { ok: false, error: 'Recording needs the Mac app.' }),
   stopRecording: (_args, _store, _storage, native) =>
     later(native, { op: 'stop' }, { ok: false, error: 'Not recording.', id: '' }),
-  exportRecording: ([id, look], _store, _storage, native) =>
-    later(native, { op: 'export', id, look }, { ok: false, error: 'Export needs the Mac app.', path: '' }),
+  exportRecording: ([id, quality, to], _store, _storage, native) =>
+    later(native, { op: 'export', id, quality, to }, { ok: false, error: 'Export needs the Mac app.', path: '', copied: false }),
   deleteRecording: ([id], _store, _storage, native) =>
     later(native, { op: 'delete', id }, { ok: false, error: '' }),
   revealFile: ([path], _store, _storage, native) => later(native, { op: 'reveal', path }, { ok: false }),

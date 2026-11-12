@@ -15,6 +15,14 @@ The preview, the export and the CLI all draw with the same code (`Framing.render
 `AVVideoCompositing`). What you see is what you export. Don't add a second, "faster" path for
 one of them.
 
+## Export
+
+- Qualities: **Full** (the canvas size, up to 4K), **1080p**, **720p**, **Small** (960 px wide, lower
+  bitrate). They only scale down. The frame is drawn at the canvas size, then scaled, so a small
+  export looks like the big one.
+- Destinations: the Movies folder, **Save As…**, or the **clipboard**. A copy is a real file put
+  on the clipboard, so it pastes into Slack, Messages and Finder.
+
 ## No blinking
 
 Edits must not make the preview blink. A change swaps the render state and redraws in place. A

@@ -1274,8 +1274,45 @@ final class StudioCompositor: NSObject, AVVideoCompositing {
         }
         image = framing.overlay(image, at: last)
         let size = request.renderContext.size
+        // A smaller export: the frame is drawn at the canvas size, then scaled down.
+        if abs(size.width - framing.canvas.width) > 0.5 || abs(size.height - framing.canvas.height) > 0.5 {
+            image = image.transformed(by: CGAffineTransform(scaleX: size.width / framing.canvas.width, y: size.height / framing.canvas.height))
+        }
         StudioCompositor.context.render(image, to: out, bounds: CGRect(origin: .zero, size: size), colorSpace: StudioCompositor.space)
         request.finish(withComposedVideoFrame: out)
+    }
+}
+
+/// Export qualities: how large the video is and how hard it is compressed. Only ever scales down.
+// @ref LLP 0003#export — qualities only scale down; the same frame, drawn smaller
+enum ExportQuality {
+    static let names = ["best", "1080p", "720p", "small"]
+
+    /// The longest side, in pixels; nil keeps the canvas size.
+    static func longSide(_ name: String) -> CGFloat? {
+        switch name { case "1080p": 1920; case "720p": 1280; case "small": 960; default: nil }
+    }
+
+    static func size(_ name: String, canvas: CGSize) -> CGSize {
+        guard let cap = longSide(name), max(canvas.width, canvas.height) > cap else { return canvas }
+        let k = cap / max(canvas.width, canvas.height)
+        // Even sides: H.264 needs them.
+        return CGSize(width: (canvas.width * k / 2).rounded() * 2, height: (canvas.height * k / 2).rounded() * 2)
+    }
+
+    static func preset(_ name: String) -> String {
+        name == "small" ? AVAssetExportPreset960x540 : AVAssetExportPresetHighestQuality
+    }
+
+    /// One export session for a made composition, at `name`'s quality.
+    static func session(_ asset: AVAsset, _ composition: AVMutableVideoComposition, quality name: String, to out: URL) -> AVAssetExportSession? {
+        composition.renderSize = size(name, canvas: composition.renderSize)
+        guard let s = AVAssetExportSession(asset: asset, presetName: preset(name)) else { return nil }
+        s.outputURL = out
+        s.outputFileType = .mp4
+        s.videoComposition = composition
+        s.shouldOptimizeForNetworkUse = true
+        return s
     }
 }
 

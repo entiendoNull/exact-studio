@@ -18,7 +18,8 @@ exact-studio — edit Exact Studio recordings from the command line
   exact-studio frame <id> <time> [--out f.png] [--source]
                                             renders one frame at <time> seconds of the video
                                             (--source: of the recording); default .exact/frame.png
-  exact-studio export <id> [--out f.mp4]    renders the video; default ~/Movies/Exact Studio/<name>.mp4
+  exact-studio export <id> [--out f.mp4] [--quality best|1080p|720p|small]
+                                            renders the video; default ~/Movies/Exact Studio/<name>.mp4
   exact-studio template <id> <name>         replaces texts, effects and moves with a template:
                                             launch, hero, tour, teaser (laid out for look.json's aspect)
   exact-studio schema                       prints where the docs and JSON Schemas are
@@ -212,11 +213,9 @@ case "export":
     let out = URL(fileURLWithPath: option("--out") ?? library.deletingLastPathComponent().appendingPathComponent("\(safe) \(r.id).mp4").path)
     try? FileManager.default.removeItem(at: out)
     let (mix, comp, map) = composition(r)
-    guard let session = AVAssetExportSession(asset: mix, presetName: AVAssetExportPresetHighestQuality) else { fail("this Mac can't export that") }
-    session.outputURL = out
-    session.outputFileType = .mp4
-    session.videoComposition = comp
-    session.shouldOptimizeForNetworkUse = true
+    let quality = option("--quality") ?? "best"
+    guard ExportQuality.names.contains(quality) else { fail("no quality \(quality); one of \(ExportQuality.names.joined(separator: ", "))") }
+    guard let session = ExportQuality.session(mix, comp, quality: quality, to: out) else { fail("this Mac can't export that") }
     let done = DispatchSemaphore(value: 0)
     session.exportAsynchronously { done.signal() }
     let start = Date()
@@ -225,7 +224,7 @@ case "export":
     }
     FileHandle.standardError.write("\r".data(using: .utf8)!)
     guard session.status == .completed else { fail("the export stopped: \(session.error?.localizedDescription ?? "unknown")", code: 1) }
-    print("\(out.path)  \(stamp(map.outputDuration))  in \(Int(Date().timeIntervalSince(start)))s")
+    print("\(out.path)  \(Int(comp.renderSize.width))×\(Int(comp.renderSize.height))  \(stamp(map.outputDuration))  in \(Int(Date().timeIntervalSince(start)))s")
 
 case "template":
     guard args.count >= 2 else { fail(usage) }

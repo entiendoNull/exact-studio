@@ -15,7 +15,7 @@
 //                 do: add (track: a kind, or zoom-in, zoom-out, slow, fast), set (number | kind),
 //                     delete, split, auto, clear, play, split-clip, remove, join-prev, join-next,
 //                     add-lane, start / end (kind: the typed time)
-//          {op: "export", id, look}             → {ok, error, path}
+//          {op: "export", id, quality, to}      → {ok, error, path, copied}  quality best|1080p|720p|small; to movies|choose|clipboard
 //          {op: "delete", id}                   → {ok, error}
 //          {op: "reveal", path}                 → {ok}
 //          {op: "crop", id, edge, by}           → {ok}  nudges a recording's crop by `by` (unit) at an edge
@@ -24,6 +24,7 @@ import AppKit
 import AVFoundation
 import AVKit
 import ScreenCaptureKit
+import UniformTypeIdentifiers
 
 final class Studio: ExactModule {
     override class var views: [String: ExactNativeFactory] {
@@ -121,7 +122,8 @@ final class Studio: ExactModule {
             edit(request)
             reply.send(["ok": true])
         case "export":
-            export(id: request["id"] as? String ?? "", reply: reply)
+            export(id: request["id"] as? String ?? "", quality: request["quality"] as? String ?? "best",
+                   to: request["to"] as? String ?? "movies", reply: reply)
         case "delete":
             let id = request["id"] as? String ?? ""
             guard !id.isEmpty, !id.contains("/") else { return reply.send(["ok": false, "error": "No such recording."]) }
@@ -290,29 +292,60 @@ final class Studio: ExactModule {
         context.changed("recordings")
     }
 
-    private func export(id: String, reply: ExactReply) {
-        guard let e = editor(id) else { return reply.send(["ok": false, "error": "No such recording.", "path": ""]) }
+    private func export(id: String, quality: String, to: String, reply: ExactReply) {
+        func fail(_ why: String) { reply.send(["ok": false, "error": why, "path": "", "copied": false]) }
+        guard let e = editor(id) else { return fail("No such recording.") }
         let made: (AVAsset, AVMutableVideoComposition)
-        do { made = try e.exportable(look: e.look) } catch { return reply.send(["ok": false, "error": "\(error)", "path": ""]) }
-        guard let session = AVAssetExportSession(asset: made.0, presetName: AVAssetExportPresetHighestQuality) else {
-            return reply.send(["ok": false, "error": "This Mac can’t export that.", "path": ""])
-        }
+        do { made = try e.exportable(look: e.look) } catch { return fail("\(error)") }
         let safe = e.meta.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
-        try? FileManager.default.createDirectory(at: Library.root, withIntermediateDirectories: true)
-        var out = Library.root.appendingPathComponent("\(safe) \(id).mp4")
-        var n = 2
-        while FileManager.default.fileExists(atPath: out.path) { out = Library.root.appendingPathComponent("\(safe) \(id) \(n).mp4"); n += 1 }
-        session.outputURL = out
-        session.outputFileType = .mp4
-        session.videoComposition = made.1
-        session.shouldOptimizeForNetworkUse = true
-        session.exportAsynchronously {
-            if session.status == .completed {
-                reply.send(["ok": true, "error": "", "path": out.path])
-            } else {
-                reply.send(["ok": false, "error": session.error?.localizedDescription ?? "The export stopped.", "path": ""])
+        let tag = quality == "best" ? "" : " \(quality)"
+
+        func run(_ out: URL) {
+            guard let session = ExportQuality.session(made.0, made.1, quality: quality, to: out) else { return fail("This Mac can’t export that.") }
+            session.exportAsynchronously {
+                guard session.status == .completed else { return fail(session.error?.localizedDescription ?? "The export stopped.") }
+                guard to == "clipboard" else { return reply.send(["ok": true, "error": "", "path": out.path, "copied": false]) }
+                DispatchQueue.main.async {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.writeObjects([out as NSURL])
+                    reply.send(["ok": true, "error": "", "path": out.path, "copied": true])
+                }
             }
         }
+
+        // Where it goes: the Movies folder, a place the person picks, or a file behind the clipboard.
+        let out: URL
+        switch to {
+        case "choose":
+            // The save panel is modal and needs the main thread; the export goes on from there.
+            DispatchQueue.main.async {
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.mpeg4Movie]
+                panel.nameFieldStringValue = "\(safe)\(tag).mp4"
+                panel.directoryURL = Library.root
+                NSApp.activate(ignoringOtherApps: true)
+                guard panel.runModal() == .OK, let picked = panel.url else {
+                    return reply.send(["ok": false, "error": "", "path": "", "copied": false])
+                }
+                try? FileManager.default.removeItem(at: picked)
+                run(picked)
+            }
+            return
+        case "clipboard":
+            // A real file, kept until the next copy, so apps that paste files (Slack, Messages, Finder) get the video.
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("Exact Studio Clipboard")
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            out = dir.appendingPathComponent("\(safe)\(tag).mp4")
+        default:
+            try? FileManager.default.createDirectory(at: Library.root, withIntermediateDirectories: true)
+            var url = Library.root.appendingPathComponent("\(safe) \(id)\(tag).mp4")
+            var n = 2
+            while FileManager.default.fileExists(atPath: url.path) { url = Library.root.appendingPathComponent("\(safe) \(id)\(tag) \(n).mp4"); n += 1 }
+            out = url
+        }
+
+        run(out)
     }
 }
 let exactModule: ExactModule.Type = Studio.self
