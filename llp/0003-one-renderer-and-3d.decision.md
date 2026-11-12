@@ -17,6 +17,8 @@ one of them.
 
 ## Export
 
+- **Export** is a button in the header. It opens a lightbox in the middle of the window, over
+  everything. Not in the inspector: it is an action, not a setting.
 - Qualities: **Full** (the canvas size, up to 4K), **1080p**, **720p**, **Small** (960 px wide, lower
   bitrate). They only scale down. The frame is drawn at the canvas size, then scaled, so a small
   export looks like the big one.

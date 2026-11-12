@@ -142,6 +142,7 @@ component ExactStudio
   // Where the settings of the selection show: "dock", "float", "overlay" or "left".
   state panelMode = "dock" persist
   state exportQuality = "best" persist
+  state exportOpen = false
   state panelX = 24 persist
   // The timeline's height, set by dragging the handle under the preview; the preview takes the rest.
   state timelineH = 330 persist
@@ -229,6 +230,10 @@ component ExactStudio
     send exported = exportRecording(selected, exportQuality, to)
   action pickQuality(q: string)
     exportQuality = q
+  action openExport
+    exportOpen = true
+  action closeExport
+    exportOpen = false
   action reveal
     send revealed = revealFile(exportPath)
   action remove
@@ -350,6 +355,10 @@ component ExactStudio
                   text (m == "dock" ? "Docked on the Right" : m == "float" ? "Floating" : m == "overlay" ? "Lightbox over the Video" : "On the Left")
             button press=toggleRight aria-label=(rightOpen ? "Hide the inspector" : "Show the inspector") testId="toggle-right"
               image "symbol:sf/sidebar.right"
+            if current != none
+              button press=openExport buttonStyle="filled" margin-left=10 testId="export-open"
+                image "symbol:sf/square.and.arrow.up"
+                text "Export"
           row flex=1 min-height=0
             // ── The sidebar: what to record, and what has been recorded.
             scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
@@ -577,26 +586,6 @@ component ExactStudio
             if current != none
               scroll width=(rightOpen ? "25rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="inspector"
                 column gap=30 padding="20px 24px 32px 20px" width="calc(25rem - 15px)" box-sizing="border-box" opacity=(rightOpen ? 1 : 0) transition="opacity 200ms ease"
-                  column gap=10
-                    row gap=8
-                      button press=exportIt("movies") buttonStyle="filled" disabled=pending(exported) flex=1 testId="export"
-                        image "symbol:sf/square.and.arrow.up"
-                        text (pending(exported) ? "Exporting…" : "Export MP4")
-                      button press=exportIt("clipboard") buttonStyle="bordered" disabled=pending(exported) aria-label="Copy the video to the clipboard" title="Copy to Clipboard" testId="export-copy"
-                        image "symbol:sf/doc.on.clipboard"
-                      button press=exportIt("choose") buttonStyle="bordered" disabled=pending(exported) aria-label="Save the video as…" title="Save As…" testId="export-save-as"
-                        image "symbol:sf/folder"
-                    row role="radiogroup" aria-label="Export quality"
-                      for q in ["best", "1080p", "720p", "small"] key=q
-                        button role="radio" aria-checked=(exportQuality == q) press=pickQuality(q) testId=`quality-${q}` flex=1
-                          text (q == "best" ? "Full" : q == "small" ? "Small" : q)
-                    if exportLine != ""
-                      row gap=8 align-items="center"
-                        text exportLine font="-exact-footnote" color="-exact-secondary-label" flex=1 testId="export-line"
-                        if exportPath != ""
-                          button press=reveal testId="reveal"
-                            text "Show" font="-exact-footnote"
-
                   if sel.problem != ""
                     row gap=8 padding=12 border-radius=12 background-color="-exact-tertiary-background" align-items="flex-start" testId="problem"
                       image "symbol:alert" color="-exact-system-orange" aria-hidden=true
@@ -797,6 +786,44 @@ component ExactStudio
                       text "Clear Edits"
                     button press=remove buttonStyle="bordered" flex=1 testId="delete"
                       text "Delete"
+
+          // ── Export: a lightbox in the middle of the window.
+          if exportOpen and current != none
+            column press=closeExport aria-label="Close Export" position="absolute" inset=0 background-color="#0000008C" testId="export-backdrop"
+            column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="export-lightbox"
+              column role="dialog" aria-label="Export" pointer-events="auto" width="30rem" max-width="90%" gap=26 padding="26px 28px 28px 28px" box-sizing="border-box" border-radius=20 box-shadow="0px 24px 80px #0000009A" background-color="-exact-secondary-background"
+                row align-items="flex-start" gap=12
+                  column gap=4 flex=1 min-width=0
+                    text "Export" font="-exact-title2" font-weight=700
+                    text `${match current { case some(r) => r.name, case none => "" }} · ${mmss(summary.length)}` font="-exact-subheadline" color="-exact-secondary-label" testId="export-what"
+                  button press=closeExport aria-label="Close" testId="export-close"
+                    image "symbol:sf/xmark"
+
+                column gap=10
+                  text "QUALITY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                  row role="radiogroup" aria-label="Export quality"
+                    for q in ["best", "1080p", "720p", "small"] key=q
+                      button role="radio" aria-checked=(exportQuality == q) press=pickQuality(q) testId=`quality-${q}` flex=1
+                        text (q == "best" ? "Full" : q == "small" ? "Small" : q)
+                  text (exportQuality == "best" ? "The full size, up to 4K. The sharpest, and the largest file." : exportQuality == "1080p" ? "Sharp everywhere. A good default for sharing." : exportQuality == "720p" ? "A smaller file for chat, docs and the web." : "The smallest file, quick to send. Less sharp.") font="-exact-footnote" color="-exact-tertiary-label" testId="quality-hint"
+
+                column gap=10
+                  button press=exportIt("movies") buttonStyle="filled" disabled=pending(exported) testId="export"
+                    image "symbol:sf/square.and.arrow.down"
+                    text (pending(exported) ? "Exporting…" : "Save to Movies")
+                  row gap=10
+                    button press=exportIt("choose") buttonStyle="bordered" disabled=pending(exported) flex=1 testId="export-save-as"
+                      image "symbol:sf/folder"
+                      text "Save As…"
+                    button press=exportIt("clipboard") buttonStyle="bordered" disabled=pending(exported) flex=1 testId="export-copy"
+                      image "symbol:sf/doc.on.clipboard"
+                      text "Copy to Clipboard"
+                  if exportLine != ""
+                    row gap=8 align-items="center" min-height=24
+                      text exportLine font="-exact-footnote" color="-exact-secondary-label" flex=1 testId="export-line"
+                      if exportPath != ""
+                        button press=reveal testId="reveal"
+                          text "Show in Finder" font="-exact-footnote"
 
 // The settings of what is selected: docked in the inspector, floating over the stage, a lightbox
 // over the video, or on the left; its header's menu moves it.
