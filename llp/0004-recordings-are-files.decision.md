@@ -25,3 +25,9 @@ that only lives in the app.
 `./exact-studio` (list, show, validate, frame, export, template, schema) builds from the app's own
 renderer sources (LLP 0003), so a frame from the CLI is the frame the app exports.
 The `edit-recording` skill in `.claude/skills/` is the workflow for agents.
+
+## Opening
+
+- File ▸ Open Recording… (⌘O, also "Open…" in the sidebar) picks a recording folder: the one with `meta.json`.
+- A folder already in the library is selected. A folder from somewhere else is copied into the library first, under its id.
+- If the library already has that id, the copy in the library wins. Nothing is overwritten.

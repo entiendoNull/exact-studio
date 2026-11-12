@@ -165,6 +165,7 @@ component ExactStudio
   mutation stopped as shape Stopped refreshes library then afterStop
   mutation exported as shape Exported
   mutation deleted as shape Reply refreshes library
+  mutation opened as shape Stopped refreshes library then afterOpen
   mutation revealed as shape Done
   mutation nudged as shape Done refreshes library
   mutation edited as shape Done queue
@@ -192,6 +193,7 @@ component ExactStudio
   derive look = `{"background":"${background}","customA":"${customA}","customB":"${customB}","customAngle":${customAngle},"customRadial":${customRadial},"aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow},"cursor":${cursorOn},"cursorSize":${cursorSize / 100},"clickEffect":${clickEffect},"smoothCursor":${smoothCursor}}`
   derive startError = match started { case some(r) => r.error, case none => "" }
   derive stopError = match stopped { case some(r) => r.error, case none => "" }
+  derive openError = match opened { case some(r) => r.error, case none => "" }
   derive exportLine = match exported { case some(r) => (r.ok ? (r.copied ? "Copied. Paste it into Slack, Messages or Finder." : "Saved.") : r.error), case none => "" }
   derive exportPath = match exported { case some(r) => (r.copied ? "" : r.path), case none => "" }
   task tick when status.recording
@@ -219,6 +221,15 @@ component ExactStudio
         selected = selected
   action choose(id: string)
     selected = id
+  action openIt
+    send opened = openRecording()
+  action afterOpen
+    match opened
+      case some(r)
+        if r.ok
+          selected = r.id
+      case none
+        selected = selected
   action pickBackground(v: string)
     send edited = editClip(selected, "look", "background", 0, v)
   action pickAspect(v: string)
@@ -444,9 +455,14 @@ component ExactStudio
                               text s.name line-clamp=1 text-align="left" align-self="stretch"
                               text s.app font="-exact-caption2" color="-exact-tertiary-label" line-clamp=1 text-align="left" align-self="stretch"
                   column gap=6
-                    text "LIBRARY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                    row align-items="center" justify-content="space-between"
+                      text "LIBRARY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                      // Also File ▸ Open Recording… ⌘O in the menu bar.
+                      button "Open…" press=openIt disabled=pending(opened) -exact-menu="file" aria-label="Open Recording…" aria-keyshortcuts="Meta+O" appearance="none" font="-exact-footnote" color="-exact-secondary-label" testId="open-recording"
                     if stopError != "" and not pending(stopped)
                       text stopError font="-exact-footnote" color="-exact-system-red" testId="stop-error"
+                    if openError != "" and not pending(opened)
+                      text openError font="-exact-footnote" color="-exact-system-red" testId="open-error"
                     if library.items.length == 0
                       text "Nothing recorded yet." color="-exact-tertiary-label" testId="no-recordings"
                     for r in library.items key=r.id

@@ -45,6 +45,8 @@ const sources: Sources = {
     later(native, { op: 'export', id, quality, to }, { ok: false, error: 'Export needs the Mac app.', path: '', copied: false }),
   deleteRecording: ([id], _store, _storage, native) =>
     later(native, { op: 'delete', id }, { ok: false, error: '' }),
+  openRecording: (_args, _store, _storage, native) =>
+    later(native, { op: 'open' }, { ok: false, error: 'Opening needs the Mac app.', id: '' }),
   revealFile: ([path], _store, _storage, native) => later(native, { op: 'reveal', path }, { ok: false }),
   nudgeCrop: ([id, edge, by], _store, _storage, native) => later(native, { op: 'crop', id, edge, by }, { ok: false }),
 };

@@ -99,6 +99,36 @@ final class Studio: ExactModule {
         }
     }
 
+    /// File ▸ Open Recording…: pick a recording folder (the one holding meta.json).
+    /// One in the library is selected; one from elsewhere is copied in first.
+    func openRecording(reply: ExactReply) {
+        let none: [String: Any] = ["ok": false, "error": "", "id": ""]
+        if context.agent { return reply.send(none) }
+        DispatchQueue.main.async {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.allowsMultipleSelection = false
+            panel.prompt = "Open"
+            panel.message = "Choose a recording folder."
+            try? FileManager.default.createDirectory(at: Library.recordings, withIntermediateDirectories: true)
+            panel.directoryURL = Library.recordings
+            NSApp.activate(ignoringOtherApps: true)
+            guard panel.runModal() == .OK, let picked = panel.url?.standardizedFileURL else { return reply.send(none) }
+            guard let data = try? Data(contentsOf: picked.appendingPathComponent("meta.json")),
+                  let meta = try? JSONDecoder().decode(RecordingMeta.self, from: data), !meta.id.contains("/") else {
+                return reply.send(["ok": false, "error": "That folder is not an Exact Studio recording.", "id": ""])
+            }
+            let home = Library.recordings.appendingPathComponent(meta.id).standardizedFileURL
+            if picked.path != home.path && !FileManager.default.fileExists(atPath: home.path) {
+                do { try FileManager.default.copyItem(at: picked, to: home) }
+                catch { return reply.send(["ok": false, "error": "Could not copy it into the library.", "id": ""]) }
+                self.context.changed("recordings")
+            }
+            reply.send(["ok": true, "error": "", "id": meta.id])
+        }
+    }
+
     override func later(_ request: [String: Any], reply: ExactReply) {
         let op = request["op"] as? String ?? ""
         switch op {
@@ -131,6 +161,8 @@ final class Studio: ExactModule {
             try? FileManager.default.removeItem(at: Library.recordings.appendingPathComponent(id))
             context.changed("recordings")
             reply.send(["ok": true, "error": ""])
+        case "open":
+            openRecording(reply: reply)
         case "reveal":
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: request["path"] as? String ?? Library.root.path)])
             reply.send(["ok": true])
