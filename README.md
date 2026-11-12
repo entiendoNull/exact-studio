@@ -30,6 +30,14 @@ Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions,
 
 [`docs/edits.md`](docs/edits.md) documents every field; [`schema/`](schema) has the JSON Schemas; the `edit-recording` skill (`.claude/skills/`) is the workflow.
 
+### MCP
+
+`mcp/server.ts` gives the same verbs to any MCP client: `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template` and `edit_format`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
+
+```sh
+claude mcp add exact-studio -- bun /path/to/exact-studio/mcp/server.ts
+```
+
 ## Run
 
 ```sh
@@ -49,6 +57,7 @@ The app uses the Exact checkout at `../exact`. The first recording asks for Scre
 - `modules/apple/Templates.swift`: the ready-made edits.
 - `modules/apple/Scene3D.swift`: the 3D stage: the slab, its materials, lights and camera.
 - `cli/main.swift`, `exact-studio`: the command-line tool.
+- `mcp/server.ts`, `.mcp.json`: the MCP server around it.
 - `modules/apple/Studio.swift`: the module's ops, the menu bar item, the preview view, export.
 - `llp/`: the decisions behind the design, as short notes. Start at `llp/0000-exact-studio.explainer.md`. `./ref-check` checks them.
 
