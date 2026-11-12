@@ -17,6 +17,7 @@ import Foundation
 enum Bezel {
     /// The bezel's rectangle in unit coordinates, or nil when the frame has
     /// no transparency to go by (bezels hidden): then the caller keeps the window.
+    // @ref LLP 0001#the-crop-is-the-phone-exactly — the crop is the phone, never a rectangle around it
     static func detect(_ buffer: CVPixelBuffer) -> UnitRect? {
         guard CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_32BGRA else { return nil }
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
@@ -56,6 +57,7 @@ enum Bezel {
     /// belongs to it however light it is, and the side buttons touch it. The
     /// title and the toolbar's icons are smaller pieces and are dropped. The
     /// edge is pulled in by a pixel so no panel colour fringes it.
+    // @ref LLP 0001#how-the-phone-is-found — the last fallback; keeps the side buttons
     static func silhouette(_ image: CGImage) -> Silhouette? {
         let w = image.width, h = image.height
         guard w > 40, h > 40,

@@ -88,6 +88,7 @@ final class Editor {
 
     /// A file changed on disk: take what it now says, if it differs from what is open.
     /// The app's own saves read back equal and change nothing.
+    // @ref LLP 0004#the-rule — files are the source of truth; agents edit them while the app runs
     private func checkDisk() {
         let now = Editor.stamps(folder)
         guard now != stamps else { return }

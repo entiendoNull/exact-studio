@@ -35,3 +35,15 @@ Recordings are folders of plain files: `edits.json` is the timeline, `look.json`
 edit them directly and use `./exact-studio` (list, show, validate, frame, export, template) to
 check and render with the app's own renderer. `docs/edits.md` is the format; the
 `edit-recording` skill is the workflow. The app reloads changed files within a second.
+
+## Design notes (LLP)
+
+Decisions we already made live in `llp/`, as short Linked Literate Programming docs
+([ccheever/llp](https://github.com/ccheever/llp)). Start at `llp/0000-exact-studio.explainer.md`.
+
+- Read the doc for the part you change before you change it. `@ref LLP NNNN#section` comments in
+  the code point at the reason behind code that looks like it could be simpler.
+- When a decision changes, update its doc in the same commit. When you make a new one worth
+  keeping, add it to the doc it belongs in, or take the next number.
+- Keep the docs short and plain. One idea per line; no essays.
+- `./ref-check` checks the docs and the references.

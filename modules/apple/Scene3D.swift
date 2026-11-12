@@ -34,6 +34,7 @@ struct ThreeD: Codable, Equatable {
     }
 }
 
+// @ref LLP 0003#real-3d — real 3D on purpose; at 0° it must match the flat picture
 final class Stage3D {
     static let shared = Stage3D()
 

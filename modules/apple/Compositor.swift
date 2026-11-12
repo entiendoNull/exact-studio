@@ -214,6 +214,7 @@ struct Edits: Codable, Equatable {
 
     /// Zooms where the clicks are: clicks less than 3 s apart share one,
     /// which holds for a beat after its last click.
+    // @ref LLP 0002#defaults — only on request (Zoom on Clicks), never on a new recording
     static func autoZooms(_ clicks: [Point], duration: Double, level: Double = 2) -> [Segment] {
         var out: [Segment] = []
         for c in clicks.sorted(by: { $0.t < $1.t }) {
@@ -1141,6 +1142,7 @@ struct Framing {
 // MARK: - Time
 
 /// Source time to output time and back, across removed parts, speed changes and crossfades.
+// @ref LLP 0002#times — the model is in recording time; this converts to video time
 struct TimeMap {
     struct Piece {
         var src0: Double, src1: Double, out0: Double, rate: Double
@@ -1206,6 +1208,7 @@ struct TimeMap {
 
 /// The framing the compositor draws with: swapped whole when a look, effect,
 /// text or move changes, so the playback needn't be rebuilt.
+// @ref LLP 0003#no-blinking — swap state and redraw in place, never rebuild for a look change
 final class RenderState: @unchecked Sendable {
     private var framing: Framing
     private let lock = NSLock()
@@ -1233,6 +1236,7 @@ final class StudioInstruction: NSObject, AVVideoCompositionInstructionProtocol {
     }
 }
 
+// @ref LLP 0003#one-renderer-for-everything — preview, export and CLI all draw here
 final class StudioCompositor: NSObject, AVVideoCompositing {
     let sourcePixelBufferAttributes: [String: any Sendable]? = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
     let requiredPixelBufferAttributesForRenderContext: [String: any Sendable] = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]

@@ -50,5 +50,6 @@ The app uses the Exact checkout at `../exact`. The first recording asks for Scre
 - `modules/apple/Scene3D.swift`: the 3D stage: the slab, its materials, lights and camera.
 - `cli/main.swift`, `exact-studio`: the command-line tool.
 - `modules/apple/Studio.swift`: the module's ops, the menu bar item, the preview view, export.
+- `llp/`: the decisions behind the design, as short notes. Start at `llp/0000-exact-studio.explainer.md`. `./ref-check` checks them.
 
 Recordings are kept in `~/Movies/Exact Studio/Recordings/<id>/` as `capture.mov` (HEVC with alpha), `meta.json`, `cursor.json` and `edits.json`.

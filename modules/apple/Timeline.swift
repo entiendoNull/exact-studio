@@ -238,6 +238,7 @@ final class TimelineView: NSView {
                 sel.stroke()
             }
         }
+        // @ref LLP 0002#our-own-look — our own marker, not one from another app
         // A split marker over each split: a thin line down the gap, with two small arrowheads
         // above the clip pointing in at it.
         for split in editor.edits.splits where split > 0.001 && split < d - 0.001 {
