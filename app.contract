@@ -397,14 +397,17 @@ component ExactStudio
                       button press=record("area") buttonStyle="filled" disabled=pending(started) testId="record-area"
                         image "symbol:sf/rectangle.dashed"
                         text "Drag Out an Area"
-                      row align-items="center" gap=8 padding-top=2
-                        image (recordSound ? "symbol:sf/speaker.wave.2" : "symbol:sf/speaker.slash") color="-exact-secondary-label" aria-hidden=true
-                        text "Record system sound" font="-exact-subheadline" flex=1
-                        input type="checkbox" switch checked=recordSound change=setRecordSound aria-label="Record system sound" testId="record-sound"
                       if not sources.allowed and not pending(sources)
                         text "Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-system-orange" testId="permission"
                       if startError != "" and not pending(started)
                         text startError font="-exact-footnote" color="-exact-system-red" testId="start-error"
+                    // Sound applies to every source below, so it sits outside the area card.
+                    row align-items="center" gap=12 padding="12px 16px" border-radius=14 background-color="-exact-tertiary-background" testId="sound-setting"
+                      image (recordSound ? "symbol:sf/speaker.wave.2.fill" : "symbol:sf/speaker.slash.fill") color=(recordSound ? "AccentColor" : "-exact-secondary-label") font="-exact-title3" width=28 text-align="center" aria-hidden=true
+                      column flex=1 min-width=0 gap=2
+                        text "System Sound" font="-exact-headline"
+                        text (recordSound ? "On for every recording" : "Off for every recording") font="-exact-footnote" color="-exact-secondary-label"
+                      input type="checkbox" switch checked=recordSound change=setRecordSound aria-label="Record system sound in every recording" testId="record-sound"
                     if devices.length > 0
                       column gap=6
                         text "SIMULATORS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
