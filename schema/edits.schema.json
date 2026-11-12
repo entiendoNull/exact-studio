@@ -123,6 +123,12 @@
         ]
       }
     },
+    "volume": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "The recorded sound's volume; 0 mutes it. It follows every cut, speed change and fade."
+    },
     "three": {
       "type": "object",
       "properties": {

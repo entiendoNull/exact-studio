@@ -269,6 +269,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private let stream: SCStream
     private let writer: AVAssetWriter
     private let input: AVAssetWriterInput
+    /// The system's sound, when asked for.
+    private let ears: AVAssetWriterInput?
     private let queue = DispatchQueue(label: "exact-studio.capture")
     private let pixelSize: CGSize
     /// Where the captured content is on screen, in global points, origin top-left;
@@ -302,9 +304,21 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         ])
         input.expectsMediaDataInRealTime = true
         writer.add(input)
+        if config.capturesAudio {
+            let ears = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: config.sampleRate,
+                AVNumberOfChannelsKey: config.channelCount, AVEncoderBitRateKey: 192_000,
+            ])
+            ears.expectsMediaDataInRealTime = true
+            writer.add(ears)
+            self.ears = ears
+        } else {
+            ears = nil
+        }
         stream = SCStream(filter: filter, configuration: config, delegate: nil)
         super.init()
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        if ears != nil { try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue) }
     }
 
     func start() async throws {
@@ -337,6 +351,13 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
+        // Sound joins once the first frame has opened the file; sound from before it is dropped.
+        if type == .audio {
+            guard let ears, let first = firstTime, sample.isValid, sample.presentationTimeStamp.seconds >= first,
+                  ears.isReadyForMoreMediaData else { return }
+            ears.append(sample)
+            return
+        }
         guard type == .screen, sample.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let raw = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
@@ -386,6 +407,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
                     return k.resume(throwing: ExactStudioError("No frames arrived. Is Screen Recording allowed in System Settings › Privacy & Security?"))
                 }
                 self.input.markAsFinished()
+                self.ears?.markAsFinished()
                 self.writer.endSession(atSourceTime: CMTime(seconds: self.lastTime, preferredTimescale: 600))
                 let cursor = self.cursor.filter { $0.0 >= first }.map { Point(t: $0.0 - first, x: $0.1.x, y: $0.1.y) }
                 let point = { (e: (Double, CGPoint)) in Point(t: e.0 - first, x: e.1.x, y: e.1.y) }
@@ -412,7 +434,7 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         return CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
     }
 
-    static func make(source: String, area: (NSScreen, CGRect)?, folder: URL, id: String) async throws -> Recorder {
+    static func make(source: String, area: (NSScreen, CGRect)?, folder: URL, id: String, sound: Bool) async throws -> Recorder {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         let config = SCStreamConfiguration()
         config.pixelFormat = kCVPixelFormatType_32BGRA
@@ -420,7 +442,11 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         config.showsCursor = false
         config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         config.queueDepth = 8
-        config.capturesAudio = false
+        // The system's sound (a window's: its app's), never this app's own.
+        config.capturesAudio = sound
+        config.excludesCurrentProcessAudio = true
+        config.sampleRate = 48_000
+        config.channelCount = 2
         config.ignoreShadowsSingleWindow = true
         config.shouldBeOpaque = false
 

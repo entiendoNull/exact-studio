@@ -96,6 +96,8 @@ shape Summary
   angleMove: string
   thickness: number
   edge: string
+  sound: bool
+  volume: number
 
 shape Reply
   ok: bool
@@ -143,6 +145,7 @@ component ExactStudio
   state panelMode = "dock" persist
   state exportQuality = "best" persist
   state exportOpen = false
+  state recordSound = true persist
   state panelX = 24 persist
   // The timeline's height, set by dragging the handle under the preview; the preview takes the rest.
   state timelineH = 330 persist
@@ -201,7 +204,7 @@ component ExactStudio
   action toggleWindows
     allWindows = not allWindows
   action record(source: string)
-    send started = startRecording(source)
+    send started = startRecording(source, recordSound)
   action afterStart
     startedAt = performanceNow()
     now = performanceNow()
@@ -228,6 +231,12 @@ component ExactStudio
     send edited = editClip(selected, "look", "shadow", 0, `${v}`)
   action exportIt(to: string)
     send exported = exportRecording(selected, exportQuality, to)
+  action setRecordSound(v: bool)
+    recordSound = v
+  action setMuted(v: bool)
+    send edited = editClip(selected, "volume", "", (v ? 0 : 100), "")
+  action setVolume(v: number)
+    send edited = editClip(selected, "volume", "", round(v), "")
   action pickQuality(q: string)
     exportQuality = q
   action openExport
@@ -388,6 +397,10 @@ component ExactStudio
                       button press=record("area") buttonStyle="filled" disabled=pending(started) testId="record-area"
                         image "symbol:sf/rectangle.dashed"
                         text "Drag Out an Area"
+                      row align-items="center" gap=8 padding-top=2
+                        image (recordSound ? "symbol:sf/speaker.wave.2" : "symbol:sf/speaker.slash") color="-exact-secondary-label" aria-hidden=true
+                        text "Record system sound" font="-exact-subheadline" flex=1
+                        input type="checkbox" switch checked=recordSound change=setRecordSound aria-label="Record system sound" testId="record-sound"
                       if not sources.allowed and not pending(sources)
                         text "Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-system-orange" testId="permission"
                       if startError != "" and not pending(started)
@@ -612,6 +625,20 @@ component ExactStudio
                       text `${countLine(summary.parts, "clip part", "clip parts")} (${summary.removed} removed) · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")} · ${countLine(summary.moves, "move", "moves")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
                       if openHelp
                         text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
+
+                  if summary.sound
+                    column gap=12 testId="sound"
+                      text "SOUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                      row align-items="center" gap=8
+                        image (summary.volume == 0 ? "symbol:sf/speaker.slash" : "symbol:sf/speaker.wave.2") color="-exact-secondary-label" aria-hidden=true
+                        text "Mute" flex=1
+                        input type="checkbox" switch checked=(summary.volume == 0) change=setMuted aria-label="Mute" testId="mute"
+                      column gap=4
+                        row
+                          text "Volume" flex=1
+                          text `${summary.volume}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+                        input type="range" min=0 max=100 step=1 value=summary.volume input=setVolume aria-label="Volume" testId="volume"
+                      text "Cuts, speed changes and crossfades apply to the sound too." font="-exact-caption1" color="-exact-tertiary-label"
 
                   column gap=16
                     button press=toggleSection("bg") appearance="none" aria-expanded=openBg testId="sec-bg" padding-top=2 padding-bottom=2

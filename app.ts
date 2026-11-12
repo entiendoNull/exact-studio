@@ -26,7 +26,7 @@ const sources: Sources = {
     return native.call({ op: 'selection', id }) as Result<'editSelection'>;
   },
   editSummary: async ([id], _store, _storage, native): Promise<Result<'editSummary'>> => {
-    if (!native?.available) return { parts: 1, removed: 0, effects: 0, lanes: 1, moves: 0, length: 0, source: 0, playing: false, device: false, found: false, cursorDrawn: false, baseScale: 100, canUndoTemplate: false, threeOn: false, tilt: 0, turn: 0, roll: 0, angleMove: '', thickness: 5, edge: 'metal' };
+    if (!native?.available) return { parts: 1, removed: 0, effects: 0, lanes: 1, moves: 0, length: 0, source: 0, playing: false, device: false, found: false, cursorDrawn: false, baseScale: 100, canUndoTemplate: false, threeOn: false, tilt: 0, turn: 0, roll: 0, angleMove: '', thickness: 5, edge: 'metal', sound: false, volume: 100 };
     native.watch('edits');
     return native.call({ op: 'summary', id }) as Result<'editSummary'>;
   },
@@ -37,8 +37,8 @@ const sources: Sources = {
   },
   editClip: ([id, what, track, number, kind], _store, _storage, native) =>
     later(native, { op: 'edit', id, do: what, track, number, kind }, { ok: false }),
-  startRecording: ([source], _store, _storage, native) =>
-    later(native, { op: 'start', source }, { ok: false, error: 'Recording needs the Mac app.' }),
+  startRecording: ([source, sound], _store, _storage, native) =>
+    later(native, { op: 'start', source, sound }, { ok: false, error: 'Recording needs the Mac app.' }),
   stopRecording: (_args, _store, _storage, native) =>
     later(native, { op: 'stop' }, { ok: false, error: 'Not recording.', id: '' }),
   exportRecording: ([id, quality, to], _store, _storage, native) =>

@@ -31,6 +31,14 @@ Every time in the model is in seconds of the **recording**, not of the edited vi
 speed don't move your effects. `TimeMap` converts between the two. Templates place things in
 video time and convert back, so nothing lands in a removed part.
 
+## Sound
+
+- System sound is recorded by default; a switch under New Recording turns it off. A window
+  recording gets its app's sound. Exact Studio's own sound is never recorded.
+- The sound is part of the clip. Every cut, speed change, crossfade and fade applies to the sound
+  at exactly the same place. There is no separate sound track to keep in sync.
+- `volume` (0–1) in `edits.json` sets it; 0 mutes.
+
 ## Defaults
 
 - A new recording gets **no** automatic zoom. "Zoom on Clicks" is a button you press.

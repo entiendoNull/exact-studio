@@ -215,7 +215,7 @@ case "export":
     let (mix, comp, map) = composition(r)
     let quality = option("--quality") ?? "best"
     guard ExportQuality.names.contains(quality) else { fail("no quality \(quality); one of \(ExportQuality.names.joined(separator: ", "))") }
-    guard let session = ExportQuality.session(mix, comp, quality: quality, to: out) else { fail("this Mac can't export that") }
+    guard let session = ExportQuality.session(mix, comp, audio: Composition.audioMix(mix, map: map, volume: r.edits.volume), quality: quality, to: out) else { fail("this Mac can't export that") }
     let done = DispatchSemaphore(value: 0)
     session.exportAsynchronously { done.signal() }
     let start = Date()
@@ -223,7 +223,7 @@ case "export":
         FileHandle.standardError.write(String(format: "\rexporting %3.0f%%", session.progress * 100).data(using: .utf8)!)
     }
     FileHandle.standardError.write("\r".data(using: .utf8)!)
-    guard session.status == .completed else { fail("the export stopped: \(session.error?.localizedDescription ?? "unknown")", code: 1) }
+    guard session.status == .completed else { fail("the export stopped: \(session.error.map { "\($0)" } ?? "unknown")", code: 1) }
     print("\(out.path)  \(Int(comp.renderSize.width))×\(Int(comp.renderSize.height))  \(stamp(map.outputDuration))  in \(Int(Date().timeIntervalSince(start)))s")
 
 case "template":

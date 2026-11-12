@@ -160,10 +160,12 @@ struct Edits: Codable, Equatable {
     var moves: [Move] = []
     /// The subject in 3D, when on.
     var three = ThreeD()
+    /// The recorded sound's volume, 0 (muted) to 1.
+    var volume: Double = 1
 
     init(segments: [Segment] = []) { self.segments = segments }
 
-    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, base, moves, three }
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, base, moves, three, volume }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
@@ -173,6 +175,7 @@ struct Edits: Codable, Equatable {
         lanes = try c.decodeIfPresent(Int.self, forKey: .lanes) ?? 1
         base = try c.decodeIfPresent(Placement.self, forKey: .base) ?? Placement()
         moves = try c.decodeIfPresent([Move].self, forKey: .moves) ?? []
+        volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1
         three = try c.decodeIfPresent(ThreeD.self, forKey: .three) ?? ThreeD()
         // Cuts were once segments: each becomes two splits and a removed part.
         for cut in segments where cut.kind == "cut" {
@@ -1305,12 +1308,14 @@ enum ExportQuality {
     }
 
     /// One export session for a made composition, at `name`'s quality.
-    static func session(_ asset: AVAsset, _ composition: AVMutableVideoComposition, quality name: String, to out: URL) -> AVAssetExportSession? {
+    static func session(_ asset: AVAsset, _ composition: AVMutableVideoComposition, audio: AVAudioMix?, quality name: String, to out: URL) -> AVAssetExportSession? {
         composition.renderSize = size(name, canvas: composition.renderSize)
         guard let s = AVAssetExportSession(asset: asset, presetName: preset(name)) else { return nil }
         s.outputURL = out
         s.outputFileType = .mp4
         s.videoComposition = composition
+        s.audioMix = audio
+        s.audioTimePitchAlgorithm = .spectral
         s.shouldOptimizeForNetworkUse = true
         return s
     }
@@ -1341,6 +1346,28 @@ enum Composition {
                 track.scaleTimeRange(CMTimeRange(start: at, duration: range.duration), toDuration: time(p.out1) - at)
             }
         }
+        // @ref LLP 0002#sound — the sound is cut, sped up and crossfaded exactly like the picture
+        if let sound = asset.tracks(withMediaType: .audio).first,
+           let sa = mix.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid),
+           let sb = mix.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let ears = [sa, sb]
+            for (i, p) in map.pieces.enumerated() {
+                let track = ears[i % 2]
+                let range = CMTimeRange(start: start + time(p.src0), end: start + time(p.src1))
+                // The sound may start a little after the picture or end before it.
+                let r = range.intersection(sound.timeRange)
+                guard r.duration.seconds > 0.001 else { continue }
+                let at = time(p.out0 + (r.start - range.start).seconds / p.rate)
+                let end = track.timeRange.isEmpty ? CMTime.zero : track.timeRange.end
+                if end < at { track.insertEmptyTimeRange(CMTimeRange(start: end, end: at)) }
+                try? track.insertTimeRange(r, of: sound, at: at)
+                if p.rate != 1 {
+                    track.scaleTimeRange(CMTimeRange(start: at, duration: r.duration), toDuration: time(r.duration.seconds / p.rate))
+                }
+            }
+            // An empty track makes an export fail; one part uses only the first.
+            for ear in ears where ear.segments.isEmpty { mix.removeTrack(ear) }
+        }
         // Instructions: a piece alone, then the stretch it shares with the next, end to end.
         var instructions: [StudioInstruction] = []
         let pieces = map.pieces
@@ -1368,6 +1395,34 @@ enum Composition {
         composition.renderSize = state.current.canvas
         composition.frameDuration = CMTime(value: 1, timescale: 60)
         return (mix, composition, map)
+    }
+
+    /// The sound's volume over time: `volume` throughout, ramping where the picture crossfades or fades.
+    static func audioMix(_ mix: AVAsset, map: TimeMap, volume: Double) -> AVAudioMix? {
+        let ears = mix.tracks(withMediaType: .audio)
+        guard !ears.isEmpty else { return nil }
+        let v = Float(min(max(volume, 0), 1))
+        func time(_ s: Double) -> CMTime { CMTime(seconds: s, preferredTimescale: 6000) }
+        let params = ears.map { AVMutableAudioMixInputParameters(track: $0) }
+        let pieces = map.pieces
+        for (i, p) in pieces.enumerated() {
+            let ear = params[i % params.count]
+            let inLength = max(p.overlap, p.fadeIn)
+            // Each track only plays inside its own pieces, so it needs no volume between them.
+            if inLength > 0 {
+                ear.setVolumeRamp(fromStartVolume: 0, toEndVolume: v, timeRange: CMTimeRange(start: time(p.out0), duration: time(inLength)))
+            } else {
+                ear.setVolume(v, at: time(p.out0))
+            }
+            let next = i + 1 < pieces.count ? pieces[i + 1] : nil
+            let outLength = max(next?.overlap ?? 0, p.fadeOut)
+            if outLength > 0 {
+                ear.setVolumeRamp(fromStartVolume: v, toEndVolume: 0, timeRange: CMTimeRange(start: time(p.out1 - outLength), duration: time(outLength)))
+            }
+        }
+        let audio = AVMutableAudioMix()
+        audio.inputParameters = params
+        return audio
     }
 
     enum CompositionError: Error, CustomStringConvertible {

@@ -110,7 +110,7 @@ final class Studio: ExactModule {
                 catch { reply.send(["items": [], "allowed": false]) }
             }
         case "start":
-            start(request["source"] as? String ?? "", reply: reply)
+            start(request["source"] as? String ?? "", sound: request["sound"] as? Bool ?? true, reply: reply)
         case "stop":
             stop(reply: reply)
         case "recordings":
@@ -175,6 +175,7 @@ final class Studio: ExactModule {
         case "undo-template": e.undoTemplate()
         case "look": e.setLookField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "three": e.setThree(r["track"] as? String ?? "", r["kind"] as? String ?? "")
+        case "volume": e.setVolume((r["number"] as? Double ?? 100) / 100)
         case "add-move": e.addMove()
         case "pattern": e.pattern(r["kind"] as? String ?? "")
         case "find-device": e.findDevice()
@@ -187,7 +188,7 @@ final class Studio: ExactModule {
 
     // MARK: Recording
 
-    private func start(_ source: String, reply: ExactReply) {
+    private func start(_ source: String, sound: Bool, reply: ExactReply) {
         guard recorder == nil, !starting else { return reply.send(["ok": false, "error": "Already recording."]) }
         guard CGPreflightScreenCaptureAccess() else {
             if !context.agent { CGRequestScreenCaptureAccess() }
@@ -199,21 +200,21 @@ final class Studio: ExactModule {
             picker.pick { [weak self] area in
                 self?.picker = nil
                 guard let area else { return reply.send(["ok": false, "error": ""]) }
-                self?.begin(source, area: area, reply: reply)
+                self?.begin(source, area: area, sound: sound, reply: reply)
             }
         } else {
-            begin(source, area: nil, reply: reply)
+            begin(source, area: nil, sound: sound, reply: reply)
         }
     }
 
-    private func begin(_ source: String, area: (NSScreen, CGRect)?, reply: ExactReply) {
+    private func begin(_ source: String, area: (NSScreen, CGRect)?, sound: Bool, reply: ExactReply) {
         starting = true
         let id = Self.newID()
         let folder = Library.recordings.appendingPathComponent(id, isDirectory: true)
         Task { @MainActor in
             defer { starting = false }
             do {
-                let r = try await Recorder.make(source: source, area: area, folder: folder, id: id)
+                let r = try await Recorder.make(source: source, area: area, folder: folder, id: id, sound: sound)
                 try await r.start()
                 recorder = r
                 showStatusItem()
@@ -295,13 +296,13 @@ final class Studio: ExactModule {
     private func export(id: String, quality: String, to: String, reply: ExactReply) {
         func fail(_ why: String) { reply.send(["ok": false, "error": why, "path": "", "copied": false]) }
         guard let e = editor(id) else { return fail("No such recording.") }
-        let made: (AVAsset, AVMutableVideoComposition)
+        let made: (AVAsset, AVMutableVideoComposition, AVAudioMix?)
         do { made = try e.exportable(look: e.look) } catch { return fail("\(error)") }
         let safe = e.meta.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
         let tag = quality == "best" ? "" : " \(quality)"
 
         func run(_ out: URL) {
-            guard let session = ExportQuality.session(made.0, made.1, quality: quality, to: out) else { return fail("This Mac can’t export that.") }
+            guard let session = ExportQuality.session(made.0, made.1, audio: made.2, quality: quality, to: out) else { return fail("This Mac can’t export that.") }
             session.exportAsynchronously {
                 guard session.status == .completed else { return fail(session.error?.localizedDescription ?? "The export stopped.") }
                 guard to == "clipboard" else { return reply.send(["ok": true, "error": "", "path": out.path, "copied": false]) }

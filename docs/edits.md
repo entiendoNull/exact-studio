@@ -48,6 +48,7 @@ plays. Cuts and speed changes make the two differ: `show` prints both lengths, a
   "base": { "x": 0.5, "y": 0.5, "scale": 1 },
   "moves": [],
   "three": { "on": false, "tilt": 0, "turn": 0, "roll": 0, "thickness": 0.06, "edge": "metal" },
+  "volume": 1,
   "segments": [
     { "id": "t1", "kind": "text", "start": 4.3, "end": 7.0, "lane": 0, "text": "Hello", "x": 0.5, "y": 0.15,
       "size": 0.08, "color": "white", "weight": "heavy", "style": "pill", "animIn": "letters", "animOut": "fade" },
@@ -68,6 +69,9 @@ milliseconds**, as a string: `"crossfade"` (0.6 s) or `"fade"` (through the back
 plain cut.
 
 To cut out 10–14 s: add `10` and `14` to `splits`, `10` to `removed`.
+
+The recorded sound, if any, follows the picture: it is cut, sped up and faded at the same places.
+`volume` (0–1, default 1) sets how loud it is; 0 mutes it.
 
 ### Segments
 

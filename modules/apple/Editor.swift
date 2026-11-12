@@ -290,6 +290,8 @@ final class Editor {
         self.composition = composition
         let item = AVPlayerItem(asset: mix)
         item.videoComposition = composition
+        item.audioMix = Composition.audioMix(mix, map: map, volume: edits.volume)
+        item.audioTimePitchAlgorithm = .spectral
         let out = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         item.add(out)
         output = out
@@ -310,6 +312,7 @@ final class Editor {
         if let c = composition?.mutableCopy() as? AVMutableVideoComposition {
             player.currentItem?.videoComposition = c
         }
+        if let item = player.currentItem { item.audioMix = Composition.audioMix(item.asset, map: map, volume: edits.volume) }
         if !isPlaying, let item = player.currentItem {
             item.seek(to: item.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
         }
@@ -317,10 +320,19 @@ final class Editor {
     }
 
     /// A separate composition for export, at this editor's edits and the look asked for.
-    func exportable(look: Look) throws -> (AVAsset, AVMutableVideoComposition) {
+    func exportable(look: Look) throws -> (AVAsset, AVMutableVideoComposition, AVAudioMix?) {
         let own = RenderState(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
-        let (mix, composition, _) = try Composition.make(asset: asset, meta: meta, edits: edits, state: own)
-        return (mix, composition)
+        let (mix, composition, map) = try Composition.make(asset: asset, meta: meta, edits: edits, state: own)
+        return (mix, composition, Composition.audioMix(mix, map: map, volume: edits.volume))
+    }
+
+    /// Whether the recording has sound.
+    var hasSound: Bool { !asset.tracks(withMediaType: .audio).isEmpty }
+
+    func setVolume(_ v: Double) {
+        var next = edits
+        next.volume = min(max(v, 0), 1)
+        apply(next)
     }
 
     // MARK: Editing
@@ -1006,7 +1018,8 @@ final class Editor {
                 // The angle the 3D controls edit: the move's in effect at the playhead, else the base.
                 "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),
                 "angleMove": (selectedMove ?? angleMove).map { Editor.stamp($0.t) } ?? "",
-                "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge]
+                "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge,
+                "sound": hasSound, "volume": (edits.volume * 100).rounded()]
     }
 }
 
