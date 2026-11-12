@@ -4,20 +4,55 @@ A macOS screen recorder built with [Exact](https://github.com/expo/exact). It re
 
 ![Exact Studio: a Simulator recording turned in 3D, with texts and effects on the timeline](docs/screenshot.png)
 
-- **Record** an area you drag out, a whole display, or one window. A dragged area stays selected on the dimmed screen: move it, resize it from its handles, then press Record (or Return); Escape cancels.
-- **System sound** is recorded with every recording (one switch in the sidebar turns it off). Cuts, speed changes, crossfades and fades apply to the sound at the same places as the picture; the inspector mutes it or sets its volume.
-- **Simulators and emulators are cropped to the device bezel.** A Simulator (or Xcode 27's Device Hub) or Android emulator window is captured on its own. The device is found in the first frame: by transparency around it, or by its dark bezel on an opaque window, whose corner radius is measured so the frame is cut to it. For an area or window recording that shows a device, **Find a Device in the Picture** does the same. If the detection is off, trim each edge in the editor.
-- **Frame**: 24 gradient backgrounds, a custom gradient (two colours from the system colour picker, linear at any angle or radial), or the recording itself blurred behind it; padding, rounded corners, a shadow, and an output shape (16:9, 9:16, 1:1, 4:3 or fit).
-- **Placement and motion**: drag the video in the preview to place it (it snaps to the centre lines); scroll or pinch to resize. Presets put it centre, left, right, top, bottom, large or in a corner. A **move** on the Position track animates it to a new place at a time, in one of eight styles (smooth, linear, spring, zoom through full screen, swipe, fade, spin, pop) at a chosen speed. **Position** has ready-made patterns: side to side, zoom tour, entrance, bounce, slow push in.
-- **3D**: the subject as a real 3D object (SceneKit) with the recording on its face, lit by a studio, its edge in polished metal, aluminum, glass or matte. A device's body is read from its silhouette: the block with its own corner radius, and each side button standing out from the edge. Tilt, turn and roll it, set its thickness, pick a pose (hero, lean left or right, lay back, tumble, face on), or ⌥-drag it in the preview. Face on looks exactly like the flat picture. Moves carry a 3D angle too, eased in their style (spin turns it a full circle), and Position has 3D patterns: turntable, orbit, hero reveal, flip in, float.
-- **Cursor**: new recordings leave the system cursor out and draw it from the recorded path, so it can be hidden, resized, smoothed, and squeezed on each click.
-- **Text**: any number of texts on the lanes, each dragged into place, with size, tilt, colour, weight and a shape (pill, box, outline, soft shadow), an entrance (letters spring up, pop or drop, typewriter, pop, spin, slide, rise, blur, fade), an exit (fade, letters fall, pop away, sink, blur) and a loop while shown (wave, pulse, float, wiggle).
-- **Whole-frame effects and temporary 3D**: blur and black and white cover the video or the whole frame (texts stay sharp); a 3D Turn segment turns the video to a pose, or a full orbit, and back, even with 3D off.
-- **Timeline**: drag its top edge to make it (and the preview) taller or shorter; it scrolls when short. It shows the clip as a filmstrip, and effect lanes under it. **Split Clip** (or S) splits the clip at the playhead with a visible gap; select a part and remove it (it stays hatched, so it can be restored) or join it with a neighbour; a kept part can pass into the next across removed ones with a crossfade or a fade through the background. **Add** puts a zoom in, zoom out, slow down, speed up, spotlight, cursor highlight, blur, or black and white at the playhead. Effects overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. **+ Add effect lane** adds a lane; an empty lane's × removes it. Drag an effect to move it (across lanes too) or its edges to resize. The inspector shows the selection's start and end as fields: type `1.25` or `0:01.25` and press Return. Delete removes the selection, Space plays, the arrow keys step a frame (Shift: a second).
-- **Templates**: Clean Launch, Product Hero, Feature Tour and Social Teaser, each a ready-made set of texts, effects, zooms, moves and 3D laid out for the frame's shape (landscape, square or portrait) along the video as it plays. Undo Template puts the edit back.
-- **Zoom on clicks**: a new recording starts with no zooms; the button adds one around each group of clicks.
-- **Export** from the header button: a lightbox picks the quality (best, 1080p, 720p or small) and where it goes: `~/Movies/Exact Studio/`, a place you choose, or the clipboard, ready to paste into Slack, Messages or Finder.
-- **Library**: every recording stays in the sidebar. File ▸ Open Recording… (⌘O) opens a recording folder from anywhere and copies it into the library. Each sidebar section folds.
+## Features
+
+### Record
+
+- **Sources:** drag out an area, or pick a display, a window, or a Simulator or emulator.
+- **Devices:** cropped to the bezel automatically. Trim any edge if the detection is off.
+- **System sound:** on by default, with one switch to turn it off.
+
+### Look
+
+- **Background:** 24 gradients, a custom gradient, or a blur of the recording.
+- **Frame:** padding, rounded corners, a shadow, and an output shape (16:9, 9:16, 1:1, 4:3).
+- **Cursor:** drawn from the recorded path, so you can hide, resize or smooth it.
+
+### Motion and 3D
+
+- **Placement:** drag the video in the preview, or use a preset.
+- **Moves:** animate it to a new place, in one of eight styles.
+- **3D:** a real 3D body made from the device's outline, side buttons included. Tilt it, turn it, or pick a pose.
+- **Patterns:** ready-made moves such as side to side, turntable and orbit.
+
+### Edit
+
+- **Timeline:** split the clip (S), remove parts, and crossfade between them.
+- **Effects:** zoom, speed, spotlight, cursor highlight, blur, and black and white, on as many lanes as you need.
+- **Text:** styled texts with entrance, exit and loop animations.
+- **Templates:** Launch, Hero, Tour and Teaser. Each adds texts, effects and moves for the frame's shape.
+- **Zoom on clicks:** adds a zoom around each group of clicks.
+- **Sound follows the cuts:** cuts, speed and fades apply to the sound too. Mute it or set its volume.
+
+### Export and library
+
+- **Export:** pick a quality (best, 1080p, 720p or small). Save to Movies or a place you choose, or copy to the clipboard.
+- **Library:** every recording stays in the sidebar. File ▸ Open Recording… (⌘O) adds one from anywhere.
+
+<details>
+<summary>Keyboard</summary>
+
+| Key | Action |
+|---|---|
+| Space | Play or pause |
+| S | Split the clip at the playhead |
+| Delete | Remove the selection |
+| ← → | Step one frame (with Shift: one second) |
+| ⌥-drag | Turn the video in 3D |
+| ⌘O | Open a recording |
+| Return / Escape | Start or cancel an area recording |
+
+</details>
 
 ## For agents
 
