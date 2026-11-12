@@ -139,6 +139,11 @@ component ExactStudio
   state openCursor = false persist
   state openDevice = true persist
   state open3d = true persist
+  // The sidebar's sections, each folded on its own.
+  state openSims = true persist
+  state openDisplays = true persist
+  state openWindows = true persist
+  state openLibrary = true persist
   state leftOpen = true persist
   state rightOpen = true persist
   // Where the settings of the selection show: "dock", "float", "overlay" or "left".
@@ -310,6 +315,14 @@ component ExactStudio
       openDevice = not openDevice
     if name == "3d"
       open3d = not open3d
+    if name == "sims"
+      openSims = not openSims
+    if name == "displays"
+      openDisplays = not openDisplays
+    if name == "windows"
+      openWindows = not openWindows
+    if name == "library"
+      openLibrary = not openLibrary
   action setCustomA(v: string)
     send edited = editClip(selected, "look", "customA", 0, v)
   action setCustomB(v: string)
@@ -421,58 +434,80 @@ component ExactStudio
                       input type="checkbox" switch checked=recordSound change=setRecordSound aria-label="Record system sound in every recording" testId="record-sound"
                     if devices.length > 0
                       column gap=6
-                        text "SIMULATORS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                        for s in devices key=s.id
-                          button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color="-exact-tertiary-background"
-                            row gap=10 align-items="center" min-width=0 flex=1
-                              column width=34 height=34 border-radius=9 background-color="-exact-system-blue" align-items="center" justify-content="center"
-                                image "symbol:sf/iphone" color="white" aria-hidden=true
-                              column min-width=0 flex=1 align-items="flex-start"
-                                text s.name line-clamp=1 font-weight=500 text-align="left" align-self="stretch"
-                                text `${s.app} · fits the bezel` font="-exact-caption1" color="-exact-system-teal" line-clamp=1
-                              image "symbol:sf/record.circle" color="-exact-system-red" aria-hidden=true
+                        row align-items="center"
+                          button press=toggleSection("sims") appearance="none" aria-expanded=openSims testId="sec-sims" flex=1 padding-top=2 padding-bottom=2
+                            row align-items="center" gap=6 flex=1
+                              text "SIMULATORS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
+                              image (openSims ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
+                              view flex=1
+                        if openSims
+                          for s in devices key=s.id
+                            button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color="-exact-tertiary-background"
+                              row gap=10 align-items="center" min-width=0 flex=1
+                                column width=34 height=34 border-radius=9 background-color="-exact-system-blue" align-items="center" justify-content="center"
+                                  image "symbol:sf/iphone" color="white" aria-hidden=true
+                                column min-width=0 flex=1 align-items="flex-start"
+                                  text s.name line-clamp=1 font-weight=500 text-align="left" align-self="stretch"
+                                  text `${s.app} · fits the bezel` font="-exact-caption1" color="-exact-system-teal" line-clamp=1
+                                image "symbol:sf/record.circle" color="-exact-system-red" aria-hidden=true
                     column gap=4
                       row align-items="center"
-                        text "DISPLAYS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1
+                        button press=toggleSection("displays") appearance="none" aria-expanded=openDisplays testId="sec-displays" flex=1 padding-top=2 padding-bottom=2
+                          row align-items="center" gap=6 flex=1
+                            text "DISPLAYS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
+                            image (openDisplays ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
+                            view flex=1
                         button press=refresh aria-label="Refresh sources" testId="refresh"
                           image "symbol:refresh"
-                      for s in displays key=s.id
-                        button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
-                          row gap=10 align-items="center" min-width=0 flex=1
-                            image "symbol:sf/display" color="-exact-secondary-label" aria-hidden=true
-                            text s.name line-clamp=1 flex=1 text-align="left"
+                      if openDisplays
+                        for s in displays key=s.id
+                          button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
+                            row gap=10 align-items="center" min-width=0 flex=1
+                              image "symbol:sf/display" color="-exact-secondary-label" aria-hidden=true
+                              text s.name line-clamp=1 flex=1 text-align="left"
                     column gap=4
                       row align-items="center"
-                        text "WINDOWS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1
-                        if windows.length > 6
+                        button press=toggleSection("windows") appearance="none" aria-expanded=openWindows testId="sec-windows" flex=1 padding-top=2 padding-bottom=2
+                          row align-items="center" gap=6 flex=1
+                            text "WINDOWS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
+                            image (openWindows ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
+                            view flex=1
+                        if openWindows and windows.length > 6
                           button press=toggleWindows testId="all-windows"
                             text (allWindows ? "Fewer" : `All ${windows.length}`) font="-exact-caption1"
-                      for s in (allWindows ? windows : windows.slice(0, 6)) key=s.id
-                        button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
-                          row gap=10 align-items="center" min-width=0 flex=1
-                            image "symbol:sf/macwindow" color="-exact-secondary-label" aria-hidden=true
-                            column min-width=0 flex=1 align-items="flex-start"
-                              text s.name line-clamp=1 text-align="left" align-self="stretch"
-                              text s.app font="-exact-caption2" color="-exact-tertiary-label" line-clamp=1 text-align="left" align-self="stretch"
+                      if openWindows
+                        for s in (allWindows ? windows : windows.slice(0, 6)) key=s.id
+                          button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
+                            row gap=10 align-items="center" min-width=0 flex=1
+                              image "symbol:sf/macwindow" color="-exact-secondary-label" aria-hidden=true
+                              column min-width=0 flex=1 align-items="flex-start"
+                                text s.name line-clamp=1 text-align="left" align-self="stretch"
+                                text s.app font="-exact-caption2" color="-exact-tertiary-label" line-clamp=1 text-align="left" align-self="stretch"
                   column gap=6
-                    row align-items="center" justify-content="space-between"
-                      text "LIBRARY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                    row align-items="center"
+                      button press=toggleSection("library") appearance="none" aria-expanded=openLibrary testId="sec-library" flex=1 padding-top=2 padding-bottom=2
+                        row align-items="center" gap=6 flex=1
+                          text "LIBRARY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
+                          image (openLibrary ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
+                          view flex=1
                       // Also File ▸ Open Recording… ⌘O in the menu bar.
                       button "Open…" press=openIt disabled=pending(opened) -exact-menu="file" aria-label="Open Recording…" aria-keyshortcuts="Meta+O" appearance="none" font="-exact-footnote" color="-exact-secondary-label" testId="open-recording"
+                    // Errors stay in sight when the list is folded.
                     if stopError != "" and not pending(stopped)
                       text stopError font="-exact-footnote" color="-exact-system-red" testId="stop-error"
                     if openError != "" and not pending(opened)
                       text openError font="-exact-footnote" color="-exact-system-red" testId="open-error"
-                    if library.items.length == 0
-                      text "Nothing recorded yet." color="-exact-tertiary-label" testId="no-recordings"
-                    for r in library.items key=r.id
-                      button press=choose(r.id) aria-pressed=(r.id == selected) testId=`recording-${r.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color=(r.id == selected ? "-exact-tertiary-background" : "transparent")
-                        row gap=10 align-items="center" min-width=0 flex=1
-                          column width=34 height=34 border-radius=9 background-color=(r.id == selected ? "-exact-system-blue" : "-exact-tertiary-fill") align-items="center" justify-content="center"
-                            image kindSymbol(r.kind) color=(r.id == selected ? "white" : "-exact-secondary-label") aria-hidden=true
-                          column min-width=0 flex=1 align-items="flex-start"
-                            text r.name line-clamp=1 font-weight=(r.id == selected ? 600 : 400) text-align="left" align-self="stretch"
-                            text `${kindLabel(r.kind)} · ${mmss(r.duration)}` font="-exact-caption1" color="-exact-secondary-label" font-variant-numeric="tabular-nums" text-align="left" align-self="stretch"
+                    if openLibrary
+                      if library.items.length == 0
+                        text "Nothing recorded yet." color="-exact-tertiary-label" testId="no-recordings"
+                      for r in library.items key=r.id
+                        button press=choose(r.id) aria-pressed=(r.id == selected) testId=`recording-${r.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color=(r.id == selected ? "-exact-tertiary-background" : "transparent")
+                          row gap=10 align-items="center" min-width=0 flex=1
+                            column width=34 height=34 border-radius=9 background-color=(r.id == selected ? "-exact-system-blue" : "-exact-tertiary-fill") align-items="center" justify-content="center"
+                              image kindSymbol(r.kind) color=(r.id == selected ? "white" : "-exact-secondary-label") aria-hidden=true
+                            column min-width=0 flex=1 align-items="flex-start"
+                              text r.name line-clamp=1 font-weight=(r.id == selected ? 600 : 400) text-align="left" align-self="stretch"
+                              text `${kindLabel(r.kind)} · ${mmss(r.duration)}` font="-exact-caption1" color="-exact-secondary-label" font-variant-numeric="tabular-nums" text-align="left" align-self="stretch"
 
             // ── The stage: the framed preview, the edit bar and the timeline.
             match current
