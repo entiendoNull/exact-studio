@@ -1,0 +1,72 @@
+# Every pull request: the checks, then the app built and packed as a disk image.
+# A pushed v* tag: the same, and the image becomes a GitHub release.
+name: build
+
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The expo/exact commit the app is built against. Move it when the app needs a newer Exact.
+  EXACT_REF: db72e04f9339d595cd3d5fa2a1383ffde1a7ccf7
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: exact-studio
+
+      - uses: actions/checkout@v4
+        with:
+          repository: expo/exact
+          ref: ${{ env.EXACT_REF }}
+          path: exact
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Exact's tools
+        working-directory: exact-studio
+        run: bun ../exact/scripts/exact.mjs setup
+
+      - name: ref-check
+        working-directory: exact-studio
+        run: ./ref-check
+
+      - name: test
+        working-directory: exact-studio
+        run: bun exact.mjs test
+
+      - name: Disk image
+        working-directory: exact-studio
+        run: tools/make-dmg "${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-dev' }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Exact-Studio-dmg
+          path: exact-studio/dist/*.dmg
+          if-no-files-found: error
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        working-directory: exact-studio
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/*.dmg \
+            --title "Exact Studio ${{ github.ref_name }}" \
+            --generate-notes \
+            --notes "Install: https://github.com/${{ github.repository }}#install"
