@@ -6,17 +6,27 @@ A macOS screen recorder built with [Exact](https://github.com/expo/exact). It re
 
 ## Install
 
-Exact Studio needs a Mac with Apple silicon and macOS 14 or later.
+There is no download yet. You build the app on your Mac, which takes a few commands.
 
-1. Download the `.dmg` file from the [latest release](https://github.com/entiendoNull/exact-studio/releases/latest).
-2. Open the file and drag **Exact Studio** to **Applications**.
-3. Open Exact Studio from Applications. macOS blocks the app the first time, because the app is not signed with an Apple Developer ID. Close the message.
-4. Open System Settings › Privacy & Security, scroll to **Security**, and click **Open Anyway** beside Exact Studio. You do this once for each version.
-5. The first recording asks for Screen Recording permission. Allow it in System Settings › Privacy & Security, then reopen the app.
+You need:
 
-To update, download the new release and replace the app in Applications. Do step 4 again for the new version. macOS can also ask for the Screen Recording permission again.
+- A Mac with Apple silicon and macOS 14 or later.
+- Xcode 27. The build works with Xcode 27.2 and fails with Xcode 26.6.
+- [Bun](https://bun.sh).
 
-You can also [build it from source](#build-from-source). An app that you build yourself opens without step 4.
+Clone this repository and [expo/exact](https://github.com/expo/exact) into the same folder, then build and open the app:
+
+```sh
+git clone https://github.com/entiendoNull/exact-studio.git
+git clone https://github.com/expo/exact.git
+cd exact-studio
+bun ../exact/scripts/exact.mjs setup    # once: installs Rust and the other tools that Exact pins
+bun exact.mjs mac --run                 # builds the app and opens it
+```
+
+The first build takes several minutes. The first recording asks for Screen Recording permission. Allow it in System Settings › Privacy & Security, then reopen the app.
+
+To update, run `git pull` in both folders and run the last command again.
 
 ## Features
 
@@ -93,21 +103,13 @@ Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions,
 claude mcp add exact-studio -- bun /path/to/exact-studio/mcp/server.ts
 ```
 
-## Build from source
-
-You need Xcode and [Bun](https://bun.sh). Clone this repository and [expo/exact](https://github.com/expo/exact) into the same folder:
+## Run
 
 ```sh
-git clone https://github.com/entiendoNull/exact-studio.git
-git clone https://github.com/expo/exact.git
-cd exact-studio
-bun ../exact/scripts/exact.mjs setup    # once: installs the tools that Exact pins
-bun exact.mjs mac --run                 # builds the app and opens it
+bun exact.mjs mac --run
 ```
 
-The first build takes several minutes. To make your own disk image, run `tools/make-dmg 1.2.3`. It writes `dist/Exact-Studio-1.2.3.dmg`.
-
-The app uses the Exact checkout at `../exact`. The first recording asks for Screen Recording permission in System Settings › Privacy & Security; reopen the app after you allow it. While recording, a **Stop** item sits in the menu bar.
+The app uses the Exact checkout at `../exact`. [Install](#install) has the full steps. While recording, a **Stop** item sits in the menu bar.
 
 ## Layout
 

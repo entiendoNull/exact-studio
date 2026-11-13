@@ -5,7 +5,7 @@ Changes reach `main` through pull requests. Nobody pushes to `main` directly.
 ## What you need
 
 - A Mac with Apple silicon and macOS 14 or later.
-- Xcode.
+- Xcode 27. The build works with Xcode 27.2 and fails with Xcode 26.6.
 - [Bun](https://bun.sh).
 - A checkout of [expo/exact](https://github.com/expo/exact) beside this one. The app builds against it by path.
 
@@ -54,20 +54,6 @@ Do not edit `exact.mjs` or the generated block at the top of `AGENTS.md`. `bun e
 - Keep each pull request to one change.
 - Say what changed and how you tested it. Add a screenshot or a short video when the change is visible.
 - A maintainer reviews and merges it.
-
-## Releases
-
-Only a maintainer makes a release, and only by hand. Nothing is released on a merge or on a pull request.
-
-To release, open Actions › release › Run workflow and give the version, or run:
-
-```sh
-gh workflow run release.yml -f version=0.2.0
-```
-
-The workflow runs the checks, builds the app, packs it with `tools/make-dmg`, and publishes the GitHub release `v0.2.0` with the `.dmg` file. The app is ad-hoc signed and not notarised.
-
-The workflow builds against the expo/exact commit in `EXACT_REF` in [`.github/workflows/release.yml`](.github/workflows/release.yml). Change it in a pull request when the app needs a newer Exact.
 
 ## Report a bug or ask for a feature
 
