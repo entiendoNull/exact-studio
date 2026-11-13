@@ -1,11 +1,14 @@
 // `<studio-timeline clip=…>`: the recording's timeline, in source time.
-// A ruler; the clip as a filmstrip with its cuts hatched over it; then as
-// many lanes as the effects need. Any effect sits on any lane, and effects
-// may overlap in time across lanes unless they clash (two zooms, two speed
-// changes, two of one visual effect). Click to seek, click a segment to
-// select it, drag it to move it (across lanes too: below the last opens a
-// new one), drag an edge to resize; Delete removes the selection, Space
-// plays, the arrow keys step a frame (Shift: a second).
+// A ruler, then rows in three groups. The video: the clip as a filmstrip with
+// its cuts hatched over it, its Position track and its effect lanes. On top of
+// the video: the text lanes, and one row for each image, which opens to show
+// that image's own Position and Effects rows. The whole frame: lanes for a blur
+// or black and white over everything. The video's rows and each image's fold
+// away. Click to seek, click a block to select it, drag it to move it (to
+// another lane of its kind too: below the last opens a new one), drag an edge
+// to resize; Delete removes the selection, Space plays, the arrow keys step a
+// frame (Shift: a second).
+// @ref LLP 0002#rows — what each group holds, and why they fold
 #if os(macOS)
 import AppKit
 import AVFoundation
@@ -19,28 +22,89 @@ final class TimelineView: NSView {
     private weak var observedPlayer: AVPlayer?
     private var lastHeight: CGFloat = 0
 
-    private enum Drag { case scrub, move(String, Double, Double, Double), left(String, Double, Double, Int), right(String, Double, Double, Int), retime(String, Double) }
+    private enum Drag {
+        case scrub, move(String, Double, Double, Double), left(String, Double, Double, Int), right(String, Double, Double, Int), retime(String, Double)
+        /// An image's effect: the image, the effect, 0 to move it or -1/1 for an edge, its span and lane, and where it was grabbed.
+        case fx(String, String, Int, Double, Double, Int, Double)
+        /// An image's move: the image, the move, and the grab's offset from where it lands.
+        case imove(String, String, Double)
+    }
     private var drag: Drag?
     private var moved = false
 
     // Geometry, top-down (the view is flipped).
-    private static let labelWidth: CGFloat = 86, pad: CGFloat = 14
+    private static let labelWidth: CGFloat = 148, pad: CGFloat = 14
     private static let rulerTop: CGFloat = 10, rulerHeight: CGFloat = 20
     private static let clipTop: CGFloat = 34, clipHeight: CGFloat = 56
     private static let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
-    private static let motionTop: CGFloat = clipTop + clipHeight + laneGap, motionHeight: CGFloat = 26
-    static func height(lanes: Int) -> CGFloat { motionTop + motionHeight + laneGap + CGFloat(lanes + 1) * (laneHeight + laneGap) + 4 }
+    private static let motionHeight: CGFloat = 26, headerHeight: CGFloat = 22
+    /// How tall the rows are: 0 compact, 1 regular, 2 tall. The person's choice, kept between launches.
+    private var size = min(max(UserDefaults.standard.integer(forKey: "ExactStudio.laneSize"), 0), 2)
+    private var laneH: CGFloat { [Self.laneHeight, 42, 56][size] }
+    private var motionH: CGFloat { [Self.motionHeight, 36, 46][size] }
+    static func height(lanes: Int) -> CGFloat { clipTop + clipHeight + laneGap + motionHeight + laneGap + CGFloat(lanes + 1) * (laneHeight + laneGap) + 4 }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// Lanes shown: those in use, and while a segment is dragged, one more to drop it on.
-    private var lanesShown: Int {
-        guard let editor else { return 1 }
-        if case .move = drag { return editor.edits.lanes + 1 }
-        return editor.edits.lanes
+    /// What a row under the clip is.
+    private enum Kind: Equatable {
+        /// A group's header, by its key: "top" (texts and images) or "frame". It folds its group.
+        case header(String)
+        /// The video's Position track.
+        case position
+        /// A lane in a space (`Segment.space`): 0 the video's effects, 1 texts, 3 whole-frame effects.
+        case lane(Int, Int)
+        /// An image's own row, and under it, while it is open, its Position row and its effect rows.
+        case image(String), imagePosition(String), imageEffects(String, Int)
     }
+    private struct Row { let kind: Kind; let y: CGFloat; let height: CGFloat
+        var maxY: CGFloat { y + height } }
+
+    /// The space of the segment being dragged, or nil when none is.
+    private var draggedSpace: Int? {
+        guard case let .move(id, _, _, _) = drag else { return nil }
+        return editor?.edits.segments.first { $0.id == id }?.space
+    }
+
+    /// The rows under the clip, top-down. While a block is dragged, its kind has one more lane to drop it on.
+    /// A folded group shows only its header.
+    private var rows: [Row] {
+        var out: [Row] = []
+        var y = Self.clipTop + Self.clipHeight + Self.laneGap
+        func add(_ kind: Kind, _ height: CGFloat) { out.append(Row(kind: kind, y: y, height: height)); y += height + Self.laneGap }
+        guard let editor else { add(.lane(0, 0), laneH); return out }
+        let e = editor.edits, dragged = draggedSpace
+        if editor.videoOpen {
+            add(.position, motionH)
+            for l in 0..<e.lanes + (dragged == 0 ? 1 : 0) { add(.lane(0, l), laneH) }
+        }
+        add(.header("top"), Self.headerHeight)
+        if !editor.folded.contains("top") {
+            for l in 0..<e.textLanes + (dragged == 1 ? 1 : 0) { add(.lane(1, l), laneH) }
+            for image in e.images.sorted(by: { $0.lane < $1.lane }) {
+                add(.image(image.id), laneH)
+                guard editor.openImages.contains(image.id) else { continue }
+                add(.imagePosition(image.id), motionH)
+                var lanes = max(1, ((image.effects ?? []).map(\.lane).max() ?? -1) + 1)
+                if case let .fx(id, _, 0, _, _, _, _) = drag, id == image.id { lanes += 1 }
+                for l in 0..<lanes { add(.imageEffects(image.id, l), laneH) }
+            }
+        }
+        add(.header("frame"), Self.headerHeight)
+        if !editor.folded.contains("frame") {
+            for l in 0..<e.frameLanes + (dragged == 3 ? 1 : 0) { add(.lane(3, l), laneH) }
+        }
+        return out
+    }
+    private func row(_ kind: Kind) -> Row? { rows.first { $0.kind == kind } }
+    /// The row under `y`, counting the gaps between rows as half each neighbour's.
+    private func row(at y: CGFloat) -> Row? { rows.first { y >= $0.y - Self.laneGap / 2 && y < $0.maxY + Self.laneGap / 2 } }
+    /// The row a top-level segment is drawn on.
+    private func row(of s: Segment) -> Row? { row(s.kind == "image" ? .image(s.id) : .lane(s.space, s.lane)) }
+    /// Whether a lane exists in the edits, not only as a place to drop on.
+    private func real(_ space: Int, _ lane: Int) -> Bool { lane < (editor?.edits.laneCount(space: space) ?? 1) }
 
     func attach(_ editor: Editor?) {
         if let old = self.editor, old !== editor { old.unlisten(self) }
@@ -64,7 +128,7 @@ final class TimelineView: NSView {
     private var extra = CGFloat(UserDefaults.standard.double(forKey: "ExactStudio.timelineExtra"))
     private var scrollY: CGFloat = 0
     private static let minimum: CGFloat = 120, grip: CGFloat = 8
-    private var contentHeight: CGFloat { Self.height(lanes: editor?.edits.lanes ?? 1) }
+    private var contentHeight: CGFloat { (rows.last?.maxY ?? Self.height(lanes: 1)) + 8 }
     private var resizing: (start: CGFloat, extra: CGFloat)?
 
     private func changed() {
@@ -125,11 +189,66 @@ final class TimelineView: NSView {
         guard let d = editor?.duration, d > 0 else { return 0 }
         return Double(min(max((x - trackRect.minX) / trackRect.width, 0), 1)) * d
     }
-    private var addLaneRect: CGRect { CGRect(x: trackRect.minX, y: laneY(lanesShown), width: min(trackRect.width, 180), height: Self.laneHeight) }
-    private func removeRect(_ lane: Int) -> CGRect { CGRect(x: trackRect.maxX - 22, y: laneY(lane) + 7, width: 14, height: 14) }
-    private func laneY(_ i: Int) -> CGFloat { Self.motionTop + Self.motionHeight + Self.laneGap + CGFloat(i) * (Self.laneHeight + Self.laneGap) }
-    private func diamond(_ t: Double) -> CGRect { CGRect(x: x(t) - 7, y: Self.motionTop + Self.motionHeight / 2 - 7, width: 14, height: 14) }
-    private func lane(at y: CGFloat) -> Int { max(0, Int((y - laneY(0)) / (Self.laneHeight + Self.laneGap))) }
+    /// Whether a row has a + that adds to it: the Position rows, the first lane of the video's
+    /// effects, the groups' headers, and an image's first effects row.
+    private func hasPlus(_ r: Row) -> Bool {
+        switch r.kind {
+        case .position, .header, .imagePosition, .lane(0, 0), .imageEffects(_, 0): return true
+        default: return false
+        }
+    }
+    /// At the end of the row's label, every row's in one column just left of the track.
+    private func plusRect(_ r: Row) -> CGRect {
+        return CGRect(x: Self.labelWidth - 28, y: r.y + r.height / 2 - 9, width: 18, height: 18)
+    }
+    /// The three lane sizes, in the corner above the labels.
+    private func sizeRect(_ i: Int) -> CGRect { CGRect(x: Self.pad + CGFloat(i) * 24, y: Self.rulerTop, width: 22, height: 18) }
+
+    private func removeRect(_ r: Row) -> CGRect { CGRect(x: trackRect.maxX - 22, y: r.y + 7, width: 14, height: 14) }
+    /// An empty lane can go, but one effect lane always stays.
+    private func removable(_ r: Row) -> Bool {
+        guard let e = editor?.edits, case let .lane(space, lane) = r.kind, real(space, lane) else { return false }
+        return !e.segments.contains { $0.space == space && $0.lane == lane } && (space != 0 || e.lanes > 1)
+    }
+    private func diamond(_ t: Double, in r: Row) -> CGRect { CGRect(x: x(t) - 7, y: r.y + r.height / 2 - 7, width: 14, height: 14) }
+
+    /// The lane a dragged top-level segment would drop on at `y`: one of its own kind, or one past
+    /// the last; for an image, the row among the images it would take.
+    private func lane(at y: CGFloat, for s: Segment) -> Int {
+        guard let e = editor?.edits else { return 0 }
+        if s.kind == "image" {
+            // Each image's rows, its own and its children's, count as that image's place.
+            var place = 0
+            for r in rows {
+                if case let .image(id) = r.kind, let other = e.images.first(where: { $0.id == id }), y >= r.y - Self.laneGap / 2 { place = other.lane }
+            }
+            return place
+        }
+        let mine = rows.filter { if case let .lane(space, _) = $0.kind { return space == s.space } else { return false } }
+        guard let first = mine.first, y >= first.y else { return 0 }
+        let i = mine.lastIndex { y >= $0.y - Self.laneGap / 2 } ?? 0
+        return min(y > (mine.last?.maxY ?? 0) + Self.laneGap / 2 ? i + 1 : i, e.laneCount(space: s.space))
+    }
+
+    /// The row of its image's effects a dragged image effect would drop on at `y`, or one past the last.
+    private func fxLane(at y: CGFloat, image: String) -> Int {
+        let mine = rows.filter { if case let .imageEffects(id, _) = $0.kind { return id == image } else { return false } }
+        guard let first = mine.first, y >= first.y else { return 0 }
+        return min((mine.lastIndex { y >= $0.y - Self.laneGap / 2 } ?? 0) + (y > (mine.last?.maxY ?? 0) + Self.laneGap / 2 ? 1 : 0), mine.count)
+    }
+
+    static func color(image effect: Segment) -> NSColor {
+        switch effect.kind {
+        case "blur": return .systemIndigo
+        case "mono": return .systemGray
+        case "fade": return .systemBrown
+        default: return .systemPurple
+        }
+    }
+
+    static func caption(image effect: Segment) -> String {
+        ["blur": "Blur", "mono": "Black & white", "fade": "Fade", "pulse": "Pulse", "float": "Float", "wiggle": "Wiggle"][effect.kind] ?? "Effect"
+    }
 
     static func color(_ s: Segment) -> NSColor {
         switch s.kind {
@@ -140,6 +259,7 @@ final class TimelineView: NSView {
         case "blur": return .systemIndigo
         case "mono": return .systemGray
         case "text": return .systemPink
+        case "image": return .systemGreen
         case "3d": return .systemMint
         default: return .systemPink
         }
@@ -179,7 +299,16 @@ final class TimelineView: NSView {
         }
 
         let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor(white: 1, alpha: 0.7)]
-        drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7))
+        // The lane sizes: three bars, thin to thick; the chosen one lit.
+        for i in 0..<3 {
+            let b = sizeRect(i)
+            NSColor(white: 1, alpha: i == size ? 0.16 : 0.05).setFill()
+            NSBezierPath(roundedRect: b, xRadius: 5, yRadius: 5).fill()
+            NSColor(white: 1, alpha: i == size ? 0.9 : 0.45).setFill()
+            let h = CGFloat(3 + i * 3)
+            NSBezierPath(roundedRect: CGRect(x: b.minX + 5, y: b.midY - h / 2, width: b.width - 10, height: h), xRadius: 1.5, yRadius: 1.5).fill()
+        }
+        drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7), open: editor.videoOpen)
 
         // The clip: each part its own rounded block of filmstrip, a clear gap between parts,
         // a scissors pin over each split; a removed part dark and hatched.
@@ -270,77 +399,128 @@ final class TimelineView: NSView {
             tag.draw(at: CGPoint(x: pill.minX + 7, y: pill.minY + 2.5), withAttributes: attrs)
         }
 
-        // The position track: each move's travel, ending in a diamond where it lands.
-        let my = Self.motionTop, mh = Self.motionHeight
-        drawLabel("Position", symbol: "arrow.up.and.down.and.arrow.left.and.right", y: my, height: mh, attrs: label, tint: .systemTeal)
-        NSColor(white: 1, alpha: 0.05).setFill()
-        NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: my, width: trackRect.width, height: mh), xRadius: 7, yRadius: 7).fill()
-        if editor.edits.moves.isEmpty {
-            let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(white: 1, alpha: 0.35)]
-            ("Drag the video in the preview to place it. Add a move to animate it." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: my + 6), withAttributes: hint)
+        // The rows under the clip.
+        let shown = rows
+        let segments = editor.edits.segments
+        let images = editor.edits.images
+        let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(white: 1, alpha: 0.35)]
+        let caption: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 9.5, weight: .semibold), .foregroundColor: NSColor(white: 1, alpha: 0.38), .kern: 0.5]
+        let child: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor(white: 1, alpha: 0.5)]
+        func bed(_ r: Row, alpha: CGFloat = 0.05) {
+            NSColor(white: 1, alpha: alpha).setFill()
+            NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: r.y, width: trackRect.width, height: r.height), xRadius: 7, yRadius: 7).fill()
         }
-        for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) {
-            let selected = editor.selected == "m:" + m.id
-            let bar = CGRect(x: x(m.t - m.duration), y: my + 7, width: max(2, x(m.t) - x(m.t - m.duration)), height: mh - 14)
-            NSColor.systemTeal.withAlphaComponent(selected ? 0.85 : 0.45).setFill()
-            NSBezierPath(roundedRect: bar, xRadius: 6, yRadius: 6).fill()
-            if selected { stroke(bar.insetBy(dx: -2, dy: -3), selected: true) }
-            let name = (["smooth": "Smooth", "linear": "Linear", "spring": "Spring", "zoom": "Zoom through", "swipe": "Swipe",
-                         "fade": "Fade", "spin": "Spin", "pop": "Pop"][m.style] ?? m.style) + (m.angles != nil ? " · 3D" : "") as NSString
-            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
-            if bar.width > name.size(withAttributes: attrs).width + 16 { name.draw(at: CGPoint(x: bar.minX + 6, y: bar.minY - 1), withAttributes: attrs) }
-            let d = diamond(m.t)
-            let path = NSBezierPath()
-            path.move(to: CGPoint(x: d.midX, y: d.minY)); path.line(to: CGPoint(x: d.maxX, y: d.midY))
-            path.line(to: CGPoint(x: d.midX, y: d.maxY)); path.line(to: CGPoint(x: d.minX, y: d.midY)); path.close()
-            (selected ? NSColor.white : NSColor.systemTeal).setFill()
-            path.fill()
-            NSColor(white: 0, alpha: 0.4).setStroke()
-            path.stroke()
-        }
-
-        // The lanes.
-        let effects = editor.edits.segments
-        for i in 0..<lanesShown {
-            let y = laneY(i)
-            let empty = !effects.contains { $0.lane == i }
-            drawLabel("Lane \(i + 1)", symbol: "square.stack", y: y, height: Self.laneHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.5))
-            NSColor(white: 1, alpha: i < editor.edits.lanes ? 0.05 : 0.025).setFill()
-            NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: y, width: trackRect.width, height: Self.laneHeight), xRadius: 7, yRadius: 7).fill()
-            if empty && editor.edits.lanes > 1 && i < editor.edits.lanes {
-                // An empty lane's ×, which removes it.
-                let xr = removeRect(i)
-                NSColor(white: 1, alpha: 0.12).setFill()
-                NSBezierPath(ovalIn: xr).fill()
-                ("×" as NSString).draw(at: CGPoint(x: xr.minX + 3.5, y: xr.minY - 1), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: NSColor(white: 1, alpha: 0.7)])
-            }
-        }
-        // The row that adds a lane.
-        let add = addLaneRect
-        let addAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.controlAccentColor]
-        NSColor(white: 1, alpha: 0.03).setFill()
-        let addPath = NSBezierPath(roundedRect: add, xRadius: 7, yRadius: 7)
-        addPath.fill()
-        NSColor(white: 1, alpha: 0.12).setStroke()
-        addPath.setLineDash([4, 3], count: 2, phase: 0)
-        addPath.stroke()
-        ("+  Add effect lane" as NSString).draw(at: CGPoint(x: add.minX + 12, y: add.midY - 7), withAttributes: addAttrs)
-        if effects.isEmpty {
-            let hint: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(white: 1, alpha: 0.35)]
-            ("No effects yet. Add one with the Add button above." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: laneY(0) + 7), withAttributes: hint)
-        }
-        for seg in effects {
-            let r = CGRect(x: x(seg.start), y: laneY(seg.lane) + 2, width: max(4, x(seg.end) - x(seg.start)), height: Self.laneHeight - 4)
-            let selected = editor.selected == seg.id
-            Self.color(seg).withAlphaComponent(selected ? 0.95 : 0.78).setFill()
+        func block(_ r: CGRect, _ color: NSColor, _ text: String, selected: Bool, dark: Bool = false) {
+            color.withAlphaComponent(selected ? 0.95 : 0.78).setFill()
             NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
             stroke(r, selected: selected)
-            title(Self.caption(seg), in: r, dark: seg.kind == "highlight")
+            title(text, in: r, dark: dark)
             NSColor(white: 1, alpha: 0.55).setFill()
             if r.width > 24 {
                 NSBezierPath(roundedRect: CGRect(x: r.minX + 3, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
                 NSBezierPath(roundedRect: CGRect(x: r.maxX - 5, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
             }
+        }
+        for r in shown {
+            switch r.kind {
+            case let .header(group):
+                let isFolded = editor.folded.contains(group)
+                drawLabel(group == "top" ? "ON TOP" : "WHOLE FRAME", symbol: "", y: r.y, height: r.height, attrs: caption, tint: .clear, open: !isFolded, plus: true)
+                if isFolded {
+                    // Folded, the group still shows where its things are: slim bars in the track, in row
+                    // order, each on the first of up to three sub-lines where it overlaps nothing, so
+                    // things at the same time stay apart. Touching ones of a colour join into one bar.
+                    let order = { (s: Segment) in s.kind == "image" ? 1000 + s.lane : s.lane }
+                    var lines: [[Segment]] = [[]]
+                    for seg in segments.filter({ group == "top" ? $0.isOverlay : $0.space == 3 }).sorted(by: { (order($0), $0.start) < (order($1), $1.start) }) {
+                        if let i = lines.firstIndex(where: { !$0.contains { $0.overlaps(seg) } }) { lines[i].append(seg) }
+                        else if lines.count < 3 { lines.append([seg]) }
+                        else { lines[2].append(seg) }
+                    }
+                    let bar: CGFloat = 3, step: CGFloat = 5, top = r.y + r.height / 2 - (CGFloat(lines.count - 1) * step + bar) / 2
+                    for (i, line) in lines.enumerated() {
+                        var runs: [(from: CGFloat, to: CGFloat, color: NSColor)] = []
+                        for seg in line.sorted(by: { $0.start < $1.start }) {
+                            let from = x(seg.start), to = max(from + 3, x(seg.end)), color = Self.color(seg)
+                            if let last = runs.last, last.color == color, from <= last.to + 2 { runs[runs.count - 1].to = max(last.to, to) }
+                            else { runs.append((from, to, color)) }
+                        }
+                        for run in runs {
+                            run.color.withAlphaComponent(0.6).setFill()
+                            NSBezierPath(roundedRect: CGRect(x: run.from, y: top + CGFloat(i) * step, width: run.to - run.from, height: bar), xRadius: 1.5, yRadius: 1.5).fill()
+                        }
+                    }
+                } else if !segments.contains(where: { group == "top" ? $0.isOverlay : $0.space == 3 }), editor.edits.laneCount(space: group == "top" ? 1 : 3) == 0 {
+                    ((group == "top" ? "Press + to put a text or an image on top of the video." : "Press + to blur the whole picture, or make it black and white.") as NSString)
+                        .draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                }
+            case .position:
+                drawLabel("Position", symbol: "arrow.up.and.down.and.arrow.left.and.right", y: r.y, height: r.height, attrs: label, tint: .systemTeal, plus: true)
+                bed(r)
+                if editor.edits.moves.isEmpty {
+                    ("Drag the video in the preview to place it. Press + to add a move that animates it." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                }
+                for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) { draw(move: m, in: r, selected: editor.selected == "m:" + m.id, threeD: m.angles != nil) }
+            case let .lane(space, lane):
+                let name = space == 1 ? "Text" : space == 3 ? "Whole Frame" : "Effects"
+                drawLabel("\(name) \(lane + 1)", symbol: space == 1 ? "textformat" : space == 3 ? "rectangle.inset.filled" : "wand.and.stars",
+                          y: r.y, height: r.height, attrs: label, tint: NSColor(white: 1, alpha: 0.5), plus: hasPlus(r))
+                bed(r, alpha: real(space, lane) ? 0.05 : 0.025)
+                if removable(r) {
+                    // An empty lane's ×, which removes it.
+                    let xr = removeRect(r)
+                    NSColor(white: 1, alpha: 0.12).setFill()
+                    NSBezierPath(ovalIn: xr).fill()
+                    ("×" as NSString).draw(at: CGPoint(x: xr.minX + 3.5, y: xr.minY - 1), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: NSColor(white: 1, alpha: 0.7)])
+                }
+                if lane == 0, real(space, lane), !segments.contains(where: { $0.space == space }) {
+                    let words = space == 1 ? "Texts go here. They sit on top of the video."
+                        : space == 3 ? "A blur or black and white here covers the whole picture."
+                        : "Press + to add an effect that changes the video: zoom, speed, blur and more."
+                    (words as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                }
+            case let .image(id):
+                guard let image = images.first(where: { $0.id == id }) else { continue }
+                drawLabel(URL(fileURLWithPath: image.file ?? "Image").deletingPathExtension().lastPathComponent, symbol: "photo", y: r.y, height: r.height,
+                          attrs: label, tint: .systemGreen, open: editor.openImages.contains(id))
+                bed(r)
+            case let .imagePosition(id):
+                guard let image = images.first(where: { $0.id == id }) else { continue }
+                drawLabel("Position", symbol: "", y: r.y, height: r.height, attrs: child, tint: .clear, indent: 22, plus: true)
+                bed(r, alpha: 0.035)
+                if (image.moves ?? []).isEmpty {
+                    ("Drag the image in the preview to place it. Press + to add a move that animates it." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                }
+                for m in (image.moves ?? []).sorted(by: { $0.t < $1.t }) {
+                    draw(move: m, in: r, selected: editor.selected == Editor.childID("im", image: id, m.id), threeD: false)
+                }
+            case let .imageEffects(id, lane):
+                guard let image = images.first(where: { $0.id == id }) else { continue }
+                drawLabel(lane == 0 ? "Effects" : "", symbol: "", y: r.y, height: r.height, attrs: child, tint: .clear, indent: 22, plus: true)
+                bed(r, alpha: 0.035)
+                if lane == 0, (image.effects ?? []).isEmpty {
+                    ("Press + to add an effect to this image only: blur, fade, pulse and more." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                }
+                for fx in image.effects ?? [] where fx.lane == lane {
+                    let b = CGRect(x: x(fx.start), y: r.y + 2, width: max(4, x(fx.end) - x(fx.start)), height: r.height - 4)
+                    block(b, Self.color(image: fx), Self.caption(image: fx), selected: editor.selected == Editor.childID("ie", image: id, fx.id))
+                }
+            }
+            if hasPlus(r) {
+                let b = plusRect(r)
+                NSColor(white: 1, alpha: 0.1).setFill()
+                NSBezierPath(roundedRect: b, xRadius: 5, yRadius: 5).fill()
+                NSColor.controlAccentColor.setFill()
+                CGRect(x: b.midX - 4.5, y: b.midY - 0.75, width: 9, height: 1.5).fill()
+                CGRect(x: b.midX - 0.75, y: b.midY - 4.5, width: 1.5, height: 9).fill()
+            }
+        }
+        for seg in segments {
+            guard let r = row(of: seg) else { continue }
+            let b = CGRect(x: x(seg.start), y: r.y + 2, width: max(4, x(seg.end) - x(seg.start)), height: r.height - 4)
+            // An image stays lit while one of its own moves or effects is selected.
+            let selected = editor.selected == seg.id || (seg.kind == "image" && editor.selectedImage?.id == seg.id)
+            block(b, Self.color(seg), Self.caption(seg), selected: selected, dark: seg.kind == "highlight")
         }
 
         // The playhead.
@@ -356,17 +536,56 @@ final class TimelineView: NSView {
         tag.draw(at: CGPoint(x: pill.minX + 6, y: pill.minY + 2), withAttributes: tagAttrs)
     }
 
-    private func drawLabel(_ text: String, symbol: String, y: CGFloat, height: CGFloat, attrs: [NSAttributedString.Key: Any], tint: NSColor) {
-        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 11, weight: .semibold)) {
+    /// A row's label: a triangle when the row folds (`open` says which way), its symbol, and its name, cut to fit.
+    private func drawLabel(_ text: String, symbol: String, y: CGFloat, height: CGFloat, attrs: [NSAttributedString.Key: Any], tint: NSColor, open: Bool? = nil, indent: CGFloat = 0, plus: Bool = false) {
+        var at = Self.pad + indent
+        if let open {
+            let tri = NSBezierPath()
+            let c = CGPoint(x: at + 4, y: y + height / 2)
+            if open { tri.move(to: CGPoint(x: c.x - 4, y: c.y - 2.5)); tri.line(to: CGPoint(x: c.x + 4, y: c.y - 2.5)); tri.line(to: CGPoint(x: c.x, y: c.y + 3.5)) }
+            else { tri.move(to: CGPoint(x: c.x - 2.5, y: c.y - 4)); tri.line(to: CGPoint(x: c.x + 3.5, y: c.y)); tri.line(to: CGPoint(x: c.x - 2.5, y: c.y + 4)) }
+            tri.close()
+            NSColor(white: 1, alpha: 0.55).setFill()
+            tri.fill()
+            at += 14
+        }
+        if !symbol.isEmpty, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(.init(pointSize: 11, weight: .semibold)) {
             let tinted = image.copy() as! NSImage
             tinted.lockFocus()
             tint.set()
             CGRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop)
             tinted.unlockFocus()
-            tinted.draw(in: CGRect(x: Self.pad, y: y + height / 2 - tinted.size.height / 2, width: tinted.size.width, height: tinted.size.height),
+            tinted.draw(in: CGRect(x: at, y: y + height / 2 - tinted.size.height / 2, width: tinted.size.width, height: tinted.size.height),
                         from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            at += 20
         }
-        (text as NSString).draw(at: CGPoint(x: Self.pad + 20, y: y + height / 2 - 7), withAttributes: attrs)
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingMiddle
+        var cut = attrs
+        cut[.paragraphStyle] = style
+        // The name stops before the row's +.
+        let room = Self.labelWidth - at - (plus ? 32 : 8)
+        (text as NSString).draw(in: CGRect(x: at, y: y + height / 2 - 7, width: max(10, room), height: 16), withAttributes: cut)
+    }
+
+    /// A move on a Position row: its travel as a bar, ending in a diamond where it lands.
+    private func draw(move m: Move, in r: Row, selected: Bool, threeD: Bool) {
+        let bar = CGRect(x: x(m.t - m.duration), y: r.y + 7, width: max(2, x(m.t) - x(m.t - m.duration)), height: r.height - 14)
+        NSColor.systemTeal.withAlphaComponent(selected ? 0.85 : 0.45).setFill()
+        NSBezierPath(roundedRect: bar, xRadius: 6, yRadius: 6).fill()
+        if selected { stroke(bar.insetBy(dx: -2, dy: -3), selected: true) }
+        let name = (["smooth": "Smooth", "linear": "Linear", "spring": "Spring", "zoom": "Zoom through", "swipe": "Swipe",
+                     "fade": "Fade", "spin": "Spin", "pop": "Pop"][m.style] ?? m.style) + (threeD ? " · 3D" : "") as NSString
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
+        if bar.width > name.size(withAttributes: attrs).width + 16 { name.draw(at: CGPoint(x: bar.minX + 6, y: bar.minY - 1), withAttributes: attrs) }
+        let d = diamond(m.t, in: r)
+        let path = NSBezierPath()
+        path.move(to: CGPoint(x: d.midX, y: d.minY)); path.line(to: CGPoint(x: d.maxX, y: d.midY))
+        path.line(to: CGPoint(x: d.midX, y: d.maxY)); path.line(to: CGPoint(x: d.minX, y: d.midY)); path.close()
+        (selected ? NSColor.white : NSColor.systemTeal).setFill()
+        path.fill()
+        NSColor(white: 0, alpha: 0.4).setStroke()
+        path.stroke()
     }
 
     private func stroke(_ r: CGRect, selected: Bool) {
@@ -399,6 +618,10 @@ final class TimelineView: NSView {
         case "mono": return s.scope == "frame" ? "Black & white · whole frame" : "Black & white"
         case "3d": return s.style == "orbit" ? "3D orbit" : "3D turn"
         case "text": return "“\(s.text ?? "")”"
+        case "image":
+            let moves = s.moves?.count ?? 0, effects = s.effects?.count ?? 0
+            let name = URL(fileURLWithPath: s.file ?? "").lastPathComponent
+            return name + (moves > 0 ? " · \(moves) move\(moves == 1 ? "" : "s")" : "") + (effects > 0 ? " · \(effects) effect\(effects == 1 ? "" : "s")" : "")
         default: return "Effect"
         }
     }
@@ -412,63 +635,157 @@ final class TimelineView: NSView {
 
     // MARK: Interaction
 
-    private func hit(_ p: CGPoint) -> Segment? {
+    /// The top-level segment under the pointer on a lane or an image's row.
+    private func hit(_ p: CGPoint, in r: Row) -> Segment? {
         guard let editor else { return nil }
         let near = { (s: Segment) in p.x >= self.x(s.start) - 4 && p.x <= self.x(s.end) + 4 }
-        // The lane under the pointer, counting the gaps between lanes as half each neighbour's.
-        guard p.y >= laneY(0) - Self.laneGap / 2 else { return nil }
-        let l = min(max(0, Int(((p.y - laneY(0) + Self.laneGap / 2) / (Self.laneHeight + Self.laneGap)).rounded(.down))), lanesShown - 1)
-        let onLane = editor.edits.segments.filter { $0.lane == l && near($0) }
+        let onRow: [Segment]
+        switch r.kind {
+        case let .lane(space, lane): onRow = editor.edits.segments.filter { $0.space == space && $0.lane == lane && near($0) }
+        case let .image(id): onRow = editor.edits.segments.filter { $0.id == id && near($0) }
+        default: return nil
+        }
         // The selected one first, then the shortest (a short segment over a long one stays reachable).
-        return onLane.first { $0.id == editor.selected } ?? onLane.min { ($0.end - $0.start) < ($1.end - $1.start) }
+        return onRow.first { $0.id == editor.selected } ?? onRow.min { ($0.end - $0.start) < ($1.end - $1.start) }
     }
 
-    /// The move under the pointer on the motion track: its diamond, else its travel bar.
-    private func moveHit(_ p: CGPoint) -> Move? {
+    /// The move under the pointer on a Position row: its diamond, else its travel bar.
+    private func moveHit(_ p: CGPoint, _ moves: [Move], in r: Row) -> Move? {
         guard let editor else { return nil }
-        if let m = editor.edits.moves.first(where: { diamond($0.t).insetBy(dx: -5, dy: -6).contains(p) }) { return m }
+        if let m = moves.first(where: { diamond($0.t, in: r).insetBy(dx: -5, dy: -6).contains(p) }) { return m }
         let at = t(p.x)
         let slop = Double(6 / max(trackRect.width, 1)) * editor.duration
-        return editor.edits.moves.filter { at >= $0.t - $0.duration - slop && at <= $0.t + slop }.min { abs($0.t - at) < abs($1.t - at) }
+        return moves.filter { at >= $0.t - $0.duration - slop && at <= $0.t + slop }.min { abs($0.t - at) < abs($1.t - at) }
+    }
+
+    // MARK: Adding
+    // @ref LLP 0005#add-where-it-goes — each row adds its own kind of thing
+
+    private final class Act: NSObject { let run: () -> Void; init(_ run: @escaping () -> Void) { self.run = run } }
+    @objc private func picked(_ item: NSMenuItem) { (item.representedObject as? Act)?.run() }
+
+    /// A menu under a row's +: titles and what each does; a nil action is a caption, "-" a line.
+    private func popUp(_ items: [(String, (() -> Void)?)], under r: CGRect) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (title, action) in items {
+            if title == "-" { menu.addItem(.separator()); continue }
+            let item = NSMenuItem(title: title, action: action == nil ? nil : #selector(picked(_:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = action != nil
+            item.representedObject = action.map(Act.init)
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: CGPoint(x: r.minX, y: r.maxY - scrollY + 4), in: self)
+    }
+
+    /// What a row's + offers, at the playhead.
+    private func showAdd(for r: Row) {
+        guard let editor else { return }
+        let at = plusRect(r)
+        switch r.kind {
+        case .position:
+            popUp([("Add Move Here — then drag the video where it should go", { editor.addMove() }), ("-", nil),
+                   ("Side to Side", { editor.pattern("side") }), ("Zoom Tour", { editor.pattern("tour") }), ("Entrance", { editor.pattern("entrance") }),
+                   ("Bounce", { editor.pattern("bounce") }), ("Slow Push In", { editor.pattern("drift") }), ("-", nil),
+                   ("3D Turntable", { editor.pattern("turntable") }), ("3D Orbit", { editor.pattern("orbit") }), ("3D Hero Reveal", { editor.pattern("reveal") }),
+                   ("3D Flip In", { editor.pattern("flip") }), ("3D Float", { editor.pattern("float") })], under: at)
+        case .lane(0, _):
+            popUp([("Effects on the video", nil),
+                   ("Zoom In", { editor.add("zoom-in") }), ("Zoom Out", { editor.add("zoom-out") }), ("Zoom on Clicks", { editor.autoZoom() }), ("-", nil),
+                   ("Slow Down", { editor.add("slow") }), ("Speed Up", { editor.add("fast") }), ("-", nil),
+                   ("Spotlight", { editor.add("spotlight") }), ("Cursor Highlight", { editor.add("highlight") }),
+                   ("Blur", { editor.add("blur") }), ("Black & White", { editor.add("mono") }), ("-", nil),
+                   ("3D Turn", { editor.add("3d") }), ("-", nil), ("New Effects Lane", { editor.addLane(space: 0) })], under: at)
+        case .header("top"):
+            popUp([("Text", { editor.add("text") }), ("Image…", { Pictures.pick { editor.addImage($0) } }), ("-", nil),
+                   ("New Text Lane", { editor.addLane(space: 1) })], under: at)
+        case .header:
+            popUp([("Over the whole picture", nil), ("Blur", { editor.add("blur-frame") }), ("Black & White", { editor.add("mono-frame") }), ("-", nil),
+                   ("New Whole-Frame Lane", { editor.addLane(space: 3) })], under: at)
+        case let .imagePosition(id):
+            editor.select(id)
+            editor.addImageMove()
+        case let .imageEffects(id, _):
+            let add = { (kind: String) in { editor.select(id); editor.addImageEffect(kind) } }
+            popUp([("Effects on this image", nil), ("Blur", add("blur")), ("Black & White", add("mono")), ("Fade", add("fade")), ("-", nil),
+                   ("Pulse", add("pulse")), ("Float", add("float")), ("Wiggle", add("wiggle"))], under: at)
+        default: break
+        }
     }
 
     override func mouseDown(with e: NSEvent) {
         window?.makeFirstResponder(self)
         guard let editor else { return }
-        // The top edge resizes the timeline (and so the preview above it); a double click resets it.
         let p = local(e)
         moved = false
-        if addLaneRect.contains(p) { editor.addLane(); return }
-        if p.y >= Self.motionTop - Self.laneGap / 2, p.y <= Self.motionTop + Self.motionHeight + Self.laneGap / 2 {
-            if let m = moveHit(p) {
+        func scrub() { drag = .scrub; editor.seek(source: t(p.x)) }
+        // The lane sizes, in the corner.
+        if p.y < Self.clipTop, p.x < Self.labelWidth {
+            if let i = (0..<3).first(where: { sizeRect($0).insetBy(dx: -1, dy: -3).contains(p) }) {
+                size = i
+                UserDefaults.standard.set(i, forKey: "ExactStudio.laneSize")
+                changed()
+            }
+            return
+        }
+        // The clip: its label folds the video's rows; a part of it is selected, and the playhead goes there.
+        if p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight {
+            if p.x < Self.labelWidth { return editor.toggle(group: "video") }
+            if let piece = editor.pieces.first(where: { t(p.x) >= $0.start && t(p.x) <= $0.end }) { editor.select(piece.id) }
+            return scrub()
+        }
+        guard let r = row(at: p.y) else {
+            if p.y > Self.clipTop + Self.clipHeight { editor.select("") }
+            return scrub()
+        }
+        if hasPlus(r), plusRect(r).insetBy(dx: -4, dy: -4).contains(p) { return showAdd(for: r) }
+        switch r.kind {
+        case let .header(group):
+            if p.x < Self.labelWidth { editor.toggle(group: group) } else { scrub() }
+        case .position:
+            if let m = moveHit(p, editor.edits.moves, in: r) {
                 editor.select("m:" + m.id)
                 editor.seek(source: m.t)
                 // Keep where in the move it was grabbed, so a drag slides it from there.
                 drag = .retime(m.id, m.t - t(p.x))
-            } else {
-                drag = .scrub
-                editor.seek(source: t(p.x))
+            } else { scrub() }
+        case let .imagePosition(id):
+            guard let image = editor.edits.images.first(where: { $0.id == id }) else { return }
+            if let m = moveHit(p, image.moves ?? [], in: r) {
+                editor.select(Editor.childID("im", image: id, m.id))
+                editor.seek(source: m.t)
+                drag = .imove(id, m.id, m.t - t(p.x))
+            } else { scrub() }
+        case let .imageEffects(id, lane):
+            guard let image = editor.edits.images.first(where: { $0.id == id }) else { return }
+            let on = (image.effects ?? []).filter { $0.lane == lane && p.x >= x($0.start) - 4 && p.x <= x($0.end) + 4 }
+            guard let fx = on.min(by: { ($0.end - $0.start) < ($1.end - $1.start) }) else { return scrub() }
+            editor.select(Editor.childID("ie", image: id, fx.id))
+            let edge: CGFloat = 7, wide = x(fx.end) - x(fx.start) > edge * 2
+            let mode = wide && p.x - x(fx.start) < edge ? -1 : wide && x(fx.end) - p.x < edge ? 1 : 0
+            drag = .fx(id, fx.id, mode, fx.start, fx.end, fx.lane, t(p.x))
+        case .lane, .image:
+            if removable(r), removeRect(r).insetBy(dx: -3, dy: -3).contains(p), case let .lane(space, lane) = r.kind {
+                return editor.removeLane(lane, space: space)
             }
-            return
-        }
-        if let i = (0..<editor.edits.lanes).first(where: { removeRect($0).insetBy(dx: -3, dy: -3).contains(p) }) { editor.removeLane(i); return }
-        if p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight, let piece = editor.pieces.first(where: { t(p.x) >= $0.start && t(p.x) <= $0.end }) {
-            // A part of the clip: select it, and seek there.
-            editor.select(piece.id)
-            drag = .scrub
-            editor.seek(source: t(p.x))
-            return
-        }
-        if let s = hit(p) {
-            editor.select(s.id)
-            let edge: CGFloat = 7, wide = x(s.end) - x(s.start) > edge * 2
-            if wide && p.x - x(s.start) < edge { drag = .left(s.id, s.start, s.end, s.lane) }
-            else if wide && x(s.end) - p.x < edge { drag = .right(s.id, s.start, s.end, s.lane) }
-            else { drag = .move(s.id, s.start, s.end, t(p.x)) }
-        } else {
-            if p.y > Self.clipTop + Self.clipHeight { editor.select("") }
-            drag = .scrub
-            editor.seek(source: t(p.x))
+            // An image's label folds its rows, and selects it.
+            if case let .image(id) = r.kind, p.x < Self.labelWidth {
+                let wasOpen = editor.openImages.contains(id), wasSelected = editor.selectedImage?.id == id
+                editor.select(id)
+                if wasOpen == editor.openImages.contains(id) || wasSelected { editor.toggleImage(id) }
+                return
+            }
+            if let s = hit(p, in: r) {
+                editor.select(s.id)
+                let edge: CGFloat = 7, wide = x(s.end) - x(s.start) > edge * 2
+                if wide && p.x - x(s.start) < edge { drag = .left(s.id, s.start, s.end, s.lane) }
+                else if wide && x(s.end) - p.x < edge { drag = .right(s.id, s.start, s.end, s.lane) }
+                else { drag = .move(s.id, s.start, s.end, t(p.x)) }
+            } else {
+                editor.select("")
+                scrub()
+            }
         }
         needsDisplay = true
     }
@@ -490,10 +807,25 @@ final class TimelineView: NSView {
             let to = now + grab
             editor.moveTime(id, to: to, live: true)
             editor.seek(source: to)
+        case let .imove(image, id, grab):
+            let to = now + grab
+            editor.dragImageMove(image, id, to: to, live: true)
+            editor.seek(source: to)
+        case let .fx(image, id, mode, s, end, lane, grab):
+            switch mode {
+            case -1: editor.dragImageEffect(image, id, start: min(now, end - 0.1), end: end, lane: lane)
+            case 1: editor.dragImageEffect(image, id, start: s, end: max(now, s + 0.1), lane: lane)
+            default:
+                guard let span = editor.edits.images.first(where: { $0.id == image }) else { return }
+                let len = end - s
+                let start = min(max(s + now - grab, span.start), span.end - len)
+                editor.dragImageEffect(image, id, start: start, end: start + len, lane: fxLane(at: p.y, image: image))
+            }
         case let .move(id, s, end, grab):
+            guard let seg = editor.edits.segments.first(where: { $0.id == id }) else { return }
             let len = end - s
             let start = min(max(s + now - grab, 0), editor.duration - len)
-            editor.drag(id, start: start, end: start + len, lane: min(lane(at: p.y), editor.edits.lanes))
+            editor.drag(id, start: start, end: start + len, lane: lane(at: p.y, for: seg))
         case let .left(id, _, end, l):
             editor.drag(id, start: min(now, end - 0.1), end: end, lane: l)
         case let .right(id, s, _, l):
@@ -513,6 +845,8 @@ final class TimelineView: NSView {
             switch drag {
             case .scrub: break
             case let .retime(id, _): if let m = editor.edits.moves.first(where: { $0.id == id }) { editor.moveTime(id, to: m.t, live: false) }
+            case let .imove(image, id, _):
+                if let m = editor.edits.images.first(where: { $0.id == image })?.moves?.first(where: { $0.id == id }) { editor.dragImageMove(image, id, to: m.t, live: false) }
             default: editor.endDrag()
             }
         }

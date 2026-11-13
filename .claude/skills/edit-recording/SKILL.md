@@ -1,6 +1,6 @@
 ---
 name: edit-recording
-description: Edit an Exact Studio screen recording as files — cut it, add texts, zooms, effects, moves, 3D, change its look — then check it, look at frames and export, without the app's UI. Use when asked to edit, cut, title, polish or export an Exact Studio recording or video.
+description: Edit an Exact Studio screen recording as files — cut it, add texts, images (logos, badges, pictures), zooms, effects, moves, 3D, change its look — then check it, look at frames and export, without the app's UI. Use when asked to edit, cut, title, brand, polish or export an Exact Studio recording or video.
 ---
 
 # Editing an Exact Studio recording
@@ -15,6 +15,10 @@ The loop, from this repository's root:
 2. Edit `edits.json` / `look.json` directly. Times are **seconds of the recording**, not of the
    video as it plays (cuts and speed changes make them differ; `show` prints both lengths).
    `./exact-studio template <id> launch|hero|tour|teaser` is a quick start to adjust from.
+   To put a picture on the video, run `./exact-studio image <id> <picture> --at <t> --for <seconds>`:
+   it copies the file into the recording and prints the new `image` segment. Then edit that
+   segment's place, size, moves and effects in `edits.json`. Never point `file` outside the
+   recording's folder.
 3. `./exact-studio validate <id>` until it prints `ok`.
 4. `./exact-studio frame <id> <seconds>` and look at `.exact/frame.png` at the moments that matter
    (a title's middle, a move's landing, a cut). `--source` takes recording time.
@@ -26,6 +30,11 @@ Rules that keep an edit looking good:
   not over a stretch where a zoom pulls the video under the text.
 - Prefer a few strong moments over many effects; leave the first second plain or blurred under a title.
 - Speed changes read as lag on screen recordings; use cuts instead.
-- An id must be unique within its list; any string works.
+- An effect on the video (zoom, blur, spotlight…) never touches a text or an image. To change one
+  image, give it its own `moves` and `effects`. To blur or grey the whole picture at once, images included, use a `blur` or
+  `mono` segment with `scope` `"frame"` (texts stay sharp) or `"all"` (texts too). `docs/edits.md` has the table of which lanes each kind uses.
+- Keep an image small and near a corner unless it is the subject: a logo at `size` 0.08–0.15, a
+  picture that carries a moment at 0.3–0.5. Look at a frame after placing it.
+- An id must be unique within its list and hold no colon; any other string works.
 
 If the app is open, it shows each change within a second: tell the person to look there.

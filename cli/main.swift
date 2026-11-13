@@ -22,6 +22,10 @@ exact-studio — edit Exact Studio recordings from the command line
                                             renders the video; default ~/Movies/Exact Studio/<name>.mp4
   exact-studio template <id> <name>         replaces texts, effects and moves with a template:
                                             launch, hero, tour, teaser (laid out for look.json's aspect)
+  exact-studio image <id> <picture> [--at <t>] [--for <seconds>]
+                                            copies a picture into the recording's images/ folder and adds an
+                                            image on top of the video at <t> seconds of the recording (default 0)
+                                            for <seconds> (default 4); prints the new segment, ready to edit
   exact-studio schema                       prints where the docs and JSON Schemas are
 
   <id> is a recording folder's name, a unique start of one, or "latest".
@@ -86,7 +90,7 @@ func open(_ ref: String) -> Recording {
 
 func write<T: Encodable>(_ value: T, _ url: URL) {
     let e = JSONEncoder()
-    e.outputFormatting = [.prettyPrinted, .sortedKeys]
+    e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     do { try e.encode(value).write(to: url) } catch { fail("couldn't write \(url.path): \(error)") }
 }
 
@@ -121,11 +125,26 @@ func problems(_ r: Recording) -> [String] {
         if !Segment.kinds.contains(s.kind) { out.append("\(at): unknown kind; one of \(Segment.kinds.joined(separator: ", "))") }
         if s.end - s.start < 0.1 { out.append("\(at): shorter than 0.1 s, or ends before it starts") }
         if s.start < 0 || s.end > d + 0.01 { out.append("\(at): outside the recording, 0:00–\(stamp(d))") }
-        if s.lane < 0 || s.lane >= e.lanes { out.append("\(at): lane \(s.lane), but lanes is \(e.lanes)") }
+        if s.kind != "image", s.lane < 0 || s.lane >= e.laneCount(space: s.space) {
+            out.append("\(at): lane \(s.lane), but \(["lanes", "textLanes", "", "frameLanes"][s.space]) is \(e.laneCount(space: s.space))")
+        }
+        if s.id.contains(":") { out.append("\(at): an id can't contain a colon") }
+        if e.segments.filter({ $0.id == s.id }).count > 1 { out.append("\(at): another segment has the same id") }
         if let why = e.conflict(s) { out.append("\(at): \(why)") }
         if s.kind == "zoom", (s.level ?? 0) <= 0 { out.append("\(at): a zoom needs a level above 0 (below 1 zooms out)") }
         if s.kind == "speed", (s.rate ?? 0) <= 0 { out.append("\(at): a speed change needs a rate above 0") }
         if s.kind == "text", (s.text ?? "").isEmpty { out.append("\(at): a text needs its words") }
+        if s.kind == "image" {
+            if (s.file ?? "").isEmpty { out.append("\(at): an image needs its file, a path inside the recording's folder") }
+            else if Pictures.image(s.file, in: folder) == nil { out.append("\(at): \(s.file!) is not a picture in \(folder.lastPathComponent)/ (\(Pictures.types.joined(separator: ", ")))") }
+            if (s.size ?? 0.25) <= 0 { out.append("\(at): an image's size must be above 0") }
+            for fx in s.effects ?? [] where fx.end - fx.start < 0.1 { out.append("\(at): its \(fx.kind) effect \(fx.id) is shorter than 0.1 s, or ends before it starts") }
+            for m in s.moves ?? [] where m.to.scale <= 0 { out.append("\(at): its move \(m.id) needs a scale above 0 (1 keeps the image's size)") }
+            let ids = (s.effects ?? []).map(\.id) + (s.moves ?? []).map(\.id)
+            if Set(ids).count != ids.count { out.append("\(at): two of its moves or effects share an id") }
+        } else if s.moves != nil || s.effects != nil {
+            out.append("\(at): only an image has moves and effects of its own")
+        }
     }
     for m in e.moves where m.t < 0 || m.t > d + 0.01 { out.append("move \(m.id) at \(stamp(m.t)): outside the recording") }
     for s in e.splits where s <= 0 || s >= d { out.append("split at \(stamp(s)): outside the recording") }
@@ -153,7 +172,7 @@ case "show":
         let pieces = r.edits.pieces(r.meta.duration).map { ["start": $0.start, "end": $0.end, "removed": $0.removed] as [String: Any] }
         let out: [String: Any] = ["id": r.id, "name": r.meta.name, "kind": r.meta.kind, "recorded": r.meta.duration, "length": map.outputDuration,
                                   "folder": r.folder.path, "clicks": r.meta.clicks.map(\.t), "parts": pieces]
-        print(String(data: try! JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys]), encoding: .utf8)!)
+        print(String(data: try! JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), encoding: .utf8)!)
         break
     }
     print("\(r.meta.name)  (\(r.meta.kind), \(r.id))")
@@ -164,17 +183,25 @@ case "show":
         let t = r.edits.transitions[Edits.key(p.end)].map { " → \($0)" } ?? ""
         print("  \(stamp(p.start))–\(stamp(p.end))\(p.removed ? "  removed" : "")\(t)")
     }
-    print("segments (lane: kind, recording time):")
-    for s in r.edits.segments.sorted(by: { ($0.lane, $0.start) < ($1.lane, $1.start) }) {
+    print("segments (row: kind, recording time; e is an effect lane, t a text lane, i an image's row, f a whole-frame lane):")
+    for s in r.edits.segments.sorted(by: { ($0.space, $0.lane, $0.start) < ($1.space, $1.lane, $1.start) }) {
         var what = s.kind
         switch s.kind {
         case "zoom": what += " \(s.level ?? 2)×"
         case "speed": what += " \(s.rate ?? 1)×"
         case "text": what += " “\(s.text ?? "")” \(s.style ?? "plain") in:\(s.animIn ?? "") out:\(s.animOut ?? "")"
+        case "image": what += " \(s.file ?? "") at x \(s.x ?? 0.5) y \(s.y ?? 0.5) size \(s.size ?? 0.25) in:\(s.animIn ?? "fade") out:\(s.animOut ?? "fade")"
         case "3d": what += " \(s.style ?? "hold") tilt \(s.tilt ?? 0) turn \(s.turn ?? 0)"
-        default: if s.scope == "frame" { what += " (whole frame)" }
+        default: if s.coversFrame { what += s.scope == "all" ? " (whole frame, texts too)" : " (whole frame)" }
         }
-        print("  \(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]")
+        print("  \(["e", "t", "i", "f"][s.space])\(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]")
+        // An image's own moves and effects, under it.
+        for m in (s.moves ?? []).sorted(by: { $0.t < $1.t }) {
+            print("        move lands \(stamp(m.t)) after \(m.duration)s \(m.style): x \(m.to.x) y \(m.to.y) scale \(m.to.scale)  [\(m.id)]")
+        }
+        for fx in (s.effects ?? []).sorted(by: { $0.start < $1.start }) {
+            print("        effect \(fx.kind)\(fx.kind == "fade" ? " to \(fx.level ?? 0.3)" : "") \(stamp(fx.start))–\(stamp(fx.end))  [\(fx.id)]")
+        }
     }
     if !r.edits.moves.isEmpty { print("moves:") }
     for m in r.edits.moves.sorted(by: { $0.t < $1.t }) {
@@ -232,19 +259,35 @@ case "template":
     let map = TimeMap(duration: r.meta.duration, edits: r.edits)
     guard let made = Templates.make(args[1], duration: map.outputDuration, source: { map.source($0) }, aspect: r.look.aspect,
                                     clicks: r.meta.clicks, three: r.edits.three) else { fail("no template \(args[1]); one of \(Templates.names.joined(separator: ", "))") }
-    var packed: [Segment] = []
-    for var seg in made.segments.sorted(by: { $0.start < $1.start }) {
-        var lane = 0
-        while packed.contains(where: { $0.lane == lane && $0.overlaps(seg) }) { lane += 1 }
-        seg.lane = lane
-        packed.append(seg)
-    }
-    r.edits.segments = packed
+    r.edits.pack(made.segments)
     r.edits.moves = made.moves
     r.edits.base = made.base
-    r.edits.lanes = max(1, (packed.map(\.lane).max() ?? 0) + 1)
     write(r.edits, r.folder.appendingPathComponent("edits.json"))
-    print("\(args[1]) applied to \(r.id): \(packed.count) segments, \(made.moves.count) moves (edits.json)")
+    print("\(args[1]) applied to \(r.id): \(r.edits.segments.count) segments, \(made.moves.count) moves (edits.json)")
+
+case "image":
+    let at = option("--at").flatMap(Double.init) ?? 0, length = option("--for").flatMap(Double.init) ?? 4
+    guard args.count >= 2 else { fail(usage) }
+    var r = open(args[0])
+    let d = r.meta.duration
+    guard at >= 0, at < d - 0.1, length >= 0.1 else { fail("--at must be inside the recording, 0–\(stamp(d)), and --for at least 0.1") }
+    do {
+        let file = try Pictures.bring(URL(fileURLWithPath: (args[1] as NSString).expandingTildeInPath), into: r.folder)
+        var n = r.edits.images.count + 1
+        while r.edits.segments.contains(where: { $0.id == "image\(n)" }) { n += 1 }
+        let canvas = Framing(meta: r.meta, look: r.look, edits: r.edits, cursor: [], folder: r.folder).canvas
+        var s = Pictures.segment(id: "image\(n)", file: file, in: r.folder, canvas: canvas, start: at, end: min(d, at + length))
+        // On top of the other images.
+        s.lane = -1
+        r.edits.segments.append(s)
+        r.edits.fitLanes()
+        write(r.edits, r.folder.appendingPathComponent("edits.json"))
+        let made = r.edits.segments.first { $0.id == s.id }!
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        print("added to \(r.id) (edits.json), picture copied to \(file):")
+        print(String(data: try e.encode(made), encoding: .utf8)!)
+    } catch let refused as Pictures.Refused { fail(refused.why) } catch { fail("\(error)") }
 
 case "schema":
     let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

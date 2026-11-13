@@ -32,7 +32,9 @@ import re
 import sys
 
 SKIP_DIRS = {".git", ".hg", "node_modules", "__pycache__", ".venv", "venv",
-             "dist", "build", ".next", ".idea", ".vscode"}
+             "dist", "build", ".next", ".idea", ".vscode",
+             # This repository's build output and scratch: generated files, with Exact's own refs.
+             "target", ".exact"}
 REQUIRED_FIELDS = ("Type", "Status", "Systems", "Author", "Date")
 GATED_STATUSES = {"accepted", "active"}
 OVERLAYS = ("current", "foundation")          # symlink overlays under llp/

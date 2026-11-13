@@ -31,18 +31,29 @@
     },
     "lanes": {
       "type": "integer",
-      "minimum": 1
+      "minimum": 1,
+      "description": "How many effect lanes the video has: they hold zoom, speed, spotlight, highlight, 3d, and a blur or mono with no scope"
+    },
+    "textLanes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many text lanes there are; a text's lane counts these. A file without it is an old one, and the app sorts its texts into text lanes"
+    },
+    "frameLanes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many whole-frame lanes there are: they hold a blur or mono with scope frame or all"
     },
     "base": {
       "type": "object",
       "properties": {
         "x": {
           "type": "number",
-          "description": "Centre, 0\u20131 of the frame's width"
+          "description": "Centre, 0–1 of the frame's width"
         },
         "y": {
           "type": "number",
-          "description": "Centre, 0\u20131 of the frame's height, from the top"
+          "description": "Centre, 0–1 of the frame's height, from the top"
         },
         "scale": {
           "type": "number",
@@ -68,11 +79,11 @@
             "properties": {
               "x": {
                 "type": "number",
-                "description": "Centre, 0\u20131 of the frame's width"
+                "description": "Centre, 0–1 of the frame's width"
               },
               "y": {
                 "type": "number",
-                "description": "Centre, 0\u20131 of the frame's height, from the top"
+                "description": "Centre, 0–1 of the frame's height, from the top"
               },
               "scale": {
                 "type": "number",
@@ -165,13 +176,15 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "description": "Unique, and without a colon"
           },
           "kind": {
             "enum": [
               "zoom",
               "speed",
               "text",
+              "image",
               "3d",
               "spotlight",
               "highlight",
@@ -191,7 +204,8 @@
           },
           "lane": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Its row among its own kind: an effect lane, a text lane, a whole-frame lane, or for an image its place among the images (0 in front)"
           },
           "level": {
             "type": "number",
@@ -206,9 +220,10 @@
           "scope": {
             "enum": [
               "video",
-              "frame"
+              "frame",
+              "all"
             ],
-            "description": "blur, mono: the video, or the whole frame"
+            "description": "blur, mono: only the video (the default); the whole frame with its images, under the texts, which stay sharp; or all, the texts too"
           },
           "tilt": {
             "type": "number"
@@ -227,14 +242,16 @@
             "type": "string"
           },
           "x": {
-            "type": "number"
+            "type": "number",
+            "description": "text, image: centre, 0–1 of the frame's width"
           },
           "y": {
-            "type": "number"
+            "type": "number",
+            "description": "text, image: centre, 0–1 of the frame's height, from the top"
           },
           "size": {
             "type": "number",
-            "description": "text: height as a share of the frame's"
+            "description": "text, image: height as a share of the frame's"
           },
           "color": {
             "enum": [
@@ -267,7 +284,8 @@
               "blur",
               "fade",
               "none"
-            ]
+            ],
+            "description": "text: any of these. image: pop, fade, rise, slide, spin, blur, none"
           },
           "animOut": {
             "enum": [
@@ -278,7 +296,8 @@
               "sink",
               "blur",
               "none"
-            ]
+            ],
+            "description": "text: any of these. image: fade, pop, sink, blur, none"
           },
           "loop": {
             "enum": [
@@ -291,7 +310,134 @@
           },
           "rotation": {
             "type": "number",
-            "description": "text: degrees"
+            "description": "text, image: degrees"
+          },
+          "file": {
+            "type": "string",
+            "description": "image: the picture, a path inside the recording's folder such as images/logo.png. `exact-studio image` copies a picture there"
+          },
+          "opacity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "image"
+          },
+          "radius": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 0.5,
+            "description": "image: rounded corners, as a share of its shorter side"
+          },
+          "shadow": {
+            "type": "boolean",
+            "description": "image"
+          },
+          "moves": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "t": {
+                  "type": "number",
+                  "description": "Seconds of the recording it lands at"
+                },
+                "to": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "description": "Centre, 0–1 of the frame's width"
+                    },
+                    "y": {
+                      "type": "number",
+                      "description": "Centre, 0–1 of the frame's height, from the top"
+                    },
+                    "scale": {
+                      "type": "number",
+                      "description": "Multiplies the image's size: 1 keeps it"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "style": {
+                  "enum": [
+                    "smooth",
+                    "linear",
+                    "spring",
+                    "zoom",
+                    "swipe",
+                    "fade",
+                    "spin",
+                    "pop"
+                  ]
+                },
+                "duration": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "Seconds it travels before t"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "t",
+                "to"
+              ]
+            },
+            "description": "image: its own moves. Each lands inside the image's span"
+          },
+          "effects": {
+            "type": "array",
+            "description": "image: its own effects, each inside the image's span",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "blur",
+                    "mono",
+                    "fade",
+                    "pulse",
+                    "float",
+                    "wiggle"
+                  ]
+                },
+                "start": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Seconds of the recording"
+                },
+                "end": {
+                  "type": "number",
+                  "minimum": 0,
+                  "description": "Seconds of the recording; at least 0.1 after start"
+                },
+                "lane": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Its row under the image"
+                },
+                "level": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "fade: the opacity it fades to"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "start",
+                "end"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "additionalProperties": false,

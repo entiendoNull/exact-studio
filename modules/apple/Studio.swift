@@ -60,6 +60,7 @@ final class Studio: ExactModule {
         }
         if context.agent {
             Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true)
+            Pictures.mayAsk = false
             print("exact-studio library: \(Library.root.path)")
         }
     }
@@ -78,9 +79,10 @@ final class Studio: ExactModule {
         "id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "", "removed": false, "first": false,
         "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
         "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": "",
+        "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "",
     ]
     private static let emptySummary: [String: Any] = [
-        "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "moves": 0, "length": 0, "source": 0, "playing": false,
+        "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "images": 0, "moves": 0, "length": 0, "source": 0, "playing": false,
         "device": false, "found": false, "cursorDrawn": false, "baseScale": 100, "canUndoTemplate": false,
         "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "angleMove": "", "thickness": 5, "edge": "metal",
     ]
@@ -183,10 +185,29 @@ final class Studio: ExactModule {
         return parts.reduce(0.0) { $0 * 60 + $1! }
     }
 
+    /// A picture file for an image: the one at `path`, else one the person picks in a panel.
+    private func pickPicture(_ path: String?, then: @escaping (URL) -> Void) {
+        if let path, !path.isEmpty { return then(URL(fileURLWithPath: path)) }
+        Pictures.pick(then: then)
+    }
+
     private func edit(_ r: [String: Any]) {
         guard let e = editor(r["id"] as? String ?? "") else { return }
         switch r["do"] as? String {
-        case "add": e.add(r["track"] as? String ?? "zoom-in")
+        case "add":
+            // An image starts from a picture file: `kind` names one, else the person picks it.
+            if r["track"] as? String == "image" { pickPicture(r["kind"] as? String) { e.addImage($0) } } else { e.add(r["track"] as? String ?? "zoom-in") }
+        case "image":
+            // The selected image: its picture, one of its fields, a new effect or move of its own, or one of theirs.
+            let field = r["track"] as? String ?? "", value = r["kind"] as? String ?? ""
+            switch field {
+            case "replace": pickPicture(value) { e.replaceImage($0) }
+            case "add-effect": e.addImageEffect(value)
+            case "add-move": e.addImageMove()
+            case "move-style", "move-duration", "move-scale": e.setImageMove(String(field.dropFirst(5)), value)
+            case "effect-level": e.setImageEffect("level", value)
+            default: e.setImage(field, value)
+            }
         case "set": e.setValue(number: r["number"] as? Double, kind: r["kind"] as? String)
         case "delete": e.deleteSelected()
         case "split": e.splitSelected()
@@ -394,7 +415,7 @@ let exactModule: ExactModule.Type = Studio.self
 
 /// `<studio-preview clip=… look=…>`: the open recording's player, with the look applied.
 /// Drag the video to place it (snapping to the centre lines), scroll or pinch to
-/// resize it; drag a text to move it.
+/// resize it; drag a text or an image to move it; drop a picture file on it to add an image.
 final class Preview: ExactNativeInstance {
     private let studio: Studio
     private let host = PlayerHost()
@@ -434,6 +455,10 @@ final class PlayerHost: NSView {
     private weak var editor: Editor?
     private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint), turn(CGPoint, Double, Double) }
     private var drag: Drag?
+    /// Whether the pointer moved since the press: a plain click places nothing.
+    private var dragged = false
+    private var ticking: Any?
+    private weak var watched: AVPlayer?
 
     // MARK: Crop mode
     // @ref LLP 0005#crop-on-the-picture — the whole recording, a grid, and handles to drag
@@ -464,6 +489,7 @@ final class PlayerHost: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
+        registerForDraggedTypes([.fileURL])
         layer?.backgroundColor = NSColor.clear.cgColor
         player.videoGravity = .resizeAspect
         player.backgroundColor = NSColor.clear.cgColor
@@ -621,8 +647,16 @@ final class PlayerHost: NSView {
 
     func attach(_ editor: Editor?) {
         self.editor?.unlisten(self)
+        if let p = watched, let o = ticking { p.removeTimeObserver(o) }
+        ticking = nil
         self.editor = editor
         player.player = editor?.player
+        // An image moves as time passes, so its outline follows the playhead.
+        watched = editor?.player
+        ticking = editor?.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in
+            guard let self, self.editor?.selectedImage != nil, self.drag == nil else { return }
+            self.drawOverlay()
+        }
         editor?.freeze = { [weak self] image in
             guard let self else { return }
             CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -680,6 +714,9 @@ final class PlayerHost: NSView {
         let f = editor.framing
         if let s = editor.selectedSegment, s.kind == "text" {
             outline.path = CGPath(roundedRect: rect(f.textFrame(s)), cornerWidth: 6, cornerHeight: 6, transform: nil)
+        } else if let s = editor.selectedImage, editor.playhead >= s.start, editor.playhead <= s.end {
+            // The image, or the image a selected move or effect belongs to, where it is now.
+            outline.path = CGPath(roundedRect: rect(f.imageFrame(s, at: editor.playhead)), cornerWidth: 6, cornerHeight: 6, transform: nil)
         } else if case .subject = drag {
             outline.path = CGPath(rect: rect(f.subjectFrame(at: editor.playhead)), transform: nil)
         } else {
@@ -691,17 +728,21 @@ final class PlayerHost: NSView {
     override func mouseDown(with e: NSEvent) {
         guard let editor else { return }
         if cropping { return cropDown(convert(e.locationInWindow, from: nil)) }
+        dragged = false
         let u = unit(convert(e.locationInWindow, from: nil))
         let f = editor.framing
         let t = editor.playhead
-        // A text showing now, the selected one first.
-        let texts = editor.edits.texts.filter { t >= $0.start && t < $0.end }
-            .sorted { a, _ in a.id == editor.selected }
-        if let s = texts.first(where: { contains(f.textFrame($0), u) }) {
-            editor.select(s.id)
-            drag = .text(s.id, u, CGPoint(x: s.x ?? 0.5, y: s.y ?? 0.5))
+        // A text or an image showing now: the selected one first, then the one in front.
+        let over = Array(editor.edits.overlays(at: t).reversed())
+        let frame = { (s: Segment) in s.kind == "image" ? f.imageFrame(s, at: t) : f.textFrame(s) }
+        let held = editor.selectedImage?.id ?? editor.selected
+        if let s = (over.filter { $0.id == held } + over).first(where: { contains(frame($0), u) }) {
+            // An image keeps its selected move selected, so the drag sets where that move lands.
+            if s.id != held { editor.select(s.id) }
+            let box = frame(s)
+            drag = .text(s.id, u, CGPoint(x: box.x + box.w / 2, y: box.y + box.h / 2))
         } else if contains(f.subjectFrame(at: t), u) {
-            if editor.selectedSegment?.kind == "text" { editor.select("") }
+            if editor.selectedSegment?.isOverlay == true { editor.select("") }
             // ⌥-drag turns it in 3D (switching 3D on); a plain drag moves it.
             if e.modifierFlags.contains(.option) {
                 if !editor.edits.three.on { editor.setThree("on", "true", live: true) }
@@ -724,6 +765,7 @@ final class PlayerHost: NSView {
     override func mouseDragged(with e: NSEvent) {
         if cropping { return cropDragged(convert(e.locationInWindow, from: nil)) }
         guard let editor, let drag else { return }
+        dragged = true
         let u = unit(convert(e.locationInWindow, from: nil))
         var lines: [CGFloat] = [], rows: [CGFloat] = []
         func snapped(_ v: Double, _ hit: inout [CGFloat]) -> Double {
@@ -736,7 +778,8 @@ final class PlayerHost: NSView {
             editor.place(Placement(x: x, y: y, scale: start.scale), live: true)
         case let .text(id, from, start):
             let x = snapped(start.x + u.x - from.x, &lines), y = snapped(start.y + u.y - from.y, &rows)
-            editor.dragText(id, x: x, y: y, live: true)
+            if editor.edits.segments.first(where: { $0.id == id })?.kind == "image" { editor.placeImage(id, x: x, y: y, live: true) }
+            else { editor.dragText(id, x: x, y: y, live: true) }
         case let .turn(from, tilt, turn):
             // Like turning an object in the hand: drag right and the right side comes toward you; drag down and the top leans away.
             var nt = turn - Double(u.x - from.x) * 160, nl = tilt + Double(u.y - from.y) * 160
@@ -761,16 +804,22 @@ final class PlayerHost: NSView {
             let a = editor.framing.pose(at: editor.selectedMove?.t ?? editor.playhead).angles
             editor.setThree("turn", String(a.turn))
         case let .text(id, _, _):
-            if let s = editor.edits.texts.first(where: { $0.id == id }) { editor.dragText(id, x: s.x ?? 0.5, y: s.y ?? 0.5, live: false) }
+            if let s = editor.edits.segments.first(where: { $0.id == id }) {
+                if s.kind == "image" { if dragged { editor.placeImage(id, live: false) } } else { editor.dragText(id, x: s.x ?? 0.5, y: s.y ?? 0.5, live: false) }
+            }
         }
         self.drag = nil
         guides.path = nil
         drawOverlay()
     }
 
-    /// Resize the selected text, else the video.
+    /// Resize the selected text or image, else the video.
     private func resize(by factor: Double) {
         guard let editor else { return }
+        if let s = editor.selectedImage {
+            editor.placeImage(s.id, factor: factor, live: false)
+            return
+        }
         if let s = editor.selectedSegment, s.kind == "text" {
             editor.setText("size", String((s.size ?? 0.08) * factor * 100))
             return
@@ -788,6 +837,25 @@ final class PlayerHost: NSView {
     }
 
     override func magnify(with e: NSEvent) { if cropping { return }; resize(by: 1 + Double(e.magnification)) }
+
+    // MARK: Dropping a picture
+
+    private func picture(_ info: NSDraggingInfo) -> URL? {
+        let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        return urls?.first { Pictures.types.contains($0.pathExtension.lowercased()) }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        editor != nil && !cropping && picture(sender) != nil ? .copy : []
+    }
+
+    /// A picture file dropped on the preview becomes an image at the playhead, where it was dropped.
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let editor, !cropping, let url = picture(sender) else { return false }
+        let u = unit(convert(sender.draggingLocation, from: nil))
+        editor.addImage(url, at: CGPoint(x: min(max(u.x, 0), 1), y: min(max(u.y, 0), 1)))
+        return true
+    }
 }
 #else
 final class Studio: ExactModule {}
