@@ -16,15 +16,20 @@ A recording is a folder of plain files. The timeline is `edits.json`; the frame 
 Anything you can do in the UI, you can do by editing those files. Keep it that way: no edit state
 that only lives in the app.
 
+This is the app's first purpose, and the README says so at its top: agents edit the videos as well
+as a person does. A feature is not done until the command-line tool, the MCP server, the format
+guide, the schema and the editing skill have it too.
+
 - The app watches the files and shows a change within a second.
 - Files are saved pretty-printed with sorted keys, so diffs stay readable.
 - The format is in [`docs/edits.md`](../docs/edits.md). The schemas are in `schema/`.
 - A picture an edit uses is copied into the recording's `images/` folder, and `edits.json` names it
   by its path inside the recording. `./exact-studio image` (and the MCP tool `add_image`) do the copy.
+- A sound file goes into `sounds/` the same way. `./exact-studio sound` (and `add_sound`) do the copy.
 
 ## The CLI
 
-`./exact-studio` (list, show, validate, frame, export, template, image, schema) builds from the app's own
+`./exact-studio` (list, show, validate, frame, export, template, image, sound, schema) builds from the app's own
 renderer sources (LLP 0003), so a frame from the CLI is the frame the app exports.
 The `edit-recording` skill in `.claude/skills/` is the workflow for agents.
 

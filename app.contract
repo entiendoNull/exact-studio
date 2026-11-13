@@ -79,6 +79,9 @@ shape SegmentInfo
   radius: number
   shadow: bool
   fx: string
+  volume: number
+  fadeIn: number
+  fadeOut: number
 
 shape Summary
   parts: number
@@ -104,6 +107,8 @@ shape Summary
   edge: string
   sound: bool
   volume: number
+  zoomed: bool
+  wheelZoom: bool
 
 shape Reply
   ok: bool
@@ -127,7 +132,7 @@ fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn kindTitle(kind: string, level: number, rate: number): string = kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "recorded" ? "Recorded Sound" : kind == "sound" ? "Sound" : kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn imageFxLabel(kind: string): string = kind == "blur" ? "Blur" : kind == "mono" ? "Black & White" : kind == "fade" ? "Fade" : kind == "pulse" ? "Pulse" : kind == "float" ? "Float" : "Wiggle"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
@@ -263,10 +268,6 @@ component ExactStudio
     send exported = exportRecording(selected, exportQuality, to)
   action setRecordSound(v: bool)
     recordSound = v
-  action setMuted(v: bool)
-    send edited = editClip(selected, "volume", "", (v ? 0 : 100), "")
-  action setVolume(v: number)
-    send edited = editClip(selected, "volume", "", round(v), "")
   action pickQuality(q: string)
     exportQuality = q
   action openExport
@@ -288,6 +289,8 @@ component ExactStudio
     send edited = editClip(selected, "set", "", 0, k)
   action editDo(what: string)
     send edited = editClip(selected, what, "", 0, "")
+  action zoomTimeline(how: string)
+    send edited = editClip(selected, "timeline", how, 0, "")
   action toggleLeft
     if panelMode == "left"
       panelMode = "dock"
@@ -365,6 +368,12 @@ component ExactStudio
     send edited = editClip(selected, "image", field, 0, `${v}`)
   action imageBool(field: string, v: bool)
     send edited = editClip(selected, "image", field, 0, `${v}`)
+  action soundField(field: string, v: string)
+    send edited = editClip(selected, "sound", field, 0, v)
+  action soundNumber(field: string, v: number)
+    send edited = editClip(selected, "sound", field, 0, `${v}`)
+  action soundBool(field: string, v: bool)
+    send edited = editClip(selected, "sound", field, 0, `${v}`)
   action moveField(field: string, v: string)
     send edited = editClip(selected, "move", field, 0, v)
   action moveNumber(field: string, v: number)
@@ -417,7 +426,7 @@ component ExactStudio
             scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
               if cardLeft
                 column padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box"
-                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, threeField=threeField, threeNumber=threeNumber)
+                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
               else
                 column gap=30 padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
                   if status.recording
@@ -586,21 +595,33 @@ component ExactStudio
                     button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
                       image "symbol:sf/crop"
                       text "Crop"
-                    text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex=1 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
+                    // The zoom buttons and the length: one unit at the right end, wrapping together.
+                    row flex=1 gap=8 align-items="center" justify-content="flex-end"
+                      // Zoom the timeline; the last button says whether the mouse wheel zooms it too.
+                      row gap=4 align-items="center" testId="zoom-controls"
+                        button press=zoomTimeline("zoom-out") aria-label="Zoom out" buttonStyle="bordered" testId="zoom-out"
+                          image "symbol:sf/minus.magnifyingglass"
+                        button press=zoomTimeline("zoom-in") aria-label="Zoom in" buttonStyle="bordered" testId="zoom-in"
+                          image "symbol:sf/plus.magnifyingglass"
+                        button press=zoomTimeline("zoom-fit") disabled=(not summary.zoomed) aria-label="Fit the whole recording" buttonStyle="bordered" testId="zoom-fit"
+                          text "Fit"
+                        button press=zoomTimeline("wheel") aria-label="Zoom with the mouse wheel" aria-pressed=summary.wheelZoom buttonStyle="bordered" testId="zoom-wheel"
+                          image (summary.wheelZoom ? "symbol:sf/computermouse.fill" : "symbol:sf/computermouse")
+                      text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex-shrink=0 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
                   studio-timeline clip=rec.id aria-label="Timeline" height=timelineH testId="timeline"
                   if sel.id != "" and panelMode == "overlay"
                     button press=closePanel appearance="none" aria-label="Close the settings" position="absolute" inset=0 background-color="#00000073" testId="lightbox-backdrop"
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
                       scroll width="24rem" max-height="85%" pointer-events="auto" border-radius=16 box-shadow="0px 18px 60px #00000080" background-color="-exact-secondary-background"
                         column padding=12
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, threeField=threeField, threeNumber=threeNumber)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
                   if sel.id != "" and panelMode == "float"
                     column position="absolute" left=panelX top=panelY width="24rem" max-height="80%" border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0
                         column padding=12 padding-top=4
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, threeField=threeField, threeNumber=threeNumber)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
@@ -611,7 +632,7 @@ component ExactStudio
                       image "symbol:alert" color="-exact-system-orange" aria-hidden=true
                       text sel.problem font="-exact-footnote" flex=1
                   if sel.id != "" and panelMode == "dock"
-                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, threeField=threeField, threeNumber=threeNumber)
+                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
                   else
                     column gap=10
                       button press=toggleSection("place") appearance="none" aria-expanded=openPlace testId="sec-place" padding-top=2 padding-bottom=2
@@ -632,20 +653,6 @@ component ExactStudio
                       text `${countLine(summary.parts, "clip part", "clip parts")} (${summary.removed} removed) · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")} · ${countLine(summary.moves, "move", "moves")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
                       if openHelp
                         text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. To add something at the playhead, press the + on its row in the timeline: an effect on the video, a move, a text, an image. Effects can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
-
-                  if summary.sound
-                    column gap=12 testId="sound"
-                      text "SOUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                      row align-items="center" gap=8
-                        image (summary.volume == 0 ? "symbol:sf/speaker.slash" : "symbol:sf/speaker.wave.2") color="-exact-secondary-label" aria-hidden=true
-                        text "Mute" flex=1
-                        input type="checkbox" switch checked=(summary.volume == 0) change=setMuted aria-label="Mute" testId="mute"
-                      column gap=4
-                        row
-                          text "Volume" flex=1
-                          text `${summary.volume}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
-                        input type="range" min=0 max=100 step=1 value=summary.volume input=setVolume aria-label="Volume" testId="volume"
-                      text "Cuts, speed changes and crossfades apply to the sound too." font="-exact-caption1" color="-exact-tertiary-label"
 
                   column gap=16
                     button press=toggleSection("bg") appearance="none" aria-expanded=openBg testId="sec-bg" padding-top=2 padding-bottom=2
@@ -861,6 +868,9 @@ component SettingsCard
     imageField: action
     imageNumber: action
     imageBool: action
+    soundField: action
+    soundNumber: action
+    soundBool: action
     threeField: action
     threeNumber: action
   view
@@ -875,14 +885,46 @@ component SettingsCard
           for m in ["dock", "float", "overlay", "left"] key=m
             button press=setPanel(m) popovertarget="panel-place" popovertargetaction="hide" role="menuitemradio" aria-checked=(mode == m) testId=`panel-${m}`
               text (m == "dock" ? "Docked on the Right" : m == "float" ? "Floating" : m == "overlay" ? "Lightbox over the Video" : "On the Left")
-      row gap=8
-        column gap=4 flex=1 min-width=0
-          text "Start" font="-exact-caption1" color="-exact-secondary-label"
-          input value=sel.startText change=setStart disabled=(sel.kind == "clip" and sel.first) aria-label="Start" font-variant-numeric="tabular-nums" testId="start"
-        column gap=4 flex=1 min-width=0
-          text "End" font="-exact-caption1" color="-exact-secondary-label"
-          input value=sel.endText change=setEnd disabled=(sel.kind == "clip" and sel.last) aria-label="End" font-variant-numeric="tabular-nums" testId="end"
-      text "Type a time like 1.25 or 0:01.25 and press Return." font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind != "recorded"
+        row gap=8
+          column gap=4 flex=1 min-width=0
+            text "Start" font="-exact-caption1" color="-exact-secondary-label"
+            input value=sel.startText change=setStart disabled=(sel.kind == "clip" and sel.first) aria-label="Start" font-variant-numeric="tabular-nums" testId="start"
+          column gap=4 flex=1 min-width=0
+            text "End" font="-exact-caption1" color="-exact-secondary-label"
+            input value=sel.endText change=setEnd disabled=(sel.kind == "clip" and sel.last) aria-label="End" font-variant-numeric="tabular-nums" testId="end"
+        text "Type a time like 1.25 or 0:01.25 and press Return." font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "recorded"
+        row align-items="center" gap=8
+          image (sel.volume == 0 ? "symbol:sf/speaker.slash" : "symbol:sf/speaker.wave.2") color="-exact-secondary-label" aria-hidden=true
+          text "Mute" flex=1
+          input type="checkbox" switch checked=(sel.volume == 0) change=soundBool("mute") aria-label="Mute" testId="mute"
+        column gap=4
+          row
+            text "Volume" flex=1
+            text `${sel.volume}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=0 max=100 step=1 value=sel.volume input=soundNumber("volume") aria-label="Volume" testId="volume"
+        text "Cuts, speed changes and crossfades apply to the sound too." font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "sound"
+        row align-items="center" gap=8
+          text sel.file flex=1 line-clamp=1 color="-exact-secondary-label" testId="sound-file"
+          button press=soundField("replace", "") buttonStyle="bordered" testId="sound-replace"
+            text "Replace…"
+        column gap=4
+          row
+            text "Volume" flex=1
+            text `${sel.volume}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=0 max=100 step=1 value=sel.volume input=soundNumber("volume") aria-label="Volume" testId="sound-volume"
+        column gap=4
+          row
+            text "Fade in" flex=1
+            text `${sel.fadeIn} s` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=0 max=5 step=0.1 value=sel.fadeIn change=soundNumber("fadeIn") aria-label="Fade in" testId="sound-fade-in"
+        column gap=4
+          row
+            text "Fade out" flex=1
+            text `${sel.fadeOut} s` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=0 max=5 step=0.1 value=sel.fadeOut change=soundNumber("fadeOut") aria-label="Fade out" testId="sound-fade-out"
       if sel.kind == "zoom"
         text "Zoom in" font="-exact-caption1" color="-exact-secondary-label"
         row role="radiogroup" aria-label="Zoom in"
@@ -1150,9 +1192,10 @@ component SettingsCard
               option "Fade through" value="fade"
           text "Used where removed parts lie between this part and the next." font="-exact-caption1" color="-exact-tertiary-label"
       else
-        row gap=8
-          if sel.kind != "move" and sel.kind != "imove" and sel.kind != "ifx"
-            button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
-              text "Split Here"
-          button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
-            text "Remove"
+        if sel.kind != "recorded"
+          row gap=8
+            if sel.kind != "move" and sel.kind != "imove" and sel.kind != "ifx" and sel.kind != "sound"
+              button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
+                text "Split Here"
+            button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"
+              text "Remove"

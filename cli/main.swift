@@ -13,7 +13,7 @@ let usage = """
 exact-studio — edit Exact Studio recordings from the command line
 
   exact-studio list                         the recordings, newest first
-  exact-studio show <id> [--json]           its length, clip parts, segments, moves and look
+  exact-studio show <id> [--json]           its length, clip parts, segments, sounds, moves and look
   exact-studio validate <id>                checks edits.json and look.json; exit 1 on a problem
   exact-studio frame <id> <time> [--out f.png] [--source]
                                             renders one frame at <time> seconds of the video
@@ -26,6 +26,11 @@ exact-studio — edit Exact Studio recordings from the command line
                                             copies a picture into the recording's images/ folder and adds an
                                             image on top of the video at <t> seconds of the recording (default 0)
                                             for <seconds> (default 4); prints the new segment, ready to edit
+  exact-studio sound <id> <audio file> [--at <t>] [--for <seconds>]
+                                            copies a sound file (music, an effect) into the recording's sounds/
+                                            folder and adds a sound from <t> seconds of the recording (default 0)
+                                            playing <seconds> of the file (default all of it, or what fits);
+                                            it plays straight through, not cut by the video's cuts; prints it
   exact-studio schema                       prints where the docs and JSON Schemas are
 
   <id> is a recording folder's name, a unique start of one, or "latest".
@@ -94,7 +99,7 @@ func write<T: Encodable>(_ value: T, _ url: URL) {
     do { try e.encode(value).write(to: url) } catch { fail("couldn't write \(url.path): \(error)") }
 }
 
-func composition(_ r: Recording) -> (AVAsset, AVMutableVideoComposition, TimeMap) {
+func composition(_ r: Recording) -> (asset: AVAsset, video: AVMutableVideoComposition, map: TimeMap, sounds: [CMPersistentTrackID: String]) {
     let asset = AVURLAsset(url: r.folder.appendingPathComponent("capture.mov"))
     let state = RenderState(Framing(meta: r.meta, look: r.look, edits: r.edits, cursor: r.cursor, folder: r.folder))
     do { return try Composition.make(asset: asset, meta: r.meta, edits: r.edits, state: state) } catch { fail("\(error)") }
@@ -145,6 +150,24 @@ func problems(_ r: Recording) -> [String] {
         } else if s.moves != nil || s.effects != nil {
             out.append("\(at): only an image has moves and effects of its own")
         }
+    }
+    let map = TimeMap(duration: d, edits: e)
+    for s in e.sounds {
+        let at = "sound \(s.id) (\(stamp(s.start)), \(s.length)s of \(s.file))"
+        if s.id.isEmpty || s.id.contains(":") { out.append("\(at): an id must be non-empty and can't contain a colon") }
+        if e.sounds.filter({ $0.id == s.id }).count > 1 { out.append("\(at): another sound has the same id") }
+        if let whole = Sounds.length(s.file, in: folder) {
+            if s.offset + s.length > whole + 0.01 { out.append("\(at): offset + length is \(s.offset + s.length)s, but the file holds \(String(format: "%.3f", whole))s") }
+        } else {
+            out.append("\(at): \(s.file) is not a readable sound file in \(folder.lastPathComponent)/ (\(Sounds.types.joined(separator: ", ")))")
+        }
+        if s.length <= 0 { out.append("\(at): length must be above 0") }
+        if s.offset < 0 { out.append("\(at): offset can't be below 0") }
+        if s.start < 0 || s.start >= d { out.append("\(at): starts outside the recording, 0:00–\(stamp(d))") }
+        if s.lane < 0 || s.lane >= e.soundLanes { out.append("\(at): lane \(s.lane), but soundLanes is \(e.soundLanes)") }
+        if !(0...1).contains(s.volume) { out.append("\(at): volume must be 0–1") }
+        if s.fadeIn < 0 || s.fadeOut < 0 { out.append("\(at): fades can't be below 0") }
+        if let why = e.conflict(s, map: map) { out.append("\(at): \(why)") }
     }
     for m in e.moves where m.t < 0 || m.t > d + 0.01 { out.append("move \(m.id) at \(stamp(m.t)): outside the recording") }
     for s in e.splits where s <= 0 || s >= d { out.append("split at \(stamp(s)): outside the recording") }
@@ -203,6 +226,11 @@ case "show":
             print("        effect \(fx.kind)\(fx.kind == "fade" ? " to \(fx.level ?? 0.3)" : "") \(stamp(fx.start))–\(stamp(fx.end))  [\(fx.id)]")
         }
     }
+    if !r.edits.sounds.isEmpty { print("sounds (added over the video; each plays straight through from its start, not cut by the cuts):") }
+    for s in r.edits.sounds.sorted(by: { ($0.lane, $0.start) < ($1.lane, $1.start) }) {
+        let (a, b) = s.playing(map)
+        print("  s\(s.lane): from \(stamp(s.start)) for \(s.length)s (video \(stamp(a))–\(stamp(b)))  \(s.file) from \(s.offset)s  volume \(s.volume) fade in \(s.fadeIn)s out \(s.fadeOut)s  [\(s.id)]")
+    }
     if !r.edits.moves.isEmpty { print("moves:") }
     for m in r.edits.moves.sorted(by: { $0.t < $1.t }) {
         let a = m.angles.map { "  3D tilt \($0.tilt) turn \($0.turn) roll \($0.roll)" } ?? ""
@@ -219,7 +247,7 @@ case "frame":
     let source = flag("--source")
     let out = URL(fileURLWithPath: option("--out") ?? ".exact/frame.png")
     let r = open(args[0])
-    let (mix, comp, map) = composition(r)
+    let (mix, comp, map, _) = composition(r)
     let t = source ? map.output(at) : min(max(at, 0), map.outputDuration - 0.02)
     let gen = AVAssetImageGenerator(asset: mix)
     gen.videoComposition = comp
@@ -239,10 +267,10 @@ case "export":
     let safe = r.meta.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
     let out = URL(fileURLWithPath: option("--out") ?? library.deletingLastPathComponent().appendingPathComponent("\(safe) \(r.id).mp4").path)
     try? FileManager.default.removeItem(at: out)
-    let (mix, comp, map) = composition(r)
+    let (mix, comp, map, sounds) = composition(r)
     let quality = option("--quality") ?? "best"
     guard ExportQuality.names.contains(quality) else { fail("no quality \(quality); one of \(ExportQuality.names.joined(separator: ", "))") }
-    guard let session = ExportQuality.session(mix, comp, audio: Composition.audioMix(mix, map: map, volume: r.edits.volume), quality: quality, to: out) else { fail("this Mac can't export that") }
+    guard let session = ExportQuality.session(mix, comp, audio: Composition.audioMix(mix, map: map, edits: r.edits, sounds: sounds), quality: quality, to: out) else { fail("this Mac can't export that") }
     let done = DispatchSemaphore(value: 0)
     session.exportAsynchronously { done.signal() }
     let start = Date()
@@ -259,7 +287,8 @@ case "template":
     let map = TimeMap(duration: r.meta.duration, edits: r.edits)
     guard let made = Templates.make(args[1], duration: map.outputDuration, source: { map.source($0) }, aspect: r.look.aspect,
                                     clicks: r.meta.clicks, three: r.edits.three) else { fail("no template \(args[1]); one of \(Templates.names.joined(separator: ", "))") }
-    r.edits.pack(made.segments)
+    // The images stay: a template knows nothing of them.
+    r.edits.pack(made.segments + r.edits.images)
     r.edits.moves = made.moves
     r.edits.base = made.base
     write(r.edits, r.folder.appendingPathComponent("edits.json"))
@@ -288,6 +317,29 @@ case "image":
         print("added to \(r.id) (edits.json), picture copied to \(file):")
         print(String(data: try e.encode(made), encoding: .utf8)!)
     } catch let refused as Pictures.Refused { fail(refused.why) } catch { fail("\(error)") }
+
+case "sound":
+    let at = option("--at").flatMap(Double.init) ?? 0, length = option("--for").flatMap(Double.init)
+    guard args.count >= 2 else { fail(usage) }
+    var r = open(args[0])
+    let d = r.meta.duration
+    guard at >= 0, at < d - 0.1, (length ?? 1) >= 0.1 else { fail("--at must be inside the recording, 0–\(stamp(d)), and --for at least 0.1") }
+    do {
+        let file = try Sounds.bring(URL(fileURLWithPath: (args[1] as NSString).expandingTildeInPath), into: r.folder)
+        var n = r.edits.sounds.count + 1
+        while r.edits.sounds.contains(where: { $0.id == "sound\(n)" }) { n += 1 }
+        let map = TimeMap(duration: d, edits: r.edits)
+        guard var s = Sounds.make(id: "sound\(n)", file: file, in: r.folder, start: at, map: map) else { fail("no room for a sound at \(at)s: the video ends there") }
+        if let length { s.length = min(s.length, length); s.fadeOut = s.length > 2 ? 0.5 : 0 }
+        s.lane = r.edits.freeLane(for: s, map: map)
+        r.edits.sounds.append(s)
+        r.edits.fitLanes()
+        write(r.edits, r.folder.appendingPathComponent("edits.json"))
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        print("added to \(r.id) (edits.json), sound copied to \(file):")
+        print(String(data: try e.encode(s), encoding: .utf8)!)
+    } catch let refused as Sounds.Refused { fail(refused.why) } catch { fail("\(error)") }
 
 case "schema":
     let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

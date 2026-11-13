@@ -5,7 +5,7 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bin="$here/.exact/cli/exact-studio"
 sources=("$here/cli/main.swift" "$here/modules/apple/Compositor.swift" "$here/modules/apple/Scene3D.swift"
-         "$here/modules/apple/Bezel.swift" "$here/modules/apple/Templates.swift" "$here/modules/apple/Images.swift")
+         "$here/modules/apple/Bezel.swift" "$here/modules/apple/Templates.swift" "$here/modules/apple/Images.swift" "$here/modules/apple/Sounds.swift")
 stale=0
 [ -x "$bin" ] || stale=1
 for s in "${sources[@]}"; do [ "$s" -nt "$bin" ] && stale=1; done

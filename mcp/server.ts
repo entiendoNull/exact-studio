@@ -64,7 +64,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'show_recording',
-    description: 'One recording in readable form: its length, clip parts, segments (texts, images with their own moves and effects, effects, zooms, speed, 3D), moves and look.',
+    description: 'One recording in readable form: its length, clip parts, segments (texts, images with their own moves and effects, effects, zooms, speed, 3D), sounds added over it, moves and look.',
     inputSchema: { type: 'object', properties: { id }, required: ['id'] },
     call: async (a) => outOf(await run(['show', a.id])),
   },
@@ -158,6 +158,23 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
       outOf(await run(['image', a.id, a.path, ...(a.at !== undefined ? ['--at', String(a.at)] : []), ...(a.for !== undefined ? ['--for', String(a.for)] : [])])),
   },
   {
+    name: 'add_sound',
+    description:
+      'Adds music or another sound over the video: copies the audio file into the recording and adds a sound, which it returns. An added sound plays straight through from its start: the video\'s cuts and speed changes do not cut it (the recorded sound, set by "volume", is the one that follows the cuts). Then use read_edits and write_edits to set its volume, fadeIn and fadeOut, or trim it with offset and length. This is the only way to bring a sound file into a recording.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id,
+        path: { type: 'string', description: 'The sound file (an absolute path): M4A, MP3, WAV, AIFF, AAC or CAF.' },
+        at: { type: 'number', description: 'When it starts, in seconds of the recording. Default 0.' },
+        for: { type: 'number', description: 'How many seconds of the file play. Default: all of it, or what fits before the video ends.' },
+      },
+      required: ['id', 'path'],
+    },
+    call: async (a) =>
+      outOf(await run(['sound', a.id, a.path, ...(a.at !== undefined ? ['--at', String(a.at)] : []), ...(a.for !== undefined ? ['--for', String(a.for)] : [])])),
+  },
+  {
     name: 'edit_format',
     description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, with examples. Read it before write_edits.',
     inputSchema: { type: 'object', properties: {} },
@@ -173,7 +190,7 @@ async function handle(msg: any): Promise<unknown> {
         capabilities: { tools: {} },
         serverInfo: { name: 'exact-studio', version: '0.1.0' },
         instructions:
-          'Edit Exact Studio screen recordings. Loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns.',
+          'Edit Exact Studio screen recordings. Loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts.',
       };
     case 'ping':
       return {};

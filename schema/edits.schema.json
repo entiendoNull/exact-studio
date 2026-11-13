@@ -140,6 +140,70 @@
       "maximum": 1,
       "description": "The recorded sound's volume; 0 mutes it. It follows every cut, speed change and fade."
     },
+    "soundLanes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many sound lanes there are; a sound's lane counts these"
+    },
+    "sounds": {
+      "type": "array",
+      "description": "Music and sounds played over the video. A sound is not cut or sped up by the video's cuts and speed changes: it starts at the moment of the recording `start` names (the next kept moment, if that is removed) and plays straight through for `length` seconds, or until the video ends.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique among the sounds, and without a colon"
+          },
+          "file": {
+            "type": "string",
+            "description": "A path inside the recording's folder, in sounds/: M4A, MP3, WAV, AIFF, AAC or CAF"
+          },
+          "lane": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Its sound lane; two sounds on one lane never play at once"
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0,
+            "description": "When it begins, in seconds of the recording"
+          },
+          "length": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "How many seconds of the file play"
+          },
+          "offset": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Where in the file it starts, in seconds; offset + length must fit in the file"
+          },
+          "volume": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "fadeIn": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Seconds"
+          },
+          "fadeOut": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Seconds"
+          }
+        },
+        "required": [
+          "id",
+          "file",
+          "start",
+          "length"
+        ],
+        "additionalProperties": false
+      }
+    },
     "three": {
       "type": "object",
       "properties": {
