@@ -40,7 +40,14 @@ jobs:
 
       - name: Exact's tools
         working-directory: exact-studio
-        run: bun ../exact/scripts/exact.mjs setup
+        # setup installs Playwright's pinned Chromium, but on this runner its last check looks for
+        # another revision and fails. CHROME names the one it installed, and --check then decides.
+        run: |
+          bun ../exact/scripts/exact.mjs setup || true
+          (cd ../exact/scripts && bun -e "console.log('playwright-core:', require.resolve('playwright-core'))")
+          shell="$(ls "$HOME"/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell | tail -1)"
+          echo "CHROME=$shell" >> "$GITHUB_ENV"
+          CHROME="$shell" bun ../exact/scripts/exact.mjs setup --check
 
       - name: ref-check
         working-directory: exact-studio
