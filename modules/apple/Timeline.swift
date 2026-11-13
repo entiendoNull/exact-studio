@@ -1,10 +1,10 @@
 // `<studio-timeline clip=…>`: the recording's timeline, in source time.
 // A ruler, then rows in four groups. The video: the clip as a filmstrip with
 // its cuts hatched over it, its recorded sound, its Position track and its effect
-// lanes. On top of the video: the text lanes, and one row for each image, which
-// opens to show that image's own Position and Effects rows. Sound: lanes for the
-// sounds added over the video. The whole frame: lanes for a blur or black and
-// white over everything. The video's rows and each image's fold
+// lanes. On top of the video: the text lanes, then the image lanes; an image lane
+// opens to show one of its images' own Position and Effects rows. Sound: lanes for
+// the sounds added over the video. The whole frame: lanes for a blur or black and
+// white over everything. The video's rows and each image lane fold
 // away. Click to seek, click a block to select it, drag it to move it (to
 // another lane of its kind too: below the last opens a new one), drag an edge
 // to resize; Delete removes the selection, Space plays, the arrow keys step a
@@ -68,11 +68,11 @@ final class TimelineView: NSView {
         case sound
         /// The video's Position track.
         case position
-        /// A lane in a space (`Segment.space`): 0 the video's effects, 1 texts, 3 whole-frame effects;
-        /// or a sound lane (`Edits.soundSpace`).
+        /// A lane in a space (`Segment.space`): 0 the video's effects, 1 texts, 2 images, 3 whole-frame
+        /// effects; or a sound lane (`Edits.soundSpace`).
         case lane(Int, Int)
-        /// An image's own row, and under it, while it is open, its Position row and its effect rows.
-        case image(String), imagePosition(String), imageEffects(String, Int)
+        /// Under an open image lane, its current image's Position row and effect rows.
+        case imagePosition(String), imageEffects(String, Int)
     }
     private struct Row { let kind: Kind; let y: CGFloat; let height: CGFloat
         var maxY: CGFloat { y + height } }
@@ -101,9 +101,10 @@ final class TimelineView: NSView {
         add(.header("top"), Self.headerHeight)
         if !editor.folded.contains("top") {
             for l in 0..<e.textLanes + (dragged == 1 ? 1 : 0) { add(.lane(1, l), laneH) }
-            for image in e.images.sorted(by: { $0.lane < $1.lane }) {
-                add(.image(image.id), laneH)
-                guard editor.openImages.contains(image.id) else { continue }
+            // @ref LLP 0002#images — an open lane shows one image's own rows at a time
+            for l in 0..<e.imageLanes + (dragged == 2 ? 1 : 0) {
+                add(.lane(2, l), laneH)
+                guard l < e.imageLanes, editor.openImageLanes.contains(l), let image = editor.currentImage(lane: l) else { continue }
                 add(.imagePosition(image.id), motionH)
                 var lanes = max(1, ((image.effects ?? []).map(\.lane).max() ?? -1) + 1)
                 if case let .fx(id, _, 0, _, _, _, _) = drag, id == image.id { lanes += 1 }
@@ -124,7 +125,7 @@ final class TimelineView: NSView {
     /// The row under `y`, counting the gaps between rows as half each neighbour's.
     private func row(at y: CGFloat) -> Row? { rows.first { y >= $0.y - Self.laneGap / 2 && y < $0.maxY + Self.laneGap / 2 } }
     /// The row a top-level segment is drawn on.
-    private func row(of s: Segment) -> Row? { row(s.kind == "image" ? .image(s.id) : .lane(s.space, s.lane)) }
+    private func row(of s: Segment) -> Row? { row(.lane(s.space, s.lane)) }
     /// Whether a lane exists in the edits, not only as a place to drop on.
     private func real(_ space: Int, _ lane: Int) -> Bool { lane < (editor?.edits.laneCount(space: space) ?? 1) }
 
@@ -384,22 +385,8 @@ final class TimelineView: NSView {
     }
     private func diamond(_ t: Double, in r: Row) -> CGRect { CGRect(x: x(t) - 7, y: r.y + r.height / 2 - 7, width: 14, height: 14) }
 
-    /// The lane a dragged top-level segment would drop on at `y`: one of its own kind, or one past
-    /// the last; for an image, the row among the images it would take.
-    private func lane(at y: CGFloat, for s: Segment) -> Int {
-        guard let e = editor?.edits else { return 0 }
-        if s.kind == "image" {
-            // Each image's rows, its own and its children's, count as that image's place.
-            var place = 0
-            for r in rows {
-                if case let .image(id) = r.kind, let other = e.images.first(where: { $0.id == id }), y >= r.y - Self.laneGap / 2 { place = other.lane }
-            }
-            return place
-        }
-        return lane(at: y, space: s.space)
-    }
-
     /// The lane of a space a dragged block would drop on at `y`, or one past the last.
+    /// An open image lane's own rows count as that lane.
     private func lane(at y: CGFloat, space: Int) -> Int {
         guard let e = editor?.edits else { return 0 }
         let mine = rows.filter { if case let .lane(sp, _) = $0.kind { return sp == space } else { return false } }
@@ -594,6 +581,21 @@ final class TimelineView: NSView {
             NSColor(white: 1, alpha: alpha).setFill()
             NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: r.y, width: trackRect.width, height: r.height), xRadius: 7, yRadius: 7).fill()
         }
+        // An image's own rows are lit only across that image's time, so it is plain whose they are.
+        // @ref LLP 0002#images — the rows under a lane belong to one image at a time
+        func childBed(_ r: Row, _ image: Segment) {
+            bed(r, alpha: 0.02)
+            let from = max(x(image.start), trackRect.minX), to = min(x(image.end), trackRect.maxX)
+            guard to > from + 1 else { return }
+            NSColor(white: 1, alpha: 0.06).setFill()
+            NSBezierPath(roundedRect: CGRect(x: from, y: r.y, width: to - from, height: r.height), xRadius: 7, yRadius: 7).fill()
+        }
+        /// An empty child row's hint: inside the image's lit stretch when it fits there, else from the track's start.
+        func childHint(_ words: String, _ r: Row, _ image: Segment) {
+            let text = words as NSString, w = text.size(withAttributes: hint).width
+            let from = x(image.start) + 12, fits = from >= trackRect.minX + 12 && from + w <= min(x(image.end), trackRect.maxX) - 8
+            text.draw(at: CGPoint(x: fits ? from : trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+        }
         func block(_ r: CGRect, _ color: NSColor, _ text: String, selected: Bool, dark: Bool = false, inside: ((CGRect) -> Void)? = nil) {
             color.withAlphaComponent(selected ? 0.95 : 0.78).setFill()
             NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
@@ -642,7 +644,7 @@ final class TimelineView: NSView {
                             NSBezierPath(roundedRect: CGRect(x: run.from, y: top + CGFloat(i) * step, width: run.to - run.from, height: bar), xRadius: 1.5, yRadius: 1.5).fill()
                         }
                     }
-                } else if items.isEmpty, editor.edits.laneCount(space: group == "top" ? 1 : group == "sound" ? Edits.soundSpace : 3) == 0 {
+                } else if items.isEmpty, (group == "top" ? editor.edits.textLanes + editor.edits.imageLanes : editor.edits.laneCount(space: group == "sound" ? Edits.soundSpace : 3)) == 0 {
                     ((group == "top" ? "Press + to put a text or an image on top of the video."
                         : group == "sound" ? "Press + to add music or another sound."
                         : "Press + to blur the whole picture, or make it black and white.") as NSString)
@@ -670,9 +672,12 @@ final class TimelineView: NSView {
                 }
                 for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) { draw(move: m, in: r, selected: editor.selected == "m:" + m.id, threeD: m.angles != nil) }
             case let .lane(space, lane):
-                let name = space == 1 ? "Text" : space == 3 ? "Whole Frame" : space == Edits.soundSpace ? "Sound" : "Effects"
-                drawLabel("\(name) \(lane + 1)", symbol: space == 1 ? "textformat" : space == 3 ? "rectangle.inset.filled" : space == Edits.soundSpace ? "music.note" : "wand.and.stars",
-                          y: r.y, height: r.height, attrs: label, tint: NSColor(white: 1, alpha: 0.5), plus: hasPlus(r))
+                let name = space == 1 ? "Text" : space == 2 ? "Image" : space == 3 ? "Whole Frame" : space == Edits.soundSpace ? "Sound" : "Effects"
+                let symbol = space == 1 ? "textformat" : space == 2 ? "photo" : space == 3 ? "rectangle.inset.filled" : space == Edits.soundSpace ? "music.note" : "wand.and.stars"
+                // An image lane with images folds its current image's own rows; an empty one keeps its name in line.
+                let folds = space == 2 && images.contains { $0.lane == lane }
+                drawLabel("\(name) \(lane + 1)", symbol: symbol, y: r.y, height: r.height, attrs: label, tint: NSColor(white: 1, alpha: 0.5),
+                          open: folds ? editor.openImageLanes.contains(lane) : nil, indent: space == 2 && !folds ? 14 : 0, plus: hasPlus(r))
                 bed(r, alpha: real(space, lane) ? 0.05 : 0.025)
                 if removable(r) {
                     // An empty lane's ×, which removes it.
@@ -684,22 +689,18 @@ final class TimelineView: NSView {
                 let empty = space == Edits.soundSpace ? editor.edits.sounds.isEmpty : !segments.contains(where: { $0.space == space })
                 if lane == 0, real(space, lane), empty {
                     let words = space == 1 ? "Texts go here. They sit on top of the video."
+                        : space == 2 ? "Images go here. Image 1 shows in front of Image 2."
                         : space == Edits.soundSpace ? "Press + to add music or another sound."
                         : space == 3 ? "A blur or black and white here covers the whole picture."
                         : "Press + to add an effect that changes the video: zoom, speed, blur and more."
                     (words as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
                 }
-            case let .image(id):
-                guard let image = images.first(where: { $0.id == id }) else { continue }
-                drawLabel(URL(fileURLWithPath: image.file ?? "Image").deletingPathExtension().lastPathComponent, symbol: "photo", y: r.y, height: r.height,
-                          attrs: label, tint: .systemGreen, open: editor.openImages.contains(id))
-                bed(r)
             case let .imagePosition(id):
                 guard let image = images.first(where: { $0.id == id }) else { continue }
                 drawLabel("Position", symbol: "", y: r.y, height: r.height, attrs: child, tint: .clear, indent: 22, plus: true)
-                bed(r, alpha: 0.035)
+                childBed(r, image)
                 if (image.moves ?? []).isEmpty {
-                    ("Drag the image in the preview to place it. Press + to add a move that animates it." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                    childHint("Drag the image in the preview to place it. Press + to add a move that animates it.", r, image)
                 }
                 for m in (image.moves ?? []).sorted(by: { $0.t < $1.t }) {
                     draw(move: m, in: r, selected: editor.selected == Editor.childID("im", image: id, m.id), threeD: false)
@@ -707,9 +708,9 @@ final class TimelineView: NSView {
             case let .imageEffects(id, lane):
                 guard let image = images.first(where: { $0.id == id }) else { continue }
                 drawLabel(lane == 0 ? "Effects" : "", symbol: "", y: r.y, height: r.height, attrs: child, tint: .clear, indent: 22, plus: true)
-                bed(r, alpha: 0.035)
+                childBed(r, image)
                 if lane == 0, (image.effects ?? []).isEmpty {
-                    ("Press + to add an effect to this image only: blur, fade, pulse and more." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                    childHint("Press + to add an effect to this image only: blur, fade, pulse and more.", r, image)
                 }
                 for fx in image.effects ?? [] where fx.lane == lane {
                     let b = CGRect(x: x(fx.start), y: r.y + 2, width: max(4, x(fx.end) - x(fx.start)), height: r.height - 4)
@@ -730,9 +731,16 @@ final class TimelineView: NSView {
         for seg in segments {
             guard let r = row(of: seg) else { continue }
             let b = CGRect(x: x(seg.start), y: r.y + 2, width: max(4, x(seg.end) - x(seg.start)), height: r.height - 4)
-            // An image stays lit while one of its own moves or effects is selected.
+            // An image stays lit while one of its own moves or effects is selected; the image whose
+            // rows an open lane shows has a quiet outline.
             let selected = editor.selected == seg.id || (seg.kind == "image" && editor.selectedImage?.id == seg.id)
             block(b, Self.color(seg), Self.caption(seg), selected: selected, dark: seg.kind == "highlight")
+            if !selected, seg.kind == "image", editor.openImageLanes.contains(seg.lane), editor.currentImage(lane: seg.lane)?.id == seg.id {
+                NSColor(white: 1, alpha: 0.6).setStroke()
+                let p = NSBezierPath(roundedRect: b.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
+                p.lineWidth = 1
+                p.stroke()
+            }
         }
         // The added sounds: each from its start for as long as it plays in the video, its file's
         // waveform inside, faint, at the moment of the file that plays there.
@@ -913,7 +921,6 @@ final class TimelineView: NSView {
         let onRow: [Segment]
         switch r.kind {
         case let .lane(space, lane): onRow = editor.edits.segments.filter { $0.space == space && $0.lane == lane && near($0) }
-        case let .image(id): onRow = editor.edits.segments.filter { $0.id == id && near($0) }
         default: return nil
         }
         // The selected one first, then the shortest (a short segment over a long one stays reachable).
@@ -970,7 +977,7 @@ final class TimelineView: NSView {
                    ("3D Turn", { editor.add("3d") }), ("-", nil), ("New Effects Lane", { editor.addLane(space: 0) })], under: at)
         case .header("top"):
             popUp([("Text", { editor.add("text") }), ("Image…", { Pictures.pick { editor.addImage($0) } }), ("-", nil),
-                   ("New Text Lane", { editor.addLane(space: 1) })], under: at)
+                   ("New Text Lane", { editor.addLane(space: 1) }), ("New Image Lane", { editor.addLane(space: 2) })], under: at)
         case .header("sound"):
             popUp([("Sound File…", { Sounds.pick { editor.addSound($0) } }), ("-", nil),
                    ("New Sound Lane", { editor.addLane(space: Edits.soundSpace) })], under: at)
@@ -1048,15 +1055,13 @@ final class TimelineView: NSView {
             let edge: CGFloat = 7, wide = x(fx.end) - x(fx.start) > edge * 2
             let mode = wide && p.x - x(fx.start) < edge ? -1 : wide && x(fx.end) - p.x < edge ? 1 : 0
             drag = .fx(id, fx.id, mode, fx.start, fx.end, fx.lane, t(p.x))
-        case .lane, .image:
+        case .lane:
             if removable(r), removeRect(r).insetBy(dx: -3, dy: -3).contains(p), case let .lane(space, lane) = r.kind {
                 return editor.removeLane(lane, space: space)
             }
-            // An image's label folds its rows, and selects it.
-            if case let .image(id) = r.kind, p.x < Self.labelWidth {
-                let wasOpen = editor.openImages.contains(id), wasSelected = editor.selectedImage?.id == id
-                editor.select(id)
-                if wasOpen == editor.openImages.contains(id) || wasSelected { editor.toggleImage(id) }
+            // An image lane's label folds its current image's rows.
+            if case let .lane(2, lane) = r.kind, p.x < Self.labelWidth {
+                if editor.edits.images.contains(where: { $0.lane == lane }) { editor.toggleImageLane(lane) }
                 return
             }
             if case let .lane(space, lane) = r.kind, space == Edits.soundSpace {
@@ -1128,7 +1133,7 @@ final class TimelineView: NSView {
             guard let seg = editor.edits.segments.first(where: { $0.id == id }) else { return }
             let len = end - s
             let start = min(max(s + now - grab, 0), editor.duration - len)
-            editor.drag(id, start: start, end: start + len, lane: lane(at: p.y, for: seg))
+            editor.drag(id, start: start, end: start + len, lane: lane(at: p.y, space: seg.space))
         case let .sound(id, mode, s, offset, length, lane, grab):
             let map = editor.map
             guard let snd = editor.edits.sounds.first(where: { $0.id == id }) else { return }

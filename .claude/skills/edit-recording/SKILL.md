@@ -16,8 +16,8 @@ The loop, from this repository's root:
    video as it plays (cuts and speed changes make them differ; `show` prints both lengths).
    `./exact-studio template <id> launch|hero|tour|teaser` is a quick start to adjust from.
    To put a picture on the video, run `./exact-studio image <id> <picture> --at <t> --for <seconds>`:
-   it copies the file into the recording and prints the new `image` segment. Then edit that
-   segment's place, size, moves and effects in `edits.json`. Never point `file` outside the
+   it copies the file into the recording and prints the new `image` segment, on the first image
+   lane free at that time. Then edit that segment's place, size, moves and effects in `edits.json`. Never point `file` outside the
    recording's folder.
 3. `./exact-studio validate <id>` until it prints `ok`.
 4. `./exact-studio frame <id> <seconds>` and look at `.exact/frame.png` at the moments that matter
@@ -38,6 +38,8 @@ Rules that keep an edit looking good:
   by the video's cuts or speed changes: it starts at recording time `start` and plays straight
   through. So add music after the cuts are set and check `show` for when it plays. Keep music
   under the recorded sound (`volume` 0.3–0.5) and give it a `fadeOut`; `volume` 0 mutes the recording.
+- Images shown one after another share an image lane. Put images that show at the same time on
+  separate lanes: the lower `lane` is in front. Raise `imageLanes` when you add a lane.
 - Keep an image small and near a corner unless it is the subject: a logo at `size` 0.08–0.15, a
   picture that carries a moment at 0.3–0.5. Look at a frame after placing it.
 - An id must be unique within its list and hold no colon; any other string works.

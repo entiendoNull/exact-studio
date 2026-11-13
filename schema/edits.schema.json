@@ -39,6 +39,11 @@
       "minimum": 0,
       "description": "How many text lanes there are; a text's lane counts these. A file without it is an old one, and the app sorts its texts into text lanes"
     },
+    "imageLanes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many image lanes there are; an image's lane counts these, and a lower lane is in front. Images on one lane never overlap in time. A file without it is an old one, where each image had a lane of its own; each keeps it"
+    },
     "frameLanes": {
       "type": "integer",
       "minimum": 0,
@@ -269,7 +274,7 @@
           "lane": {
             "type": "integer",
             "minimum": 0,
-            "description": "Its row among its own kind: an effect lane, a text lane, a whole-frame lane, or for an image its place among the images (0 in front)"
+            "description": "Its lane among its own kind: an effect lane, a text lane, an image lane (0 in front) or a whole-frame lane. Two segments on one lane never overlap in time"
           },
           "level": {
             "type": "number",

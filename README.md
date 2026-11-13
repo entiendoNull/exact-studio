@@ -62,6 +62,7 @@ To update, run `git pull` in both folders and run the last command again.
 - **Effects:** zoom, speed, spotlight, cursor highlight, blur, and black and white, on as many lanes as you need. A blur or black and white can cover the video, the whole frame, or everything.
 - **Text:** styled texts with entrance, exit and loop animations.
 - **Images:** put a logo, a badge or any picture on the video. Each image has its own moves and its own effects.
+- **Image lanes:** images that follow one another share a lane. Images that show at the same time go on separate lanes; the top lane is in front.
 - **Rows by kind:** effects for the video, texts, images, sounds, and effects for the whole frame each have their own rows. Each row has a + that adds its own kind of thing at the playhead.
 - **A tidy timeline:** every group folds away, and the rows have three heights to pick from.
 - **Zoom the timeline:** with the mouse wheel, a pinch, or the − and + buttons; Fit shows it all again. A trackpad scrolls instead, and a switch turns wheel zoom off.

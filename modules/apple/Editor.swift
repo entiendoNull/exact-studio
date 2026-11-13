@@ -384,7 +384,11 @@ final class Editor {
         guard selected != id else { return }
         selected = id
         problem = ""
-        if let image = selectedImage { openImages.insert(image.id) }
+        if let image = selectedImage {
+            openImageLanes.insert(image.lane)
+            recentImages.removeAll { $0 == image.id }
+            recentImages.insert(image.id, at: 0)
+        }
         notify()
     }
 
@@ -491,17 +495,30 @@ final class Editor {
     }
 
     // MARK: Images
-    // @ref LLP 0002#images — an image is a row of its own, with its own moves and effects
+    // @ref LLP 0002#images — images share lanes; each has its own moves and effects
 
-    /// The image rows open in the timeline, and the groups folded away: "video" (its Position and
+    /// The image lanes open in the timeline, and the groups folded away: "video" (its Position and
     /// effect lanes), "top" (texts and images) and "frame". How the timeline looks, not part of the edit.
-    private(set) var openImages: Set<String> = []
+    private(set) var openImageLanes: Set<Int> = []
     private(set) var folded = Set(UserDefaults.standard.stringArray(forKey: "ExactStudio.folded") ?? [])
     var videoOpen: Bool { !folded.contains("video") }
+    /// The images selected so far, the last one first.
+    private var recentImages: [String] = []
 
-    func toggleImage(_ id: String) {
-        if openImages.contains(id) { openImages.remove(id) } else { openImages.insert(id) }
+    func toggleImageLane(_ lane: Int) {
+        if openImageLanes.contains(lane) { openImageLanes.remove(lane) } else { openImageLanes.insert(lane) }
         redrawViews()
+    }
+
+    /// The image whose own Position and Effects rows an open lane shows: the selected one (or the
+    /// one whose move or effect is selected) when it is on the lane; else the one on it selected
+    /// last; else the one under the playhead; else the first. While a block is dragged, the lanes
+    /// as they were, so the rows stay put under the pointer.
+    func currentImage(lane: Int) -> Segment? {
+        let on = (dragOrigin ?? edits).images.filter { $0.lane == lane }.sorted { $0.start < $1.start }
+        if let s = selectedImage, let hit = on.first(where: { $0.id == s.id }) { return hit }
+        if let id = recentImages.first(where: { id in on.contains { $0.id == id } }) { return on.first { $0.id == id } }
+        return on.first { playhead >= $0.start && playhead < $0.end } ?? on.first
     }
 
     func toggle(group: String) {
@@ -860,34 +877,40 @@ final class Editor {
         apply(next)
     }
 
-    /// A new empty lane in a space (`Segment.space`): 0 for the video's effects, 1 for texts, 3 for whole-frame effects.
+    /// A new empty lane in a space (`Segment.space`): 0 for the video's effects, 1 for texts, 2 for images, 3 for whole-frame effects.
     func addLane(space: Int = 0) {
         var next = edits
         switch space {
         case 1: next.textLanes += 1
+        case 2: next.imageLanes += 1
         case 3: next.frameLanes += 1
         case Edits.soundSpace: next.soundLanes += 1
         default: next.lanes += 1
         }
-        if space == Edits.soundSpace { reveal(space: space) }
+        reveal(space: space)
         apply(next)
     }
 
     /// Remove an empty lane; the lanes of its kind below it move up. One effect lane always stays.
     func removeLane(_ lane: Int, space: Int = 0) {
-        guard space != 2, edits.laneCount(space: space) > (space == 0 ? 1 : 0),
+        guard edits.laneCount(space: space) > (space == 0 ? 1 : 0),
               !edits.segments.contains(where: { $0.space == space && $0.lane == lane }),
               space != Edits.soundSpace || !edits.sounds.contains(where: { $0.lane == lane }) else { return }
         var next = edits
         switch space {
         case 1: next.textLanes -= 1
+        case 2: next.imageLanes -= 1
         case 3: next.frameLanes -= 1
         case Edits.soundSpace: next.soundLanes -= 1
         default: next.lanes -= 1
         }
         next.segments = next.segments.map { var s = $0; if s.space == space, s.lane > lane { s.lane -= 1 }; return s }
         if space == Edits.soundSpace { next.sounds = next.sounds.map { var s = $0; if s.lane > lane { s.lane -= 1 }; return s } }
-        apply(next)
+        if apply(next), space == 2 {
+            // The open lanes below it move up with it.
+            openImageLanes = Set(openImageLanes.compactMap { $0 == lane ? nil : $0 > lane ? $0 - 1 : $0 })
+            redrawViews()
+        }
     }
 
     /// Set the selected segment's value: a zoom's level, a speed's rate, or (for
@@ -1372,8 +1395,7 @@ final class Editor {
     private var dragOrigin: Edits?
 
     /// Move or resize a segment while dragging: drawn at once, checked on drop.
-    /// `lane` may be one past the last: the drop opens a new lane there. For an image it is
-    /// the row to move it to among the images, on the drop.
+    /// `lane` may be one past the last: the drop opens a new lane there.
     func drag(_ id: String, start: Double, end: Double, lane: Int) {
         if dragOrigin == nil { dragOrigin = edits }
         let s = max(0, min(start, duration - 0.1)), e = min(duration, max(end, s + 0.1))
@@ -1387,17 +1409,14 @@ final class Editor {
                     m.moves = m.moves?.map { var mv = $0; mv.t += by; return mv }
                     m.effects = m.effects?.map { var fx = $0; fx.start += by; fx.end += by; return fx }
                 }
-                dragRow = lane
-            } else {
-                m.lane = max(0, lane)
             }
+            m.lane = max(0, lane)
             m.start = s; m.end = e
             return m
         }
         // An image's children move in the picture too; the rest only in the timeline.
         selectedSegment?.kind == "image" ? redraw() : redrawViews()
     }
-    private var dragRow: Int?
 
     /// The drop: keep the move if it fits, else put the segment back.
     func endDrag() {
@@ -1405,20 +1424,13 @@ final class Editor {
         dragOrigin = nil
         var moved = edits
         moved.segments = moved.segments.map { $0.kind == "image" ? Editor.tidy($0) : $0 }
-        if let row = dragRow, let s = selectedSegment, s.kind == "image", row != s.lane {
-            // An image dropped on another image's row takes that place; the others close up.
-            moved.segments = moved.segments.map { o in
-                guard o.kind == "image" else { return o }
-                var m = o
-                m.lane = o.id == s.id ? row * 2 + (row > s.lane ? 1 : -1) : o.lane * 2
-                return m
-            }
-        }
-        dragRow = nil
-        moved.lanes = origin.lanes; moved.textLanes = origin.textLanes; moved.frameLanes = origin.frameLanes; moved.soundLanes = origin.soundLanes
+        moved.lanes = origin.lanes; moved.textLanes = origin.textLanes; moved.imageLanes = origin.imageLanes
+        moved.frameLanes = origin.frameLanes; moved.soundLanes = origin.soundLanes
         moved.fitLanes()
         edits = origin
-        if !apply(moved) { redrawViews() }
+        if !apply(moved) { return redrawViews() }
+        // An image dropped on another lane opens that lane, as selecting it does.
+        if let image = selectedImage, !openImageLanes.contains(image.lane) { openImageLanes.insert(image.lane); redrawViews() }
     }
 
     // MARK: Finding a device
@@ -1521,7 +1533,7 @@ final class Editor {
 
     var summary: [String: Any] {
         let parts = pieces
-        return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes + edits.textLanes + edits.frameLanes, "images": edits.images.count,
+        return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes + edits.textLanes + edits.imageLanes + edits.frameLanes, "images": edits.images.count,
                 "moves": edits.moves.count, "length": map.outputDuration, "source": duration, "playing": isPlaying,
                 "device": meta.isDevice, "found": meta.device == true, "cursorDrawn": meta.drawsCursor,
                 "baseScale": (edits.base.scale * 100).rounded(), "canUndoTemplate": beforeTemplate != nil,

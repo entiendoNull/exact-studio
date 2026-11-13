@@ -25,7 +25,8 @@ exact-studio — edit Exact Studio recordings from the command line
   exact-studio image <id> <picture> [--at <t>] [--for <seconds>]
                                             copies a picture into the recording's images/ folder and adds an
                                             image on top of the video at <t> seconds of the recording (default 0)
-                                            for <seconds> (default 4); prints the new segment, ready to edit
+                                            for <seconds> (default 4), on the first image lane free then (else a
+                                            new one); prints the new segment, ready to edit
   exact-studio sound <id> <audio file> [--at <t>] [--for <seconds>]
                                             copies a sound file (music, an effect) into the recording's sounds/
                                             folder and adds a sound from <t> seconds of the recording (default 0)
@@ -125,13 +126,19 @@ func problems(_ r: Recording) -> [String] {
         }
     }
     let d = r.meta.duration, e = r.edits
+    // Reading raises imageLanes to fit the images, so compare with the count the file states.
+    if let data = try? Data(contentsOf: folder.appendingPathComponent("edits.json")),
+       let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let stated = raw["imageLanes"] as? Int,
+       let top = e.images.map(\.lane).max(), top >= stated {
+        out.append("edits.json: imageLanes is \(stated), but an image is on lane \(top); raise it to \(top + 1)")
+    }
     for s in e.segments {
         let at = "\(s.kind) \(s.id) (\(stamp(s.start))–\(stamp(s.end)))"
         if !Segment.kinds.contains(s.kind) { out.append("\(at): unknown kind; one of \(Segment.kinds.joined(separator: ", "))") }
         if s.end - s.start < 0.1 { out.append("\(at): shorter than 0.1 s, or ends before it starts") }
         if s.start < 0 || s.end > d + 0.01 { out.append("\(at): outside the recording, 0:00–\(stamp(d))") }
-        if s.kind != "image", s.lane < 0 || s.lane >= e.laneCount(space: s.space) {
-            out.append("\(at): lane \(s.lane), but \(["lanes", "textLanes", "", "frameLanes"][s.space]) is \(e.laneCount(space: s.space))")
+        if s.lane < 0 || s.lane >= e.laneCount(space: s.space) {
+            out.append("\(at): lane \(s.lane), but \(["lanes", "textLanes", "imageLanes", "frameLanes"][s.space]) is \(e.laneCount(space: s.space))")
         }
         if s.id.contains(":") { out.append("\(at): an id can't contain a colon") }
         if e.segments.filter({ $0.id == s.id }).count > 1 { out.append("\(at): another segment has the same id") }
@@ -206,7 +213,7 @@ case "show":
         let t = r.edits.transitions[Edits.key(p.end)].map { " → \($0)" } ?? ""
         print("  \(stamp(p.start))–\(stamp(p.end))\(p.removed ? "  removed" : "")\(t)")
     }
-    print("segments (row: kind, recording time; e is an effect lane, t a text lane, i an image's row, f a whole-frame lane):")
+    print("segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front), f a whole-frame lane):")
     for s in r.edits.segments.sorted(by: { ($0.space, $0.lane, $0.start) < ($1.space, $1.lane, $1.start) }) {
         var what = s.kind
         switch s.kind {
@@ -306,8 +313,8 @@ case "image":
         while r.edits.segments.contains(where: { $0.id == "image\(n)" }) { n += 1 }
         let canvas = Framing(meta: r.meta, look: r.look, edits: r.edits, cursor: [], folder: r.folder).canvas
         var s = Pictures.segment(id: "image\(n)", file: file, in: r.folder, canvas: canvas, start: at, end: min(d, at + length))
-        // On top of the other images.
-        s.lane = -1
+        // On the first image lane free at that time, else a new one.
+        s.lane = r.edits.freeLane(for: s)
         r.edits.segments.append(s)
         r.edits.fitLanes()
         write(r.edits, r.folder.appendingPathComponent("edits.json"))

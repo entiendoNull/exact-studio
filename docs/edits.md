@@ -50,6 +50,7 @@ plays. Cuts and speed changes make the two differ: `show` prints both lengths, a
   "transitions": { "4200": "crossfade" },
   "lanes": 1,
   "textLanes": 1,
+  "imageLanes": 0,
   "frameLanes": 0,
   "base": { "x": 0.5, "y": 0.5, "scale": 1 },
   "moves": [],
@@ -94,17 +95,19 @@ and `lane` (0 up). A segment's kind decides which rows its `lane` counts:
 |---|---|---|---|
 | an effect on the video | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, and `blur` or `mono` with no `scope` | the video's effect lanes | `lanes` (at least 1) |
 | a text | `text` | the text lanes | `textLanes` |
-| an image | `image` | nothing shared: each image is its own row, and `lane` is its place among the images, 0 in front | one for each image |
+| an image | `image` | the image lanes, 0 in front | `imageLanes` |
 | an effect on the whole picture | `blur` or `mono` with `scope` `"frame"` or `"all"` | the whole-frame lanes | `frameLanes` |
 
 An effect on the video never touches a text or an image, and an image's own effects (below) never
 touch the video. Two segments on one lane must not overlap in time, and these never overlap
 anywhere: two `zoom`s, two `speed`s, two `3d`s, or two of the same visual effect with the same reach.
-Texts and images overlap freely. Images are drawn over the video with the lowest `lane` in front,
-and texts over the images.
+Texts and images on separate lanes overlap freely. Images are drawn over the video with the lowest
+`lane` in front, and texts over the images.
 
 A file with no `textLanes` is an old one, where texts and whole-frame effects shared the effect
 lanes: the app sorts them into lanes of their own kind when it reads it.
+A file with no `imageLanes` is an old one, where each image had a lane of its own: each image keeps
+its lane, so the picture stacks as before, and `imageLanes` becomes the number of images.
 
 | kind | fields | |
 |---|---|---|
@@ -137,8 +140,8 @@ in the recording's folder, so the recording stays whole when it is copied.
 ./exact-studio image <id> ~/Desktop/logo.png --at 2 --for 6
 ```
 
-copies the picture to `images/logo.png`, adds this segment at 2 s of the recording for 6 s, and
-prints it. Then edit the segment like any other:
+copies the picture to `images/logo.png`, adds this segment at 2 s of the recording for 6 s, on the
+first image lane free then (else a new one), and prints it. Then edit the segment like any other:
 
 ```json
 { "id": "image1", "kind": "image", "start": 2, "end": 8, "lane": 0, "file": "images/logo.png",
@@ -171,6 +174,9 @@ and `lane` (its row under the image, 0 up). They ease in and out over 0.3 s and 
 image. Kinds: `blur`; `mono` (black and white); `fade` (to `level`, an opacity of 0–1, default 0.3);
 `pulse`, `float` and `wiggle` (a gentle motion while they last). Two effects on one `lane` must not
 overlap, nor two of the same kind on any lane.
+
+**Lanes:** images that follow one another can share a lane. Images that show at the same time need
+separate lanes; the lower `lane` is in front. A lane is below `imageLanes`.
 
 To blur or grey the whole picture instead, images included, use a `blur` or `mono` segment with
 `scope` `"frame"` (texts stay sharp) or `"all"` (texts too).

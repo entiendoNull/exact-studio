@@ -131,8 +131,8 @@ struct Segment: Codable, Equatable {
     var coversFrame: Bool { (kind == "blur" || kind == "mono") && (scope == "frame" || scope == "all") }
     /// Drawn over the finished picture: a text or an image.
     var isOverlay: Bool { kind == "text" || kind == "image" }
-    /// Which rows its `lane` counts: 0 the video's effect lanes, 1 the text lanes, 2 the images
-    /// (each its own row), 3 the whole-frame effect lanes.
+    /// Which rows its `lane` counts: 0 the video's effect lanes, 1 the text lanes, 2 the image
+    /// lanes, 3 the whole-frame effect lanes.
     var space: Int { kind == "text" ? 1 : kind == "image" ? 2 : coversFrame ? 3 : 0 }
 
     func overlaps(_ o: Segment) -> Bool { start < o.end - 0.0001 && o.start < end - 0.0001 }
@@ -226,9 +226,11 @@ struct Edits: Codable, Equatable {
     /// Effect lanes, at least one; a lane may stay empty. They hold what changes the video.
     var lanes: Int = 1
     /// Text lanes: they hold the texts drawn over the video. A text's `lane` counts these.
-    /// An image has no lane to share: each is its own row, and its `lane` is its place among the images.
     // @ref LLP 0002#rows — effects change the video; texts and images sit on top of it
     var textLanes: Int = 0
+    /// Image lanes: they hold the images drawn over the video. An image's `lane` counts these;
+    /// images on one lane never overlap, and a lower lane is in front.
+    var imageLanes: Int = 0
     /// Whole-frame lanes: they hold the blurs and black-and-whites that cover the whole picture.
     var frameLanes: Int = 0
     /// Where the subject sits before any move.
@@ -245,7 +247,7 @@ struct Edits: Codable, Equatable {
 
     init(segments: [Segment] = []) { self.segments = segments }
 
-    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, frameLanes, base, moves, three, volume, sounds, soundLanes }
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, imageLanes, frameLanes, base, moves, three, volume, sounds, soundLanes }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
@@ -281,41 +283,51 @@ struct Edits: Codable, Equatable {
                 if space == 0 { lanes = used.count }
             }
         }
+        if let n = try c.decodeIfPresent(Int.self, forKey: .imageLanes) {
+            imageLanes = n
+        } else {
+            // Each image was once a row of its own, the top row in front, read in that order:
+            // each keeps a lane of its own, so the picture stacks as it did.
+            // @ref LLP 0002#images — old files keep one image to a lane
+            let order = segments.enumerated().filter { $0.element.kind == "image" }.sorted { ($0.element.lane, $0.offset) < ($1.element.lane, $1.offset) }
+            for (row, item) in order.enumerated() { segments[item.offset].lane = row }
+            imageLanes = order.count
+        }
         fitLanes()
     }
 
     /// How many rows there are in a space (`Segment.space`), or of sound lanes (`Edits.soundSpace`).
-    func laneCount(space: Int) -> Int { space == 1 ? textLanes : space == 2 ? images.count : space == 3 ? frameLanes : space == Edits.soundSpace ? soundLanes : lanes }
+    func laneCount(space: Int) -> Int { space == 1 ? textLanes : space == 2 ? imageLanes : space == 3 ? frameLanes : space == Edits.soundSpace ? soundLanes : lanes }
     /// The sound lanes, counted as one more space after the segments' own.
     static let soundSpace = 4
 
-    /// Enough lanes of each kind for the segments, at least one effect lane, and each image on its own row.
+    /// Enough lanes of each kind for the segments, and at least one effect lane.
     mutating func fitLanes() {
         lanes = max(lanes, (segments.filter { $0.space == 0 }.map(\.lane).max() ?? -1) + 1, 1)
         textLanes = max(textLanes, (texts.map(\.lane).max() ?? -1) + 1, 0)
+        imageLanes = max(imageLanes, (images.map(\.lane).max() ?? -1) + 1, 0)
         frameLanes = max(frameLanes, (segments.filter { $0.space == 3 }.map(\.lane).max() ?? -1) + 1, 0)
         soundLanes = max(soundLanes, (sounds.map(\.lane).max() ?? -1) + 1, 0)
-        let order = segments.enumerated().filter { $0.element.kind == "image" }.sorted { ($0.element.lane, $0.offset) < ($1.element.lane, $1.offset) }
-        for (row, item) in order.enumerated() { segments[item.offset].lane = row }
     }
 
     /// The first lane of `s`'s kind where nothing overlaps it; one past the last when none has room.
-    /// A new image goes on top of the others.
     func freeLane(for s: Segment) -> Int {
-        if s.kind == "image" { return -1 }
         var lane = 0
         while lane < laneCount(space: s.space), segments.contains(where: { $0.id != s.id && $0.space == s.space && $0.lane == lane && $0.overlaps(s) }) { lane += 1 }
         return lane
     }
 
     /// Replace the segments with `made`, each on the first lane of its kind with room, and no lane more than they need.
+    /// Images keep their lanes: a template knows nothing of them.
     mutating func pack(_ made: [Segment]) {
         segments = []
         lanes = 0; textLanes = 0; frameLanes = 0
         for var seg in made.sorted(by: { $0.start < $1.start }) {
-            var lane = 0
-            while seg.kind != "image", segments.contains(where: { $0.space == seg.space && $0.lane == lane && $0.overlaps(seg) }) { lane += 1 }
-            if seg.kind != "image" { seg.lane = lane }
+            if seg.kind != "image" {
+                var lane = 0
+                while segments.contains(where: { $0.space == seg.space && $0.lane == lane && $0.overlaps(seg) }) { lane += 1 }
+                seg.lane = lane
+            }
             segments.append(seg)
         }
         fitLanes()
@@ -339,12 +351,14 @@ struct Edits: Codable, Equatable {
     var effects: [Segment] { segments.filter { Segment.visual.contains($0.kind) } }
     var texts: [Segment] { segments.filter { $0.kind == "text" } }
     var images: [Segment] { segments.filter { $0.kind == "image" } }
-    /// The texts and images showing at `t`, back to front: the images, the top row in front, then
+    /// The texts and images showing at `t`, back to front: the images, the lowest lane in front, then
     /// the texts over them, in the order they are listed, as they always were.
-    // @ref LLP 0002#images — row order is the stacking order
+    // @ref LLP 0002#images — lane order is the stacking order
     func overlays(at t: Double) -> [Segment] {
         let showing = segments.filter { $0.isOverlay && t >= $0.start && t < $0.end }
-        return showing.filter { $0.kind == "image" }.sorted { $0.lane > $1.lane } + showing.filter { $0.kind == "text" }
+        let images = showing.enumerated().filter { $0.element.kind == "image" }
+            .sorted { ($0.element.lane, $1.offset) > ($1.element.lane, $0.offset) }.map(\.element)
+        return images + showing.filter { $0.kind == "text" }
     }
     var turns: [Segment] { segments.filter { $0.kind == "3d" } }
 
@@ -352,7 +366,7 @@ struct Edits: Codable, Equatable {
     func conflict(_ s: Segment) -> String? {
         for o in segments where o.id != s.id && o.overlaps(s) {
             if o.group == s.group { return "Two \(Segment.noun(s.kind)) can’t overlap." }
-            if o.lane == s.lane, o.space == s.space, s.kind != "image" { return "That lane is taken there; drop it on another lane." }
+            if o.lane == s.lane, o.space == s.space { return "That lane is taken there; drop it on another lane." }
         }
         if s.kind == "image" { return Edits.conflict(in: s) }
         return nil

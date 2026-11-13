@@ -143,7 +143,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   {
     name: 'add_image',
     description:
-      'Puts a picture on top of the video: copies the file into the recording and adds an image segment, which it returns. Then use read_edits and write_edits to set its place (x, y), size, moves and effects. This is the only way to bring a picture file into a recording.',
+      'Puts a picture on top of the video: copies the file into the recording and adds an image segment on the first image lane free at that time (else a new one), which it returns. Then use read_edits and write_edits to set its place (x, y), size, moves and effects. This is the only way to bring a picture file into a recording.',
     inputSchema: {
       type: 'object',
       properties: {
