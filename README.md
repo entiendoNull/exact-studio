@@ -8,8 +8,9 @@ A macOS screen recorder built with [Exact](https://github.com/expo/exact). It re
 
 ### Record
 
-- **Sources:** drag out an area, or pick a display, a window, or a Simulator or emulator.
-- **Devices:** cropped to the bezel automatically. Trim any edge if the detection is off.
+- **Sources:** drag out an area, pick a window on screen, or choose a display, a window, or a Simulator or emulator from the sidebar.
+- **Devices:** cropped to the bezel automatically.
+- **Windows:** keep their own shape, rounded corners included.
 - **System sound:** on by default, with one switch to turn it off.
 
 ### Look
@@ -27,6 +28,7 @@ A macOS screen recorder built with [Exact](https://github.com/expo/exact). It re
 
 ### Edit
 
+- **Crop:** drag the corners or edges of a grid over the whole recording.
 - **Timeline:** split the clip (S), remove parts, and crossfade between them.
 - **Effects:** zoom, speed, spotlight, cursor highlight, blur, and black and white, on as many lanes as you need.
 - **Text:** styled texts with entrance, exit and loop animations.

@@ -150,6 +150,8 @@ component ExactStudio
   state panelMode = "dock" persist
   state exportQuality = "best" persist
   state exportOpen = false
+  // The preview shows the whole recorded frame with the crop's grid and handles.
+  state cropping = false
   state recordSound = true persist
   state panelX = 24 persist
   // The timeline's height, set by dragging the handle under the preview; the preview takes the rest.
@@ -226,6 +228,11 @@ component ExactStudio
         selected = selected
   action choose(id: string)
     selected = id
+    cropping = false
+  action toggleCrop
+    cropping = not cropping
+  action endCrop
+    cropping = false
   action openIt
     send opened = openRecording()
   action afterOpen
@@ -421,6 +428,10 @@ component ExactStudio
                       button press=record("area") buttonStyle="filled" disabled=pending(started) testId="record-area"
                         image "symbol:sf/rectangle.dashed"
                         text "Drag Out an Area"
+                      // Light up the window under the pointer and click it; recorded in its own shape.
+                      button press=record("pick-window") buttonStyle="bordered" disabled=pending(started) testId="record-pick-window"
+                        image "symbol:sf/macwindow.on.rectangle"
+                        text "Pick a Window"
                       if not sources.allowed and not pending(sources)
                         text "Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-system-orange" testId="permission"
                       if startError != "" and not pending(started)
@@ -519,7 +530,15 @@ component ExactStudio
                   text "Drag out an area, or pick a window or a device in the sidebar. A Simulator or an emulator is cropped to its bezel, nothing more." color="-exact-secondary-label" text-align="center" max-width="28rem"
               case some(rec)
                 column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease"
-                  studio-preview clip=rec.id look=look aria-label="Preview" flex=1 min-height=200 testId="preview"
+                  studio-preview clip=rec.id look=look cropping=(cropping ? "true" : "") aria-label="Preview" flex=1 min-height=200 testId="preview"
+                  if cropping
+                    row gap=10 align-items="center" padding="8px 12px" border-radius=12 background-color="-exact-tertiary-background" testId="crop-bar"
+                      image "symbol:sf/crop" color="-exact-secondary-label" aria-hidden=true
+                      text "Drag a corner or an edge to crop. Drag inside to move the crop." font="-exact-footnote" color="-exact-secondary-label" flex=1
+                      button press=trim("reset", 0) buttonStyle="bordered" testId="crop-reset"
+                        text "Reset"
+                      button press=endCrop buttonStyle="filled" testId="crop-done"
+                        text "Done"
                   // The handle: drag it to give the preview or the timeline more room.
                   button pan=resizeStage press=resetStage appearance="none" aria-label="Resize the preview; click to reset" cursor="row-resize" align-self="stretch" display="flex" align-items="center" justify-content="center" height=12 margin-top=-6 margin-bottom=-6 testId="stage-handle"
                     column width=56 height=5 border-radius=3 background-color="-exact-tertiary-label"
@@ -630,6 +649,9 @@ component ExactStudio
                         hr
                         button press=editDo("undo-template") popovertarget="template-menu" popovertargetaction="hide" testId="template-undo"
                           text "Undo Template"
+                    button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
+                      image "symbol:sf/crop"
+                      text "Crop"
                     button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
                       image "symbol:sf/cursorarrow.click.2"
                       text "Zoom on Clicks"
@@ -836,31 +858,10 @@ component ExactStudio
                         button press=editDo("find-device") buttonStyle="bordered" flex=1 testId="find-device"
                           image "symbol:sf/iphone"
                           text (summary.device ? "Fit to the Phone" : "Find a Device")
-                        if isDevice
-                          button popovertarget="crop-menu" buttonStyle="bordered" testId="crop"
-                            image "symbol:sf/crop"
-                            text "Crop"
-                          column id="crop-menu" popover="auto" role="menu" aria-label="Crop"
-                            button press=trim("top", 0.004) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-top"
-                              image "symbol:sf/arrow.down.to.line"
-                              text "Trim Top"
-                            button press=trim("bottom", 0.004) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-bottom"
-                              image "symbol:sf/arrow.up.to.line"
-                              text "Trim Bottom"
-                            button press=trim("left", 0.004) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-left"
-                              image "symbol:sf/arrow.right.to.line"
-                              text "Trim Left"
-                            button press=trim("right", 0.004) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-right"
-                              image "symbol:sf/arrow.left.to.line"
-                              text "Trim Right"
-                            hr
-                            button press=trim("reset", 0) popovertarget="crop-menu" popovertargetaction="hide" testId="trim-reset"
-                              image "symbol:sf/rectangle.expand.vertical"
-                              text "Use the Whole Window"
-                            if summary.found
-                              button press=editDo("forget-device") popovertarget="crop-menu" popovertargetaction="hide" destructive=true testId="forget-device"
-                                text "Not a Device"
-                      text (isDevice ? "Cut to the phone’s own outline, side buttons included. Crop trims an edge a little at a time." : "Cuts the video to a phone’s own outline when the recording shows a Simulator in its window.") font="-exact-caption1" color="-exact-tertiary-label"
+                        if summary.found
+                          button press=editDo("forget-device") buttonStyle="bordered" testId="forget-device"
+                            text "Not a Device"
+                      text (isDevice ? "Cut to the phone’s own outline, side buttons included. Crop, under the preview, trims it further." : "Cuts the video to a phone’s own outline when the recording shows a Simulator in its window.") font="-exact-caption1" color="-exact-tertiary-label"
 
                   row gap=8
                     button press=editDo("clear") buttonStyle="bordered" flex=1 testId="clear"

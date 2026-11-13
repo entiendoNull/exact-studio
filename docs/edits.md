@@ -137,7 +137,8 @@ the cursor settings apply to recordings made without the system cursor in the pi
 
 Rarely edited. `crop` (unit rectangle, top-left origin) is what of the capture is shown; `clicks`
 and `releases` drive Zoom on Clicks and the cursor's squeeze; `device`, `mask`, `maskRect` and
-`cornerRadius` describe a device found in the picture.
+`cornerRadius` describe a device found in the picture. For a window recording, `cornerRadius` is
+the window's own corner radius (a share of its width), measured from its alpha.
 
 ## Templates
 

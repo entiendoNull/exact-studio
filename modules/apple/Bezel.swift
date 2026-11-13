@@ -257,6 +257,27 @@ enum Bezel {
                        radius: min(0.3, Double(corner) / width))
     }
 
+    /// A window captured on its own has transparent rounded corners. Its radius,
+    /// as a fraction of the width: how far the top-left corner's curve reaches,
+    /// down the left edge and along the top edge, averaged. Nil when the corners are square.
+    // @ref LLP 0001#windows-keep-their-own-shape — the window's own corners, not the look's radius
+    static func windowRadius(_ image: CGImage) -> Double? {
+        let w = image.width, h = image.height
+        guard w > 40, h > 40, let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+              let data = ctx.data else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let p = data.assumingMemoryBound(to: UInt8.self)
+        let solid = { (x: Int, y: Int) -> Bool in p[(y * w + x) * 4 + 3] >= 128 }
+        // The window's edges, at the middle of each side (its border may be faint at the very edge).
+        guard let left = (0..<w / 4).first(where: { solid($0, h / 2) }),
+              let top = (0..<h / 4).first(where: { solid(w / 2, $0) }) else { return nil }
+        guard let down = (top..<h / 2).first(where: { solid(left, $0) }),
+              let along = (left..<w / 2).first(where: { solid($0, top) }) else { return nil }
+        let r = Double((down - top) + (along - left)) / 2
+        return r < 2 ? nil : min(0.3, r / Double(w - 2 * left))
+    }
+
     /// The same over any alpha source: `alpha(x, y)`, origin top-left.
     static func detect(width w: Int, height h: Int, alpha: (Int, Int) -> UInt8) -> UnitRect? {
         guard w > 8, h > 8 else { return nil }

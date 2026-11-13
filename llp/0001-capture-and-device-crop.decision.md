@@ -36,6 +36,19 @@ The silhouette is found off the capture queue, at about frame 10, so recording n
 - A window, an area you draw, or a Simulator. Simulator windows are listed under **Simulators**.
 - **Area picker**: the selection stays until you confirm it. The rest of the screen is dimmed, and
   a Record / Cancel bar shows next to it.
+- **Window picker** (Pick a Window): the window under the pointer lights up with its name; a click
+  records it, Escape cancels. The sidebar list is the other way in.
+
+## Windows keep their own shape
+
+A window is captured on its own, without its shadow, so its rounded corners come out transparent.
+That alpha is the cut: the video follows the window's real outline, whatever its corner radius.
+The frame's own corner setting does not apply to a window.
+
+- The radius is measured once from the alpha (the corner's reach down the side and along the top)
+  and kept in `meta.json` as `cornerRadius`. 3D uses it for the window's body.
+- An older window recording gets its radius measured when it is opened.
+- "Find a Device" on a window recording makes it a device recording instead.
 
 ## Cursor
 

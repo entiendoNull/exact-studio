@@ -62,6 +62,8 @@ final class Editor {
         rebuild(keepTime: false)
         // A device recording without its silhouette yet (made before there was one): find it now.
         if meta.isDevice && meta.mask == nil && meta.crop == .full { findDevice(quietly: true) }
+        // A window recording made before its corners were measured: measure them now.
+        if meta.isWindow && meta.cornerRadius == nil { measureWindow() }
         playing = player.observe(\.timeControlStatus) { [weak self] _, _ in
             DispatchQueue.main.async { self?.notify() }
         }
@@ -967,6 +969,18 @@ final class Editor {
             return quietly ? () : refuse("No device found in the picture: it looks for a phone on its window’s panel.")
         }
         m.device = true
+        setMeta(m)
+    }
+
+    /// The window's own corner radius, from a frame's alpha.
+    func measureWindow() {
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+        guard let image = try? generator.copyCGImage(at: CMTime(seconds: min(1, duration / 2), preferredTimescale: 600), actualTime: nil),
+              let r = Bezel.windowRadius(image) else { return }
+        var m = meta
+        m.cornerRadius = r
         setMeta(m)
     }
 

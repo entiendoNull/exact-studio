@@ -8,7 +8,7 @@
 //                                                   startText, endText, removed, first, last, problem}
 //          {op: "summary", id}                  → {parts, removed, effects, lanes, length, source}
 //   later  {op: "sources"}                      → {items: [{id, name, app, kind}], allowed}
-//          {op: "start", source}                → {ok, error}   source "area" opens the picker
+//          {op: "start", source}                → {ok, error}   source "area" or "pick-window" opens a picker
 //          {op: "stop"}                         → {ok, error, id}
 //          {op: "recordings"}                   → {items: [{id, name, kind, created, duration}]}
 //          {op: "edit", id, do, track?, number?, kind?}  → {ok}
@@ -37,7 +37,8 @@ final class Studio: ExactModule {
 
     private var recorder: Recorder?
     private var starting = false
-    private var picker: AreaPicker?
+    /// The area or window picker while it is open.
+    private var picker: AnyObject?
     private var statusItem: NSStatusItem?
     private var editors: [String: Editor] = [:]
     private var keys: Any?
@@ -234,6 +235,14 @@ final class Studio: ExactModule {
                 guard let area else { return reply.send(["ok": false, "error": ""]) }
                 self?.begin(source, area: area, sound: sound, reply: reply)
             }
+        } else if source == "pick-window" {
+            let picker = WindowPicker()
+            self.picker = picker
+            picker.pick { [weak self] id in
+                self?.picker = nil
+                guard let id else { return reply.send(["ok": false, "error": ""]) }
+                self?.begin("window:\(id)", area: nil, sound: sound, reply: reply)
+            }
         } else {
             begin(source, area: nil, sound: sound, reply: reply)
         }
@@ -408,6 +417,7 @@ final class Preview: ExactNativeInstance {
             host.attach(editor)
         }
         studio.active = next
+        host.cropping = props["cropping"] == "true"
         // The look is the recording's own (look.json); the view only shows and sets it.
     }
 
@@ -424,6 +434,32 @@ final class PlayerHost: NSView {
     private weak var editor: Editor?
     private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint), turn(CGPoint, Double, Double) }
     private var drag: Drag?
+
+    // MARK: Crop mode
+    // @ref LLP 0005#crop-on-the-picture — the whole recording, a grid, and handles to drag
+    /// While on, the view shows the whole recorded frame at the playhead, uncropped,
+    /// with the crop as a lit rectangle over it: a thirds grid inside, the rest dimmed,
+    /// a handle at each corner and edge. Drag a handle to move that side (a corner moves
+    /// two), or inside to move the crop. Letting go saves it.
+    var cropping = false {
+        didSet {
+            guard cropping != oldValue else { return }
+            if cropping { editor?.player.pause(); loadFrame() } else { rawFrame.contents = nil; cropDrag = nil }
+            layoutCrop()
+            drawOverlay()
+        }
+    }
+    private let rawFrame = CALayer()
+    private let cropShade = CAShapeLayer()
+    private let cropLines = CAShapeLayer()
+    private let cropGrid = CAShapeLayer()
+    private let cropHandles = CAShapeLayer()
+    private enum CropDrag { case edges(left: Bool, right: Bool, top: Bool, bottom: Bool, from: CGPoint, start: UnitRect), move(CGPoint, UnitRect) }
+    private var cropDrag: CropDrag?
+    /// The crop while it is dragged, before it is saved.
+    private var cropLive: UnitRect?
+    /// The smallest crop, as a share of each side.
+    private static let cropMinimum = 0.05
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -443,6 +479,140 @@ final class PlayerHost: NSView {
         outline.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
         outline.lineDashPattern = [6, 4]
         guides.strokeColor = NSColor.systemPink.cgColor
+
+        rawFrame.contentsGravity = .resize
+        rawFrame.isHidden = true
+        rawFrame.backgroundColor = NSColor(white: 0.12, alpha: 1).cgColor
+        cropShade.fillColor = NSColor(white: 0, alpha: 0.6).cgColor
+        cropShade.fillRule = .evenOdd
+        cropLines.fillColor = nil
+        cropLines.strokeColor = NSColor.white.cgColor
+        cropLines.lineWidth = 1.5
+        cropGrid.fillColor = nil
+        cropGrid.strokeColor = NSColor.white.withAlphaComponent(0.45).cgColor
+        cropGrid.lineWidth = 1
+        cropHandles.fillColor = nil
+        cropHandles.strokeColor = NSColor.white.cgColor
+        cropHandles.lineWidth = 4
+        cropHandles.lineCap = .round
+        cropHandles.shadowColor = NSColor.black.cgColor
+        cropHandles.shadowOpacity = 0.5
+        cropHandles.shadowRadius = 2
+        cropHandles.shadowOffset = .zero
+        for l in [rawFrame, cropShade, cropGrid, cropLines, cropHandles] { l.isHidden = true; layer?.addSublayer(l) }
+    }
+
+    /// The recorded frame at the playhead, as captured.
+    private func loadFrame() {
+        guard let editor else { return }
+        let generator = AVAssetImageGenerator(asset: editor.asset)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let at = CMTime(seconds: editor.playhead, preferredTimescale: 6000)
+        generator.generateCGImageAsynchronously(for: at) { [weak self] image, _, _ in
+            DispatchQueue.main.async {
+                guard let self, self.cropping, let image else { return }
+                CATransaction.begin(); CATransaction.setDisableActions(true)
+                self.rawFrame.contents = image
+                CATransaction.commit()
+            }
+        }
+    }
+
+    /// Where the whole frame is drawn while cropping: fitted into the view with a margin for the handles.
+    private var frameRect: CGRect {
+        guard let m = editor?.meta, m.width > 0, m.height > 0 else { return bounds.insetBy(dx: 24, dy: 24) }
+        return AVMakeRect(aspectRatio: CGSize(width: m.width, height: m.height), insideRect: bounds.insetBy(dx: 24, dy: 24))
+    }
+    private var cropNow: UnitRect { cropLive ?? editor?.meta.crop ?? .full }
+    /// A unit rectangle of the frame (origin top-left) in this view (origin bottom-left).
+    private func onFrame(_ u: UnitRect) -> CGRect {
+        let f = frameRect
+        return CGRect(x: f.minX + u.x * f.width, y: f.minY + (1 - u.y - u.h) * f.height, width: u.w * f.width, height: u.h * f.height)
+    }
+
+    private func layoutCrop() {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        for l in [rawFrame, cropShade, cropGrid, cropLines, cropHandles] { l.isHidden = !cropping }
+        for l in [player, still, outline, guides] as [CALayer] { l.opacity = cropping ? 0 : 1 }
+        guard cropping else { return }
+        let f = frameRect
+        rawFrame.frame = f
+        let r = onFrame(cropNow)
+        let shade = CGMutablePath()
+        shade.addRect(f)
+        shade.addRect(r)
+        cropShade.path = shade
+        cropLines.path = CGPath(rect: r, transform: nil)
+        let grid = CGMutablePath()
+        for i in 1...2 {
+            let x = r.minX + r.width * CGFloat(i) / 3, y = r.minY + r.height * CGFloat(i) / 3
+            grid.move(to: CGPoint(x: x, y: r.minY)); grid.addLine(to: CGPoint(x: x, y: r.maxY))
+            grid.move(to: CGPoint(x: r.minX, y: y)); grid.addLine(to: CGPoint(x: r.maxX, y: y))
+        }
+        cropGrid.path = grid
+        // An L at each corner, a short bar at each edge's middle.
+        let k = min(18, r.width / 4, r.height / 4), b = min(12, r.width / 6, r.height / 6)
+        let h = CGMutablePath()
+        for (c, dx, dy) in [(CGPoint(x: r.minX, y: r.minY), 1.0, 1.0), (CGPoint(x: r.maxX, y: r.minY), -1.0, 1.0),
+                            (CGPoint(x: r.maxX, y: r.maxY), -1.0, -1.0), (CGPoint(x: r.minX, y: r.maxY), 1.0, -1.0)] {
+            h.move(to: CGPoint(x: c.x + dx * k, y: c.y)); h.addLine(to: c); h.addLine(to: CGPoint(x: c.x, y: c.y + dy * k))
+        }
+        h.move(to: CGPoint(x: r.midX - b, y: r.minY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.minY))
+        h.move(to: CGPoint(x: r.midX - b, y: r.maxY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.maxY))
+        h.move(to: CGPoint(x: r.minX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.minX, y: r.midY + b))
+        h.move(to: CGPoint(x: r.maxX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.maxX, y: r.midY + b))
+        cropHandles.path = h
+    }
+
+    private func cropDown(_ p: CGPoint) {
+        let r = onFrame(cropNow), f = frameRect
+        let u = CGPoint(x: (p.x - f.minX) / f.width, y: 1 - (p.y - f.minY) / f.height)
+        // Within reach of a side: that side moves; of two sides (a corner): both.
+        let reach: CGFloat = 14
+        let near = { (a: CGFloat, b: CGFloat) in abs(a - b) <= reach }
+        let inY = p.y >= r.minY - reach && p.y <= r.maxY + reach, inX = p.x >= r.minX - reach && p.x <= r.maxX + reach
+        let left = near(p.x, r.minX) && inY, right = near(p.x, r.maxX) && inY && !left
+        let bottom = near(p.y, r.minY) && inX, top = near(p.y, r.maxY) && inX && !bottom
+        if left || right || top || bottom {
+            cropDrag = .edges(left: left, right: right, top: top, bottom: bottom, from: u, start: cropNow)
+        } else if r.contains(p) {
+            cropDrag = .move(u, cropNow)
+        } else {
+            cropDrag = nil
+        }
+    }
+
+    private func cropDragged(_ p: CGPoint) {
+        guard let cropDrag else { return }
+        let f = frameRect
+        let u = CGPoint(x: (p.x - f.minX) / f.width, y: 1 - (p.y - f.minY) / f.height)
+        let m = Self.cropMinimum
+        var c: UnitRect
+        switch cropDrag {
+        case let .move(from, start):
+            c = start
+            c.x = min(max(start.x + u.x - from.x, 0), 1 - start.w)
+            c.y = min(max(start.y + u.y - from.y, 0), 1 - start.h)
+        case let .edges(left, right, top, bottom, from, start):
+            var x0 = start.x, x1 = start.x + start.w, y0 = start.y, y1 = start.y + start.h
+            let dx = u.x - from.x, dy = u.y - from.y
+            if left { x0 = min(max(start.x + dx, 0), x1 - m) }
+            if right { x1 = max(min(start.x + start.w + dx, 1), x0 + m) }
+            if top { y0 = min(max(start.y + dy, 0), y1 - m) }
+            if bottom { y1 = max(min(start.y + start.h + dy, 1), y0 + m) }
+            c = UnitRect(x: x0, y: y0, w: x1 - x0, h: y1 - y0)
+        }
+        cropLive = c
+        layoutCrop()
+    }
+
+    private func cropUp() {
+        if let c = cropLive { editor?.setCrop(c) }
+        cropLive = nil
+        cropDrag = nil
+        layoutCrop()
     }
     required init?(coder: NSCoder) { fatalError() }
 
@@ -478,7 +648,9 @@ final class PlayerHost: NSView {
         player.frame = bounds
         outline.frame = bounds
         guides.frame = bounds
+        for l in [cropShade, cropGrid, cropLines, cropHandles] { l.frame = bounds }
         CATransaction.commit()
+        layoutCrop()
         drawOverlay()
     }
 
@@ -504,6 +676,7 @@ final class PlayerHost: NSView {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         guard let editor else { outline.path = nil; guides.path = nil; return }
+        if cropping { layoutCrop(); return }
         let f = editor.framing
         if let s = editor.selectedSegment, s.kind == "text" {
             outline.path = CGPath(roundedRect: rect(f.textFrame(s)), cornerWidth: 6, cornerHeight: 6, transform: nil)
@@ -517,6 +690,7 @@ final class PlayerHost: NSView {
 
     override func mouseDown(with e: NSEvent) {
         guard let editor else { return }
+        if cropping { return cropDown(convert(e.locationInWindow, from: nil)) }
         let u = unit(convert(e.locationInWindow, from: nil))
         let f = editor.framing
         let t = editor.playhead
@@ -548,6 +722,7 @@ final class PlayerHost: NSView {
     private static let snap = 0.012
 
     override func mouseDragged(with e: NSEvent) {
+        if cropping { return cropDragged(convert(e.locationInWindow, from: nil)) }
         guard let editor, let drag else { return }
         let u = unit(convert(e.locationInWindow, from: nil))
         var lines: [CGFloat] = [], rows: [CGFloat] = []
@@ -578,6 +753,7 @@ final class PlayerHost: NSView {
     }
 
     override func mouseUp(with e: NSEvent) {
+        if cropping { return cropUp() }
         guard let editor, let drag else { return }
         switch drag {
         case .subject: editor.endPlace()
@@ -605,12 +781,13 @@ final class PlayerHost: NSView {
     }
 
     override func scrollWheel(with e: NSEvent) {
+        if cropping { return }
         let dy = e.hasPreciseScrollingDeltas ? e.scrollingDeltaY : e.scrollingDeltaY * 8
         guard abs(dy) > 0.1 else { return }
         resize(by: 1 + Double(dy) * 0.004)
     }
 
-    override func magnify(with e: NSEvent) { resize(by: 1 + Double(e.magnification)) }
+    override func magnify(with e: NSEvent) { if cropping { return }; resize(by: 1 + Double(e.magnification)) }
 }
 #else
 final class Studio: ExactModule {}

@@ -89,6 +89,131 @@ final class AreaPicker: NSObject {
     }
 }
 
+/// A full-screen overlay to pick one window: the window under the pointer is
+/// lit and named; a click records it, Escape cancels. The windows are listed once,
+/// front to back, when the overlay opens. Comes back with the window's ID.
+final class WindowPicker: NSObject {
+    private var windows: [NSWindow] = []
+    private var done: (CGWindowID?) -> Void = { _ in }
+
+    struct Candidate { let id: CGWindowID; let frame: CGRect; let app: String; let title: String }
+
+    /// Ordinary windows of other apps, front to back, in global points (origin top-left).
+    static func candidates() -> [Candidate] {
+        let me = ProcessInfo.processInfo.processIdentifier
+        let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+        return list.compactMap { info in
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  (info[kCGWindowOwnerPID as String] as? Int32) != me,
+                  let id = info[kCGWindowNumber as String] as? CGWindowID,
+                  let b = info[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
+            let frame = CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+            guard frame.width >= 120, frame.height >= 120 else { return nil }
+            return Candidate(id: id, frame: frame, app: info[kCGWindowOwnerName as String] as? String ?? "",
+                             title: info[kCGWindowName as String] as? String ?? "")
+        }
+    }
+
+    func pick(_ done: @escaping (CGWindowID?) -> Void) {
+        self.done = done
+        let all = Self.candidates()
+        let mouse = NSEvent.mouseLocation
+        let top = NSScreen.screens.first?.frame.maxY ?? 0
+        for screen in NSScreen.screens {
+            let w = PickerWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            w.level = .screenSaver
+            w.isOpaque = false
+            w.backgroundColor = .clear
+            w.acceptsMouseMovedEvents = true
+            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            let view = WindowPickerView(frame: CGRect(origin: .zero, size: screen.frame.size))
+            // Each window's frame in this view: AppKit's origin is bottom-left, the list's top-left.
+            view.candidates = all.map { c in
+                (c, CGRect(x: c.frame.minX - screen.frame.minX, y: top - c.frame.maxY - screen.frame.minY, width: c.frame.width, height: c.frame.height))
+            }
+            view.finish = { [weak self] id in self?.finish(id) }
+            view.moved = { [weak self, weak view] in
+                self?.windows.compactMap { $0.contentView as? WindowPickerView }.filter { $0 !== view }.forEach { $0.clear() }
+            }
+            w.contentView = view
+            w.setFrame(screen.frame, display: true)
+            w.orderFrontRegardless()
+            if NSMouseInRect(mouse, screen.frame, false) { w.makeKey(); view.hover(at: w.convertPoint(fromScreen: mouse)) }
+            windows.append(w)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func finish(_ id: CGWindowID?) {
+        windows.forEach { $0.orderOut(nil) }
+        windows = []
+        let done = self.done
+        self.done = { _ in }
+        done(id)
+    }
+}
+
+private final class WindowPickerView: NSView {
+    var candidates: [(WindowPicker.Candidate, CGRect)] = []
+    var finish: (CGWindowID?) -> Void = { _ in }
+    var moved: () -> Void = {}
+    private var lit: (WindowPicker.Candidate, CGRect)?
+
+    override var acceptsFirstResponder: Bool { true }
+    override func viewDidMoveToWindow() {
+        window?.makeFirstResponder(self)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self))
+    }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+
+    func clear() { if lit != nil { lit = nil; needsDisplay = true } }
+
+    /// The frontmost window under a point of this view.
+    func hover(at p: CGPoint) {
+        let next = candidates.first { $0.1.contains(p) }
+        if next?.0.id != lit?.0.id { lit = next; needsDisplay = true; moved() }
+    }
+
+    override func mouseMoved(with e: NSEvent) { hover(at: convert(e.locationInWindow, from: nil)) }
+    override func mouseDown(with e: NSEvent) {
+        hover(at: convert(e.locationInWindow, from: nil))
+        finish(lit?.0.id)
+    }
+    override func keyDown(with e: NSEvent) {
+        if e.keyCode == 53 { finish(nil) } else { super.keyDown(with: e) }
+    }
+    override func rightMouseDown(with e: NSEvent) { finish(nil) }
+
+    override func draw(_ dirty: NSRect) {
+        NSColor(white: 0, alpha: 0.35).setFill()
+        bounds.fill()
+        let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.white, .font: NSFont.systemFont(ofSize: 15, weight: .semibold)]
+        guard let (c, r) = lit else {
+            let hint = "Click a window to record it. Press Escape to cancel." as NSString
+            let s = hint.size(withAttributes: attrs)
+            hint.draw(at: CGPoint(x: bounds.midX - s.width / 2, y: bounds.midY - s.height / 2), withAttributes: attrs)
+            return
+        }
+        let shape = NSBezierPath(roundedRect: r, xRadius: 12, yRadius: 12)
+        NSGraphicsContext.current?.compositingOperation = .copy
+        NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+        shape.fill()
+        NSGraphicsContext.current?.compositingOperation = .sourceOver
+        NSColor.controlAccentColor.setStroke()
+        shape.lineWidth = 3
+        shape.stroke()
+        // The window's name in a pill at its middle.
+        let title = c.title.count > 60 ? c.title.prefix(59) + "…" : Substring(c.title)
+        let name = (title.isEmpty ? c.app : "\(c.app) — \(title)") as NSString
+        let s = name.size(withAttributes: attrs)
+        let pill = CGRect(x: r.midX - s.width / 2 - 14, y: r.midY - s.height / 2 - 8, width: s.width + 28, height: s.height + 16)
+        NSColor(white: 0, alpha: 0.7).setFill()
+        NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
+        name.draw(at: CGPoint(x: pill.minX + 14, y: pill.minY + 8), withAttributes: attrs)
+    }
+}
+
 private final class PickerWindow: NSWindow {
     override var canBecomeKey: Bool { true }
 }
@@ -369,14 +494,17 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
         }
         frames += 1
         // A few frames in, once the window has drawn: find the device's silhouette, off this queue.
-        if !detected && frames >= 10 && (kind == .simulator || kind == .emulator) {
+        if !detected && frames >= 10 && (kind == .simulator || kind == .emulator || kind == .window) {
             detected = true
             let image = CIImage(cvPixelBuffer: buffer)
             if let cg = Recorder.stills.createCGImage(image, from: image.extent) {
                 finding.enter()
                 DispatchQueue.global(qos: .userInitiated).async { [self] in
                     defer { finding.leave() }
-                    if let found = Bezel.silhouette(cg), let name = Library.saveMask(found.mask, in: folder) {
+                    if kind == .window {
+                        let r = Bezel.windowRadius(cg)
+                        queue.async { self.cornerRadius = r }
+                    } else if let found = Bezel.silhouette(cg), let name = Library.saveMask(found.mask, in: folder) {
                         queue.async { self.crop = found.rect; self.mask = name }
                     } else if let outline = Bezel.outline(cg) {
                         queue.async { self.crop = outline.rect; self.cornerRadius = outline.radius }

@@ -265,6 +265,8 @@ struct RecordingMeta: Codable {
     var cursorBaked: Bool?
 
     var isDevice: Bool { kind == "simulator" || kind == "emulator" || device == true }
+    /// A window recording keeps the window's own shape: its alpha is the cut, its corner radius the 3D body's.
+    var isWindow: Bool { kind == "window" && device != true }
     var drawsCursor: Bool { cursorBaked == false }
 }
 
@@ -828,7 +830,7 @@ struct Framing {
         return dim.outputImage!.cropped(to: CGRect(origin: .zero, size: canvas))
     }
 
-    /// The subject cut to a rounded rectangle, or (a device without a silhouette) to its own alpha.
+    /// The subject cut to a rounded rectangle, or (a window, or a device without a silhouette) to its own alpha.
     private func shaped(_ subjectImage: CIImage, source: CIImage) -> CIImage {
         let mask: CIImage
         if meta.isDevice, let r = meta.cornerRadius {
@@ -837,7 +839,7 @@ struct Framing {
             g.radius = Float(r * subject.width)
             g.color = .white
             mask = g.outputImage!
-        } else if meta.isDevice {
+        } else if meta.isDevice || meta.isWindow {
             mask = source
         } else if look.radius > 0 {
             let g = CIFilter.roundedRectangleGenerator()
@@ -909,6 +911,7 @@ struct Framing {
     private var outline: CGPath {
         let r: CGFloat
         if meta.isDevice { r = CGFloat(meta.cornerRadius ?? 0.16) * subject.width }
+        else if meta.isWindow, let w = meta.cornerRadius { r = CGFloat(w) * subject.width }
         else { r = CGFloat(look.radius) }
         let radius = min(r, min(subject.width, subject.height) / 2 - 0.5)
         return CGPath(roundedRect: subject, cornerWidth: max(0.5, radius), cornerHeight: max(0.5, radius), transform: nil)
