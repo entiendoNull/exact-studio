@@ -45,7 +45,7 @@ The first build takes several minutes. The first recording asks for Screen Recor
    ```
 
 5. Run the app and try your change.
-6. Open a pull request against `main`. The `build` workflow runs the same checks and builds the app.
+6. Open a pull request against `main`.
 
 Do not edit `exact.mjs` or the generated block at the top of `AGENTS.md`. `bun exact.mjs update` writes them.
 
@@ -57,9 +57,17 @@ Do not edit `exact.mjs` or the generated block at the top of `AGENTS.md`. `bun e
 
 ## Releases
 
-A maintainer pushes a tag such as `v0.2.0`. The `build` workflow then builds the app, packs it with `tools/make-dmg`, and publishes a GitHub release with the `.dmg` file. The app is ad-hoc signed and not notarised.
+Only a maintainer makes a release, and only by hand. Nothing is released on a merge or on a pull request.
 
-The workflow builds against the expo/exact commit in `EXACT_REF` in [`.github/workflows/build.yml`](.github/workflows/build.yml). Change it in a pull request when the app needs a newer Exact.
+To release, open Actions › release › Run workflow and give the version, or run:
+
+```sh
+gh workflow run release.yml -f version=0.2.0
+```
+
+The workflow runs the checks, builds the app, packs it with `tools/make-dmg`, and publishes the GitHub release `v0.2.0` with the `.dmg` file. The app is ad-hoc signed and not notarised.
+
+The workflow builds against the expo/exact commit in `EXACT_REF` in [`.github/workflows/release.yml`](.github/workflows/release.yml). Change it in a pull request when the app needs a newer Exact.
 
 ## Report a bug or ask for a feature
 

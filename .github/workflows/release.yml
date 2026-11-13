@@ -1,21 +1,25 @@
-# Every pull request: the checks, then the app built and packed as a disk image.
-# A pushed v* tag: the same, and the image becomes a GitHub release.
-name: build
+# Makes a release, and only when a maintainer starts it: Actions › release › Run workflow, or
+#   gh workflow run release.yml -f version=0.2.0
+# It runs the checks, builds the app, packs it as a disk image, and publishes the GitHub
+# release v<version> from the commit it ran on.
+name: release
 
 on:
-  pull_request:
-  push:
-    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: The version to release, such as 0.2.0
+        required: true
+        type: string
 
 concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: release
 
 env:
   # The expo/exact commit the app is built against. Move it when the app needs a newer Exact.
   EXACT_REF: db72e04f9339d595cd3d5fa2a1383ffde1a7ccf7
   CARGO_TERM_COLOR: always
+  VERSION: ${{ inputs.version }}
 
 jobs:
   mac:
@@ -44,7 +48,6 @@ jobs:
         # another revision and fails. CHROME names the one it installed, and --check then decides.
         run: |
           bun ../exact/scripts/exact.mjs setup || true
-          (cd ../exact/scripts && bun -e "console.log('playwright-core:', require.resolve('playwright-core'))")
           shell="$(ls "$HOME"/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell | tail -1)"
           echo "CHROME=$shell" >> "$GITHUB_ENV"
           CHROME="$shell" bun ../exact/scripts/exact.mjs setup --check
@@ -59,21 +62,15 @@ jobs:
 
       - name: Disk image
         working-directory: exact-studio
-        run: tools/make-dmg "${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-dev' }}"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Exact-Studio-dmg
-          path: exact-studio/dist/*.dmg
-          if-no-files-found: error
+        run: tools/make-dmg "$VERSION"
 
       - name: Release
-        if: github.ref_type == 'tag'
         working-directory: exact-studio
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/*.dmg \
-            --title "Exact Studio ${{ github.ref_name }}" \
+          gh release create "v${VERSION#v}" dist/*.dmg \
+            --target "$GITHUB_SHA" \
+            --title "Exact Studio ${VERSION#v}" \
             --generate-notes \
-            --notes "Install: https://github.com/${{ github.repository }}#install"
+            --notes "Install: https://github.com/$GITHUB_REPOSITORY#install"
