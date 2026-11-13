@@ -955,7 +955,7 @@ final class Editor {
         apply(next)
     }
 
-    static func stamp(_ s: Double) -> String { String(format: "%d:%05.2f", Int(s) / 60, s.truncatingRemainder(dividingBy: 60)) }
+    static func stamp(_ s: Double) -> String { (s < 0 ? "-" : "") + String(format: "%d:%05.2f", Int(abs(s)) / 60, abs(s).truncatingRemainder(dividingBy: 60)) }
 
     /// Typed times for the selection: an effect's span, a clip part's edges
     /// (which move the splits beside it), or a move's arrival.
@@ -1542,7 +1542,6 @@ final class Editor {
                 "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),
                 "angleMove": (selectedMove ?? angleMove).map { Editor.stamp($0.t) } ?? "",
                 "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge,
-                "sound": hasSound, "volume": (edits.volume * 100).rounded(),
                 "zoomed": zoomed, "wheelZoom": wheelZoom]
     }
 }

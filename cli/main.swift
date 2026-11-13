@@ -106,7 +106,7 @@ func composition(_ r: Recording) -> (asset: AVAsset, video: AVMutableVideoCompos
     do { return try Composition.make(asset: asset, meta: r.meta, edits: r.edits, state: state) } catch { fail("\(error)") }
 }
 
-func stamp(_ s: Double) -> String { String(format: "%d:%05.2f", Int(s) / 60, s.truncatingRemainder(dividingBy: 60)) }
+func stamp(_ s: Double) -> String { (s < 0 ? "-" : "") + String(format: "%d:%05.2f", Int(abs(s)) / 60, abs(s).truncatingRemainder(dividingBy: 60)) }
 
 /// Problems with a recording's edits, each a line; empty when it is fine.
 func problems(_ r: Recording) -> [String] {
@@ -126,19 +126,17 @@ func problems(_ r: Recording) -> [String] {
         }
     }
     let d = r.meta.duration, e = r.edits
-    // Reading raises imageLanes to fit the images, so compare with the count the file states.
-    if let data = try? Data(contentsOf: folder.appendingPathComponent("edits.json")),
-       let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let stated = raw["imageLanes"] as? Int,
-       let top = e.images.map(\.lane).max(), top >= stated {
-        out.append("edits.json: imageLanes is \(stated), but an image is on lane \(top); raise it to \(top + 1)")
-    }
+    // Opening a file raises each lane count to fit, so the counts are checked as the file declares them.
+    // A missing count is derived, as is `lanes` in an old file without `textLanes`: its lanes are renumbered.
+    let raw = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("edits.json")))) as? [String: Any]) ?? [:]
+    func count(_ key: String, _ fitted: Int) -> Int { key == "lanes" && raw["textLanes"] == nil ? fitted : (raw[key] as? Int) ?? fitted }
     for s in e.segments {
         let at = "\(s.kind) \(s.id) (\(stamp(s.start))–\(stamp(s.end)))"
         if !Segment.kinds.contains(s.kind) { out.append("\(at): unknown kind; one of \(Segment.kinds.joined(separator: ", "))") }
         if s.end - s.start < 0.1 { out.append("\(at): shorter than 0.1 s, or ends before it starts") }
         if s.start < 0 || s.end > d + 0.01 { out.append("\(at): outside the recording, 0:00–\(stamp(d))") }
-        if s.lane < 0 || s.lane >= e.laneCount(space: s.space) {
-            out.append("\(at): lane \(s.lane), but \(["lanes", "textLanes", "imageLanes", "frameLanes"][s.space]) is \(e.laneCount(space: s.space))")
+        if case let key = ["lanes", "textLanes", "imageLanes", "frameLanes"][s.space], s.lane < 0 || s.lane >= count(key, e.laneCount(space: s.space)) {
+            out.append("\(at): lane \(s.lane), but \(key) is \(count(key, e.laneCount(space: s.space)))")
         }
         if s.id.contains(":") { out.append("\(at): an id can't contain a colon") }
         if e.segments.filter({ $0.id == s.id }).count > 1 { out.append("\(at): another segment has the same id") }
@@ -171,7 +169,7 @@ func problems(_ r: Recording) -> [String] {
         if s.length <= 0 { out.append("\(at): length must be above 0") }
         if s.offset < 0 { out.append("\(at): offset can't be below 0") }
         if s.start < 0 || s.start >= d { out.append("\(at): starts outside the recording, 0:00–\(stamp(d))") }
-        if s.lane < 0 || s.lane >= e.soundLanes { out.append("\(at): lane \(s.lane), but soundLanes is \(e.soundLanes)") }
+        if s.lane < 0 || s.lane >= count("soundLanes", e.soundLanes) { out.append("\(at): lane \(s.lane), but soundLanes is \(count("soundLanes", e.soundLanes))") }
         if !(0...1).contains(s.volume) { out.append("\(at): volume must be 0–1") }
         if s.fadeIn < 0 || s.fadeOut < 0 { out.append("\(at): fades can't be below 0") }
         if let why = e.conflict(s, map: map) { out.append("\(at): \(why)") }

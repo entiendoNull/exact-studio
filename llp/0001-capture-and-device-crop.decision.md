@@ -62,6 +62,7 @@ Asked for by Jacob on 2026-11-13: four sources, each picked on the screen.
 - System Sound is one setting, kept by the native module. The sidebar switch and the menu item
   both change it.
 - A start from the menu that fails brings the window forward, where the card shows why.
+- A recording that finishes is selected, whether the sidebar or the menu bar stopped it: `status.finished` names it.
 - Under the agent there is no menu bar item.
 
 ## Windows keep their own shape

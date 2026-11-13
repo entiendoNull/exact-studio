@@ -109,6 +109,10 @@ lanes: the app sorts them into lanes of their own kind when it reads it.
 A file with no `imageLanes` is an old one, where each image had a lane of its own: each image keeps
 its lane, so the picture stacks as before, and `imageLanes` becomes the number of images.
 
+Each `lane` must be below the count the file declares (`lanes`, `textLanes`, `frameLanes`,
+`soundLanes`). The app raises a count that is too low when it opens the file, but `validate` reports
+it. A count the file leaves out is derived from the lanes in use.
+
 | kind | fields | |
 |---|---|---|
 | `zoom` | `level` | above 1 zooms in toward the cursor (1.5–3 is usual), below 1 zooms out (0.5–0.85); eases in and out over 0.7 s |

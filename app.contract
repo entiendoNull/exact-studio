@@ -11,6 +11,8 @@ shape Status
   sound: bool
   // Why the last start failed, from the sidebar or the menu bar; "" when it did not.
   error: string
+  // The last recording that finished, stopped from the sidebar or the menu bar; "" before one has.
+  finished: string
 
 shape Source
   id: string
@@ -109,8 +111,6 @@ shape Summary
   angleMove: string
   thickness: number
   edge: string
-  sound: bool
-  volume: number
   zoomed: bool
   wheelZoom: bool
 
@@ -224,6 +224,9 @@ component ExactStudio
   // A recording can start from the menu bar too, so its clock starts when the status says so.
   task began when status.recording
     after(1, markStart)
+  // And it can stop there, so the recording that finished is selected once, when the status names it.
+  task landed when status.finished != "" key=status.finished
+    after(1, selectFinished)
 
   action step
     now = performanceNow()
@@ -236,6 +239,9 @@ component ExactStudio
   action markStart
     startedAt = performanceNow()
     now = performanceNow()
+  action selectFinished
+    selected = status.finished
+    cropping = false
   action stop
     send stopped = stopRecording()
   action afterStop
