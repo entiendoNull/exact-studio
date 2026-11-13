@@ -21,6 +21,8 @@ final class Editor {
     private(set) var map: TimeMap
     let state: RenderState
     private var composition: AVMutableVideoComposition?
+    /// The added sounds' audio tracks in the playing composition, by track id.
+    private var soundTracks: [CMPersistentTrackID: String] = [:]
     /// The selected segment, clip part ("p:…") or move ("m:…"); empty for none.
     private(set) var selected = ""
     /// Why the last edit was refused; cleared by the next one that lands.
@@ -101,7 +103,7 @@ final class Editor {
             timing = Editor.timing(disk) != Editor.timing(edits)
             edits = disk
             drawn = true
-            if !selected.isEmpty, selectedSegment == nil, selectedMove == nil, selectedPiece == nil, selectedImageMove == nil, selectedImageEffect == nil { selected = "" }
+            if !selected.isEmpty, selectedSegment == nil, selectedMove == nil, selectedPiece == nil, selectedImageMove == nil, selectedImageEffect == nil, selectedSound == nil, selected != Editor.recordedSound { selected = "" }
         }
         if let data = read("look.json"), let disk = try? JSONDecoder().decode(Look.self, from: data), disk != look {
             look = disk
@@ -287,12 +289,13 @@ final class Editor {
         let held = keepTime ? still() : nil
         if let held { freeze(held) }
         state.update(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
-        guard let (mix, composition, map) = try? Composition.make(asset: asset, meta: meta, edits: edits, state: state) else { return }
+        guard let (mix, composition, map, sounds) = try? Composition.make(asset: asset, meta: meta, edits: edits, state: state) else { return }
         self.map = map
         self.composition = composition
+        soundTracks = sounds
         let item = AVPlayerItem(asset: mix)
         item.videoComposition = composition
-        item.audioMix = Composition.audioMix(mix, map: map, volume: edits.volume)
+        item.audioMix = Composition.audioMix(mix, map: map, edits: edits, sounds: sounds)
         item.audioTimePitchAlgorithm = .spectral
         let out = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         item.add(out)
@@ -314,7 +317,7 @@ final class Editor {
         if let c = composition?.mutableCopy() as? AVMutableVideoComposition {
             player.currentItem?.videoComposition = c
         }
-        if let item = player.currentItem { item.audioMix = Composition.audioMix(item.asset, map: map, volume: edits.volume) }
+        if let item = player.currentItem { item.audioMix = Composition.audioMix(item.asset, map: map, edits: edits, sounds: soundTracks) }
         if !isPlaying, let item = player.currentItem {
             item.seek(to: item.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
         }
@@ -324,12 +327,12 @@ final class Editor {
     /// A separate composition for export, at this editor's edits and the look asked for.
     func exportable(look: Look) throws -> (AVAsset, AVMutableVideoComposition, AVAudioMix?) {
         let own = RenderState(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
-        let (mix, composition, map) = try Composition.make(asset: asset, meta: meta, edits: edits, state: own)
-        return (mix, composition, Composition.audioMix(mix, map: map, volume: edits.volume))
+        let (mix, composition, map, sounds) = try Composition.make(asset: asset, meta: meta, edits: edits, state: own)
+        return (mix, composition, Composition.audioMix(mix, map: map, edits: edits, sounds: sounds))
     }
 
     /// Whether the recording has sound.
-    var hasSound: Bool { !asset.tracks(withMediaType: .audio).isEmpty }
+    private(set) lazy var hasSound = !asset.tracks(withMediaType: .audio).isEmpty
 
     func setVolume(_ v: Double) {
         var next = edits
@@ -347,15 +350,18 @@ final class Editor {
         stamps = Editor.stamps(folder)
     }
 
+    /// What the playback is built from; a change rebuilds it. A sound's volume and fades only change the mix.
     private static func timing(_ e: Edits) -> String {
         "\(e.splits)|\(e.removed)|\(e.transitions.sorted { $0.key < $1.key })|\(e.speeds.map { "\($0.start),\($0.end),\($0.rate ?? 1)" })"
+            + "|\(e.sounds.map { "\($0.file),\($0.start),\($0.length),\($0.offset)" })"
     }
 
     /// Land `next` if every segment in it may sit where it is; else keep the
     /// edits as they were and say why.
     @discardableResult
     private func apply(_ next: Edits) -> Bool {
-        if let why = next.segments.lazy.compactMap({ next.conflict($0) }).first {
+        let nextMap = TimeMap(duration: duration, edits: next)
+        if let why = next.segments.lazy.compactMap({ next.conflict($0) }).first ?? next.sounds.lazy.compactMap({ next.conflict($0, map: nextMap) }).first {
             refuse(why)
             return false
         }
@@ -506,7 +512,7 @@ final class Editor {
 
     /// The group a selection or a new segment shows in opens, so it is never out of sight.
     private func reveal(space: Int) {
-        let group = space == 0 ? "video" : space == 3 ? "frame" : "top"
+        let group = space == 0 ? "video" : space == 3 ? "frame" : space == Edits.soundSpace ? "sound" : "top"
         if folded.contains(group) { toggle(group: group) }
     }
 
@@ -733,28 +739,118 @@ final class Editor {
         if live { edits = next; redraw() } else { apply(next) }
     }
 
+    // MARK: Sounds
+    // @ref LLP 0002#sound — the recorded sound follows the cuts; an added sound plays straight through
+
+    /// The selection id of the recorded sound's row.
+    static let recordedSound = "sound:clip"
+    /// The selection id of an added sound.
+    static func soundID(_ id: String) -> String { "snd:" + id }
+    var selectedSound: Sound? { edits.sounds.first { Editor.soundID($0.id) == selected } }
+
+    /// A new sound at the playhead from a sound file: the whole file, or what fits before the video
+    /// ends, on the first sound lane where it plays alone (a new lane when none has room), selected.
+    func addSound(_ url: URL) {
+        do {
+            let file = try Sounds.bring(url, into: folder)
+            let t = min(playhead, max(0, duration - 0.3))
+            var n = edits.sounds.count + 1
+            while edits.sounds.contains(where: { $0.id == "sound\(n)" }) { n += 1 }
+            guard var s = Sounds.make(id: "sound\(n)", file: file, in: folder, start: t, map: map) else {
+                return refuse("There’s no room for a sound there. Move the playhead earlier.")
+            }
+            var next = edits
+            s.lane = next.freeLane(for: s, map: map)
+            next.sounds.append(s)
+            next.fitLanes()
+            reveal(space: Edits.soundSpace)
+            if apply(next) { select(Editor.soundID(s.id)) }
+        } catch { refuse((error as? Sounds.Refused)?.why ?? "Couldn’t add that sound.") }
+    }
+
+    /// Play another file in the selected sound, from its start; its place and settings stay.
+    func replaceSound(_ url: URL) {
+        guard var s = selectedSound else { return }
+        do {
+            s.file = try Sounds.bring(url, into: folder)
+            let whole = Sounds.length(s.file, in: folder) ?? s.length
+            s.offset = 0
+            s.length = min(s.length, whole)
+            replace(s)
+        } catch { refuse((error as? Sounds.Refused)?.why ?? "Couldn’t use that sound.") }
+    }
+
+    /// Set one field of the selected sound ("volume" in percent, "fadeIn" or "fadeOut" in seconds),
+    /// or of the recorded sound ("volume" in percent, "mute").
+    func setSound(_ field: String, _ value: String) {
+        let n = Double(value)
+        if selected == Editor.recordedSound {
+            switch field {
+            case "volume": if let n { setVolume(n / 100) }
+            case "mute": setVolume(value == "true" ? 0 : 1)
+            default: break
+            }
+            return
+        }
+        guard var s = selectedSound, let n else { return }
+        switch field {
+        case "volume": s.volume = min(max(n / 100, 0), 1)
+        case "fadeIn": s.fadeIn = min(max(n, 0), 5)
+        case "fadeOut": s.fadeOut = min(max(n, 0), 5)
+        default: return
+        }
+        replace(s)
+    }
+
+    /// Move a sound, or trim either end, while dragging: drawn at once, checked on drop.
+    /// `lane` may be one past the last: the drop opens a new sound lane there.
+    func dragSound(_ id: String, start: Double, offset: Double, length: Double, lane: Int) {
+        if dragOrigin == nil { dragOrigin = edits }
+        edits.sounds = edits.sounds.map {
+            guard $0.id == id else { return $0 }
+            var m = $0
+            m.start = min(max(start, 0), duration - 0.1)
+            m.offset = max(0, offset)
+            m.length = max(0.1, length)
+            m.lane = max(0, lane)
+            return m
+        }
+        redrawViews()
+    }
+
+    private func replace(_ s: Sound) {
+        var next = edits
+        next.sounds = next.sounds.map { $0.id == s.id ? s : $0 }
+        apply(next)
+    }
+
     /// A new empty lane in a space (`Segment.space`): 0 for the video's effects, 1 for texts, 3 for whole-frame effects.
     func addLane(space: Int = 0) {
         var next = edits
         switch space {
         case 1: next.textLanes += 1
         case 3: next.frameLanes += 1
+        case Edits.soundSpace: next.soundLanes += 1
         default: next.lanes += 1
         }
+        if space == Edits.soundSpace { reveal(space: space) }
         apply(next)
     }
 
     /// Remove an empty lane; the lanes of its kind below it move up. One effect lane always stays.
     func removeLane(_ lane: Int, space: Int = 0) {
         guard space != 2, edits.laneCount(space: space) > (space == 0 ? 1 : 0),
-              !edits.segments.contains(where: { $0.space == space && $0.lane == lane }) else { return }
+              !edits.segments.contains(where: { $0.space == space && $0.lane == lane }),
+              space != Edits.soundSpace || !edits.sounds.contains(where: { $0.lane == lane }) else { return }
         var next = edits
         switch space {
         case 1: next.textLanes -= 1
         case 3: next.frameLanes -= 1
+        case Edits.soundSpace: next.soundLanes -= 1
         default: next.lanes -= 1
         }
         next.segments = next.segments.map { var s = $0; if s.space == space, s.lane > lane { s.lane -= 1 }; return s }
+        if space == Edits.soundSpace { next.sounds = next.sounds.map { var s = $0; if s.lane > lane { s.lane -= 1 }; return s } }
         apply(next)
     }
 
@@ -805,7 +901,19 @@ final class Editor {
     /// Typed times for the selection: an effect's span, a clip part's edges
     /// (which move the splits beside it), or a move's arrival.
     func setTimes(start: Double?, end: Double?) {
-        if let (image, effect) = selectedImageEffect {
+        if var s = selectedSound {
+            // Start moves it; End sets how long it plays, up to the end of its file.
+            if let a = start {
+                guard a >= 0, a < duration - 0.1 else { return refuse("A sound must start inside 0:00–\(Editor.stamp(duration)).") }
+                s.start = a
+            }
+            if let b = end {
+                let length = map.output(b) - map.output(s.start)
+                guard length >= 0.1 else { return refuse("End must come at least 0.1 s of video after the start.") }
+                s.length = min(length, (Sounds.length(s.file, in: folder) ?? length) - s.offset)
+            }
+            replace(s)
+        } else if let (image, effect) = selectedImageEffect {
             let a = start ?? effect.start, b = end ?? effect.end
             guard a >= image.start - 0.001, b <= image.end + 0.001, b - a >= 0.1 else {
                 return refuse("An image’s effect must stay inside the image, \(Editor.stamp(image.start))–\(Editor.stamp(image.end)), and last at least 0.1 s.")
@@ -851,7 +959,8 @@ final class Editor {
     /// Delete: an effect, text or move goes; a clip part is removed from the video (or put back).
     func deleteSelected() {
         if selectedPiece != nil { return toggleRemoved() }
-        guard !selected.isEmpty else { return }
+        // The recorded sound is part of the clip: it is muted, not removed.
+        guard !selected.isEmpty, selected != Editor.recordedSound else { return }
         var next = edits
         if let c = selectedChild {
             // An image's own move or effect goes; the image stays, selected.
@@ -865,6 +974,7 @@ final class Editor {
         }
         next.segments.removeAll { $0.id == selected }
         next.moves.removeAll { "m:" + $0.id == selected }
+        next.sounds.removeAll { Editor.soundID($0.id) == selected }
         apply(next)
         select("")
     }
@@ -1269,7 +1379,7 @@ final class Editor {
             }
         }
         dragRow = nil
-        moved.lanes = origin.lanes; moved.textLanes = origin.textLanes; moved.frameLanes = origin.frameLanes
+        moved.lanes = origin.lanes; moved.textLanes = origin.textLanes; moved.frameLanes = origin.frameLanes; moved.soundLanes = origin.soundLanes
         moved.fitLanes()
         edits = origin
         if !apply(moved) { redrawViews() }
@@ -1332,8 +1442,16 @@ final class Editor {
                                   "removed": false, "first": false, "last": false, "transition": "cut", "text": "", "size": 0,
                                   "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "", "rotation": 0,
                                   "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": problem,
-                                  "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": ""]
-        if let s = selectedSegment {
+                                  "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "",
+                                  "volume": 100, "fadeIn": 0, "fadeOut": 0]
+        if selected == Editor.recordedSound {
+            out.merge(["id": selected, "kind": "recorded", "volume": (edits.volume * 100).rounded()]) { $1 }
+        } else if let s = selectedSound {
+            let end = s.end(map)
+            out.merge(["id": selected, "kind": "sound", "start": s.start, "end": end, "startText": Editor.stamp(s.start), "endText": Editor.stamp(end),
+                       "file": URL(fileURLWithPath: s.file).lastPathComponent, "volume": (s.volume * 100).rounded(),
+                       "fadeIn": (s.fadeIn * 10).rounded() / 10, "fadeOut": (s.fadeOut * 10).rounded() / 10]) { $1 }
+        } else if let s = selectedSegment {
             out.merge(["scope": s.scope ?? "video", "tilt": (s.tilt ?? 0).rounded(), "turn": (s.turn ?? 0).rounded(), "roll": (s.roll ?? 0).rounded()]) { $1 }
             out.merge(["id": s.id, "kind": s.kind, "level": s.level ?? 0, "rate": s.rate ?? 0, "start": s.start, "end": s.end,
                        "startText": Editor.stamp(s.start), "endText": Editor.stamp(s.end), "text": s.text ?? "",

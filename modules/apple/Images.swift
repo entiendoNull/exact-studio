@@ -7,6 +7,33 @@ import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 
+/// Why a file could not be brought into a recording, in words for the person.
+struct FileRefused: Error { let why: String }
+
+/// Files an edit uses, kept in the recording's own folder so it stays whole when copied.
+// @ref LLP 0004#the-rule — a file an edit uses lives in the recording's folder
+enum RecordingFiles {
+    /// Copy `url` into `recording`'s `folder` and give its path inside the recording. The same file
+    /// added twice is one file; another file with a taken name gets a number. `what` names it in a refusal.
+    static func bring(_ url: URL, into recording: URL, folder: String, what: String) throws -> String {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else { throw FileRefused(why: "There is no file at \(url.path).") }
+        let dir = recording.appendingPathComponent(folder)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let stem = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
+        var name = url.lastPathComponent, n = 2
+        while fm.fileExists(atPath: dir.appendingPathComponent(name).path), !fm.contentsEqual(atPath: dir.appendingPathComponent(name).path, andPath: url.path) {
+            name = "\(stem)-\(n).\(ext)"
+            n += 1
+        }
+        let to = dir.appendingPathComponent(name)
+        if !fm.fileExists(atPath: to.path) {
+            do { try fm.copyItem(at: url, to: to) } catch { throw FileRefused(why: "Couldn’t copy the \(what) into the recording.") }
+        }
+        return folder + "/" + name
+    }
+}
+
 /// Picture files, loaded once per file and again when the file changes.
 enum Pictures {
     static let types = ["png", "jpg", "jpeg", "heic", "tiff", "tif", "gif", "webp", "bmp"]
@@ -29,7 +56,7 @@ enum Pictures {
         return placed
     }
 
-    struct Refused: Error { let why: String }
+    typealias Refused = FileRefused
 
     /// Whether a panel may open: not while an agent drives the app.
     static var mayAsk = true
@@ -56,21 +83,7 @@ enum Pictures {
         guard types.contains(url.pathExtension.lowercased()) else {
             throw Refused(why: "Exact Studio can’t show that file. Use a PNG, JPEG, HEIC, TIFF, GIF, WebP or BMP picture.")
         }
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else { throw Refused(why: "There is no file at \(url.path).") }
-        let dir = recording.appendingPathComponent(folder)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        let stem = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
-        var name = url.lastPathComponent, n = 2
-        while fm.fileExists(atPath: dir.appendingPathComponent(name).path), !fm.contentsEqual(atPath: dir.appendingPathComponent(name).path, andPath: url.path) {
-            name = "\(stem)-\(n).\(ext)"
-            n += 1
-        }
-        let to = dir.appendingPathComponent(name)
-        if !fm.fileExists(atPath: to.path) {
-            do { try fm.copyItem(at: url, to: to) } catch { throw Refused(why: "Couldn’t copy the picture into the recording.") }
-        }
-        let file = folder + "/" + name
+        let file = try RecordingFiles.bring(url, into: recording, folder: folder, what: "picture")
         guard image(file, in: recording) != nil else { throw Refused(why: "Couldn’t read that picture.") }
         return file
     }

@@ -21,7 +21,7 @@ const sources: Sources = {
     return later(native, { op: 'recordings' }, { items: [] });
   },
   editSelection: async ([id], _store, _storage, native): Promise<Result<'editSelection'>> => {
-    if (!native?.available) return { id: '', kind: '', level: 0, rate: 0, start: 0, end: 0, startText: '', endText: '', removed: false, first: false, last: false, transition: 'cut', text: '', size: 0, color: '', weight: '', style: '', animIn: '', animOut: '', loop: '', rotation: 0, moveStyle: '', duration: 0, scale: 0, tilt: 0, turn: 0, roll: 0, hasAngles: false, scope: 'video', problem: '', file: '', opacity: 100, radius: 0, shadow: false, fx: '' };
+    if (!native?.available) return { id: '', kind: '', level: 0, rate: 0, start: 0, end: 0, startText: '', endText: '', removed: false, first: false, last: false, transition: 'cut', text: '', size: 0, color: '', weight: '', style: '', animIn: '', animOut: '', loop: '', rotation: 0, moveStyle: '', duration: 0, scale: 0, tilt: 0, turn: 0, roll: 0, hasAngles: false, scope: 'video', problem: '', file: '', opacity: 100, radius: 0, shadow: false, fx: '', volume: 100, fadeIn: 0, fadeOut: 0 };
     native.watch('edits');
     return native.call({ op: 'selection', id }) as Result<'editSelection'>;
   },

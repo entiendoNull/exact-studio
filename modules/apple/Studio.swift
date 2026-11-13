@@ -79,7 +79,7 @@ final class Studio: ExactModule {
         "id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "", "removed": false, "first": false,
         "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
         "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": "",
-        "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "",
+        "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "", "volume": 100, "fadeIn": 0, "fadeOut": 0,
     ]
     private static let emptySummary: [String: Any] = [
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "images": 0, "moves": 0, "length": 0, "source": 0, "playing": false,
@@ -191,12 +191,27 @@ final class Studio: ExactModule {
         Pictures.pick(then: then)
     }
 
+    /// A sound file for a sound: the one at `path`, else one the person picks in a panel.
+    private func pickSound(_ path: String?, then: @escaping (URL) -> Void) {
+        if let path, !path.isEmpty { return then(URL(fileURLWithPath: path)) }
+        Sounds.pick(then: then)
+    }
+
     private func edit(_ r: [String: Any]) {
         guard let e = editor(r["id"] as? String ?? "") else { return }
         switch r["do"] as? String {
         case "add":
             // An image starts from a picture file: `kind` names one, else the person picks it.
-            if r["track"] as? String == "image" { pickPicture(r["kind"] as? String) { e.addImage($0) } } else { e.add(r["track"] as? String ?? "zoom-in") }
+            // A sound likewise starts from a sound file.
+            switch r["track"] as? String {
+            case "image": pickPicture(r["kind"] as? String) { e.addImage($0) }
+            case "sound": pickSound(r["kind"] as? String) { e.addSound($0) }
+            case let track: e.add(track ?? "zoom-in")
+            }
+        case "sound":
+            // The selected sound (its file, volume or fades), or the recorded sound's volume.
+            let field = r["track"] as? String ?? "", value = r["kind"] as? String ?? ""
+            if field == "replace" { pickSound(value) { e.replaceSound($0) } } else { e.setSound(field, value) }
         case "image":
             // The selected image: its picture, one of its fields, a new effect or move of its own, or one of theirs.
             let field = r["track"] as? String ?? "", value = r["kind"] as? String ?? ""
@@ -415,7 +430,7 @@ let exactModule: ExactModule.Type = Studio.self
 
 /// `<studio-preview clip=… look=…>`: the open recording's player, with the look applied.
 /// Drag the video to place it (snapping to the centre lines), scroll or pinch to
-/// resize it; drag a text or an image to move it; drop a picture file on it to add an image.
+/// resize it; drag a text or an image to move it; drop a picture file on it to add an image, or a sound file to add a sound.
 final class Preview: ExactNativeInstance {
     private let studio: Studio
     private let host = PlayerHost()
@@ -838,20 +853,22 @@ final class PlayerHost: NSView {
 
     override func magnify(with e: NSEvent) { if cropping { return }; resize(by: 1 + Double(e.magnification)) }
 
-    // MARK: Dropping a picture
+    // MARK: Dropping a picture or a sound
 
     private func picture(_ info: NSDraggingInfo) -> URL? {
         let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
-        return urls?.first { Pictures.types.contains($0.pathExtension.lowercased()) }
+        return urls?.first { (Pictures.types + Sounds.types).contains($0.pathExtension.lowercased()) }
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         editor != nil && !cropping && picture(sender) != nil ? .copy : []
     }
 
-    /// A picture file dropped on the preview becomes an image at the playhead, where it was dropped.
+    /// A picture file dropped on the preview becomes an image at the playhead, where it was dropped;
+    /// a sound file, a sound at the playhead.
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let editor, !cropping, let url = picture(sender) else { return false }
+        if Sounds.types.contains(url.pathExtension.lowercased()) { editor.addSound(url); return true }
         let u = unit(convert(sender.draggingLocation, from: nil))
         editor.addImage(url, at: CGPoint(x: min(max(u.x, 0), 1), y: min(max(u.y, 0), 1)))
         return true
