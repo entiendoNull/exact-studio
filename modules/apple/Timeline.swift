@@ -16,8 +16,15 @@ import AVFoundation
 final class TimelineView: NSView {
     weak var editor: Editor?
     var onHeight: (CGFloat) -> Void = { _ in }
-    private var thumbs: [CGImage] = []
-    private var thumbsFor = ""
+    /// The filmstrip's thumbnails, by level (the clip cut into 2^level equal steps) and step; see `drawFilm`.
+    private struct Thumb: Hashable { let level: Int, index: Int }
+    private var film: [Thumb: CGImage] = [:]
+    private var filmUsed: [Thumb: Int] = [:]
+    private var filmTick = 0
+    private var filmPending: Set<Thumb> = []
+    private var filmWanted: Set<Thumb> = []
+    private var filmFor = ""
+    private var generators: [Int: AVAssetImageGenerator] = [:]
     private var timeObserver: Any?
     private weak var observedPlayer: AVPlayer?
     private var lastHeight: CGFloat = 0
@@ -28,6 +35,8 @@ final class TimelineView: NSView {
         case fx(String, String, Int, Double, Double, Int, Double)
         /// An image's move: the image, the move, and the grab's offset from where it lands.
         case imove(String, String, Double)
+        /// The slim bar under the track while zoomed: where in it it was grabbed.
+        case pan(CGFloat)
     }
     private var drag: Drag?
     private var moved = false
@@ -113,11 +122,13 @@ final class TimelineView: NSView {
         self.editor = editor
         guard let editor else { needsDisplay = true; return }
         editor.listen(self) { [weak self] in self?.changed() }
+        editor.onZoom = { [weak self] in self?.needsDisplay = true }
         observedPlayer = editor.player
         timeObserver = editor.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in
+            self?.follow()
             self?.needsDisplay = true
         }
-        loadThumbs(editor)
+        resetFilm(editor)
         changed()
     }
 
@@ -144,50 +155,197 @@ final class TimelineView: NSView {
         return CGPoint(x: p.x, y: p.y + scrollY)
     }
 
+    // @ref LLP 0005#zoom-the-timeline — a mouse wheel zooms, a trackpad scrolls
     override func scrollWheel(with e: NSEvent) {
+        if let editor {
+            let p = convert(e.locationInWindow, from: nil)
+            if !e.hasPreciseScrollingDeltas {
+                // A mouse wheel: sideways (or with Shift) it pans; up and down it zooms around the pointer.
+                if e.scrollingDeltaX != 0 || e.modifierFlags.contains(.shift) {
+                    if editor.zoomed { pan(by: -(e.scrollingDeltaX != 0 ? e.scrollingDeltaX : e.scrollingDeltaY) * 8) }
+                    return
+                }
+                if editor.wheelZoom, e.scrollingDeltaY != 0, p.x >= trackRect.minX, p.x <= trackRect.maxX {
+                    return zoom(by: pow(1.12, Double(min(max(e.scrollingDeltaY, -6), 6))), at: p.x)
+                }
+            } else if abs(e.scrollingDeltaX) > abs(e.scrollingDeltaY) {
+                // A trackpad never zooms: sideways it pans the zoomed timeline.
+                guard editor.zoomed else { return super.scrollWheel(with: e) }
+                return pan(by: -e.scrollingDeltaX)
+            }
+        }
         let room = contentHeight - bounds.height
         guard room > 0 else { return super.scrollWheel(with: e) }
         scrollY = min(max(scrollY - e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 1 : 8), 0), room)
         needsDisplay = true
     }
 
+    /// A pinch zooms around the pointer, always.
+    override func magnify(with e: NSEvent) {
+        let p = convert(e.locationInWindow, from: nil)
+        zoom(by: 1 + Double(e.magnification), at: min(max(p.x, trackRect.minX), trackRect.maxX))
+    }
 
+    // MARK: Zoom
+    // Only the view changes: no edit, no save, no rebuild.
 
-    private func loadThumbs(_ editor: Editor) {
-        guard thumbsFor != editor.id else { return }
-        thumbsFor = editor.id
-        thumbs = []
-        let generator = AVAssetImageGenerator(asset: editor.asset)
-        generator.maximumSize = CGSize(width: 240, height: 240)
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
-        let n = 14, d = editor.duration, crop = editor.meta.crop, id = editor.id
-        let times = (0..<n).map { NSValue(time: CMTime(seconds: d * (Double($0) + 0.5) / Double(n), preferredTimescale: 600)) }
-        var got: [Int: CGImage] = [:]
-        generator.generateCGImagesAsynchronously(forTimes: times) { [weak self] requested, image, _, _, _ in
-            guard let image, let i = times.firstIndex(of: NSValue(time: requested)) else { return }
-            let r = CGRect(x: crop.x * Double(image.width), y: crop.y * Double(image.height),
-                           width: crop.w * Double(image.width), height: crop.h * Double(image.height)).integral
-            let cropped = image.cropping(to: r) ?? image
-            DispatchQueue.main.async {
-                guard let self, self.thumbsFor == id else { return }
-                got[i] = cropped
-                self.thumbs = (0..<n).compactMap { got[$0] }
-                self.needsDisplay = true
+    /// The most a recording zooms: about 240 points a second, and never less than the whole of it.
+    private var maxZoom: Double {
+        guard let d = editor?.duration, d > 0 else { return 1 }
+        return max(1, 240 * d / Double(trackRect.width))
+    }
+    /// The seconds the track shows, and the time at its left edge.
+    private var span: Double {
+        guard let editor, editor.duration > 0 else { return 1 }
+        return editor.duration / min(max(editor.zoom, 1), maxZoom)
+    }
+    private var origin: Double {
+        guard let editor else { return 0 }
+        return min(max(editor.zoomStart, 0), max(0, editor.duration - span))
+    }
+
+    /// Zoom by `factor`, keeping the time under `px` under it.
+    private func zoom(by factor: Double, at px: CGFloat) {
+        guard let editor, editor.duration > 0 else { return }
+        editor.zoomMax = maxZoom
+        let f = Double((px - trackRect.minX) / trackRect.width)
+        let at = origin + f * span
+        let next = min(max(editor.duration / span * factor, 1), maxZoom)
+        editor.setZoom(next, start: at - f * editor.duration / next)
+    }
+
+    /// Slide the zoomed timeline by `points` (positive: later).
+    private func pan(by points: CGFloat) {
+        guard let editor else { return }
+        editor.setZoom(editor.zoom, start: origin + Double(points / trackRect.width) * span)
+    }
+
+    /// While playing, the view pages on when the playhead runs off it.
+    private func follow() {
+        guard let editor, editor.isPlaying, editor.zoomed, drag == nil else { return }
+        let ph = editor.playhead
+        if ph > origin + span * 0.98 || ph < origin { editor.setZoom(editor.zoom, start: ph - span * 0.02) }
+    }
+
+    /// Dragging to an edge of the zoomed track slides it slowly that way.
+    private var lastDrag: NSEvent?
+    private var edgeTimer: Timer?
+    private func autoPan() {
+        guard let editor, editor.zoomed, moved, let e = lastDrag, let drag else { return }
+        if case .pan = drag { return }
+        let px = convert(e.locationInWindow, from: nil).x, band: CGFloat = 16
+        let over = px < trackRect.minX + band ? px - trackRect.minX - band : px > trackRect.maxX - band ? px - trackRect.maxX + band : 0
+        guard over != 0 else { return }
+        editor.setZoom(editor.zoom, start: origin + Double(min(max(over / band, -2), 2)) * span * 0.5 / 30)
+        mouseDragged(with: e)
+    }
+
+    // MARK: Filmstrip
+
+    private func resetFilm(_ editor: Editor) {
+        guard filmFor != editor.id else { return }
+        generators.values.forEach { $0.cancelAllCGImageGeneration() }
+        filmFor = editor.id
+        film = [:]; filmUsed = [:]; filmPending = []; filmWanted = []; generators = [:]
+    }
+
+    /// The level whose steps are about as wide as one thumbnail at this zoom, and its step in seconds.
+    private func filmLevel(_ editor: Editor) -> (level: Int, step: Double) {
+        let m = editor.meta, d = editor.duration
+        let aspect = m.width > 0 && m.height > 0 && m.crop.h > 0 ? min(max(m.width * m.crop.w / (m.height * m.crop.h), 0.3), 3) : 16.0 / 9
+        let want = Double(Self.clipHeight) * aspect * span / Double(trackRect.width)
+        let level = min(max(0, Int(log2(d / max(want, 0.001)).rounded())), 18)
+        return (level, d / pow(2, Double(level)))
+    }
+
+    /// The clip's thumbnails inside `r`: one a step at this zoom's level, sharp ones loaded in the
+    /// background for what is in view; until one arrives, the nearest loaded one stands in.
+    private func drawFilm(_ editor: Editor, in r: CGRect, ctx: CGContext) {
+        guard editor.duration > 0 else { return }
+        let (level, step) = filmLevel(editor)
+        let from = max(origin, origin + Double((r.minX - trackRect.minX) / trackRect.width) * span)
+        let to = min(origin + span, origin + Double((r.maxX - trackRect.minX) / trackRect.width) * span)
+        guard to > from else { return }
+        let last = (1 << level) - 1
+        for i in max(0, Int(from / step))...min(last, max(0, Int(ceil(to / step)) - 1)) {
+            let key = Thumb(level: level, index: i)
+            var img = film[key]
+            if img != nil { filmTick += 1; filmUsed[key] = filmTick }
+            else {
+                if !filmPending.contains(key) { filmWanted.insert(key) }
+                let mid = (Double(i) + 0.5) * step, d = editor.duration
+                img = film.min { abs((Double($0.key.index) + 0.5) * d / pow(2, Double($0.key.level)) - mid) < abs((Double($1.key.index) + 0.5) * d / pow(2, Double($1.key.level)) - mid) }?.value
+            }
+            guard let img else { continue }
+            let cell = CGRect(x: x(Double(i) * step), y: Self.clipTop, width: x(Double(i + 1) * step) - x(Double(i) * step), height: Self.clipHeight)
+            let k = max(cell.width / CGFloat(img.width), cell.height / CGFloat(img.height))
+            let w = CGFloat(img.width) * k, h = CGFloat(img.height) * k
+            ctx.saveGState()
+            ctx.clip(to: cell)
+            ctx.translateBy(x: cell.midX, y: cell.midY)
+            ctx.scaleBy(x: 1, y: -1)
+            ctx.draw(img, in: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
+            ctx.restoreGState()
+        }
+        if !filmWanted.isEmpty { DispatchQueue.main.async { [weak self] in self?.loadFilm() } }
+    }
+
+    /// Ask for the thumbnails the last draw lacked, off the main thread; keep at most a few hundred.
+    private func loadFilm() {
+        guard let editor, filmFor == editor.id, !filmWanted.isEmpty else { return }
+        if filmPending.count > 150 {
+            // Zoomed or panned far past them: drop the old requests.
+            generators.values.forEach { $0.cancelAllCGImageGeneration() }
+            filmPending = []
+        }
+        let crop = editor.meta.crop, id = editor.id, d = editor.duration
+        for (level, keys) in Dictionary(grouping: filmWanted.subtracting(filmPending), by: \.level) {
+            let step = d / pow(2, Double(level))
+            let generator = generators[level] ?? {
+                let g = AVAssetImageGenerator(asset: editor.asset)
+                g.maximumSize = CGSize(width: 240, height: 240)
+                g.requestedTimeToleranceBefore = CMTime(seconds: step / 2, preferredTimescale: 600)
+                g.requestedTimeToleranceAfter = CMTime(seconds: step / 2, preferredTimescale: 600)
+                generators[level] = g
+                return g
+            }()
+            var byTime: [NSValue: Thumb] = [:]
+            for key in keys { byTime[NSValue(time: CMTime(seconds: (Double(key.index) + 0.5) * step, preferredTimescale: 600))] = key }
+            filmPending.formUnion(keys)
+            generator.generateCGImagesAsynchronously(forTimes: Array(byTime.keys)) { [weak self] requested, image, _, _, _ in
+                guard let key = byTime[NSValue(time: requested)] else { return }
+                let cropped = image.map { image in
+                    image.cropping(to: CGRect(x: crop.x * Double(image.width), y: crop.y * Double(image.height),
+                                              width: crop.w * Double(image.width), height: crop.h * Double(image.height)).integral) ?? image
+                }
+                DispatchQueue.main.async {
+                    guard let self, self.filmFor == id else { return }
+                    self.filmPending.remove(key)
+                    guard let cropped else { return }
+                    self.film[key] = cropped
+                    self.filmTick += 1
+                    self.filmUsed[key] = self.filmTick
+                    if self.film.count > 400 {
+                        for old in self.filmUsed.sorted(by: { $0.value < $1.value }).prefix(100).map(\.key) { self.film[old] = nil; self.filmUsed[old] = nil }
+                    }
+                    self.needsDisplay = true
+                }
             }
         }
+        filmWanted = []
     }
 
     // MARK: Mapping
 
     private var trackRect: CGRect { CGRect(x: Self.labelWidth, y: 0, width: max(1, bounds.width - Self.labelWidth - Self.pad), height: bounds.height) }
+    /// Time to the track and back, through the zoom: the track shows `span` seconds from `origin`.
     private func x(_ t: Double) -> CGFloat {
         guard let d = editor?.duration, d > 0 else { return trackRect.minX }
-        return trackRect.minX + CGFloat(t / d) * trackRect.width
+        return trackRect.minX + CGFloat((t - origin) / span) * trackRect.width
     }
     private func t(_ x: CGFloat) -> Double {
         guard let d = editor?.duration, d > 0 else { return 0 }
-        return Double(min(max((x - trackRect.minX) / trackRect.width, 0), 1)) * d
+        return origin + Double(min(max((x - trackRect.minX) / trackRect.width, 0), 1)) * span
     }
     /// Whether a row has a + that adds to it: the Position rows, the first lane of the video's
     /// effects, the groups' headers, and an image's first effects row.
@@ -286,17 +444,30 @@ final class TimelineView: NSView {
         let d = editor.duration
         let rulerTop = Self.rulerTop, rulerHeight = Self.rulerHeight, clipTop = Self.clipTop, clipHeight = Self.clipHeight
 
-        // The ruler: a tick a second (or every 2, 5 or 10 on long clips), labelled.
-        let step: Double = d > 120 ? 10 : d > 40 ? 5 : d > 12 ? 2 : 1
+        editor.zoomMax = maxZoom
+        // Zoomed or scrolled, the track's drawing stays in the track: never over the labels.
+        // @ref LLP 0005#zoom-the-timeline — the label column is never drawn over
+        // Zoomed, it also stops above the slim bar along the bottom.
+        let trackClip = CGRect(x: trackRect.minX - 2, y: -100_000, width: trackRect.width + 4,
+                               height: 100_000 + scrollY + bounds.height - (editor.zoomed ? 8 : -100_000))
+        // The ruler: the densest step whose labels still fit apart, ticks only where it shows.
+        let perPoint = span / Double(trackRect.width)
+        let step = [0.1, 0.2, 0.5, 1, 2, 5, 10, 30, 60].first { $0 / perPoint >= ($0 < 1 ? 58 : 46) } ?? 60 * ceil(46 * perPoint / 60)
         let small: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium), .foregroundColor: NSColor(white: 1, alpha: 0.45)]
-        var s = 0.0
-        while s <= d + 0.001 {
-            let px = x(s)
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: trackClip).addClip()
+        var tick = floor(origin / step)
+        while tick * step <= min(d, origin + span) + 0.001 {
+            let s = tick * step, px = x(s)
+            tick += 1
             NSColor(white: 1, alpha: 0.18).setFill()
             NSRect(x: px, y: rulerTop + rulerHeight - 6, width: 1, height: 6).fill()
-            (Self.clock(s, tenths: false) as NSString).draw(at: CGPoint(x: px + 3, y: rulerTop + 2), withAttributes: small)
-            s += step
+            let text = Self.clock(s + 0.001, tenths: step < 1) as NSString
+            // A label that would run past the track's end is left out rather than cut.
+            guard px + 3 + text.size(withAttributes: small).width <= trackRect.maxX + 2 else { continue }
+            text.draw(at: CGPoint(x: px + 3, y: rulerTop + 2), withAttributes: small)
         }
+        NSGraphicsContext.restoreGraphicsState()
 
         let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor(white: 1, alpha: 0.7)]
         // The lane sizes: three bars, thin to thick; the chosen one lit.
@@ -309,6 +480,10 @@ final class TimelineView: NSView {
             NSBezierPath(roundedRect: CGRect(x: b.minX + 5, y: b.midY - h / 2, width: b.width - 10, height: h), xRadius: 1.5, yRadius: 1.5).fill()
         }
         drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7), open: editor.videoOpen)
+        // From here to the playhead, labels and +s wait in `labelQueue` and are drawn after, unclipped.
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: trackClip).addClip()
+        labelQueue = []
 
         // The clip: each part its own rounded block of filmstrip, a clear gap between parts,
         // a scissors pin over each split; a removed part dark and hatched.
@@ -322,22 +497,8 @@ final class TimelineView: NSView {
             shape.addClip()
             NSColor(white: 1, alpha: 0.08).setFill()
             r.fill()
-            if !thumbs.isEmpty, let ctx = NSGraphicsContext.current?.cgContext {
-                // The filmstrip runs across the whole clip; each block shows its own stretch of it.
-                let slot = trackRect.width / CGFloat(thumbs.count)
-                for (i, img) in thumbs.enumerated() {
-                    let cell = CGRect(x: trackRect.minX + CGFloat(i) * slot, y: clipTop, width: slot, height: clipHeight)
-                    guard cell.intersects(r) else { continue }
-                    let k = max(cell.width / CGFloat(img.width), cell.height / CGFloat(img.height))
-                    let w = CGFloat(img.width) * k, h = CGFloat(img.height) * k
-                    ctx.saveGState()
-                    ctx.clip(to: cell)
-                    ctx.translateBy(x: cell.midX, y: cell.midY)
-                    ctx.scaleBy(x: 1, y: -1)
-                    ctx.draw(img, in: CGRect(x: -w / 2, y: -h / 2, width: w, height: h))
-                    ctx.restoreGState()
-                }
-            }
+            // The filmstrip runs across the whole clip; each block shows its own stretch of it.
+            if let ctx = NSGraphicsContext.current?.cgContext { drawFilm(editor, in: r, ctx: ctx) }
             if piece.removed {
                 NSColor(calibratedWhite: 0.06, alpha: 0.84).setFill()
                 r.fill()
@@ -414,7 +575,9 @@ final class TimelineView: NSView {
             color.withAlphaComponent(selected ? 0.95 : 0.78).setFill()
             NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
             stroke(r, selected: selected)
-            title(text, in: r, dark: dark)
+            // Zoomed, a block's name stays in the part of it that shows.
+            let from = max(r.minX, trackRect.minX), to = min(r.maxX, trackRect.maxX)
+            title(text, in: CGRect(x: from, y: r.minY, width: max(0, to - from), height: r.height), dark: dark)
             NSColor(white: 1, alpha: 0.55).setFill()
             if r.width > 24 {
                 NSBezierPath(roundedRect: CGRect(x: r.minX + 3, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
@@ -508,11 +671,13 @@ final class TimelineView: NSView {
             }
             if hasPlus(r) {
                 let b = plusRect(r)
+                labelQueue?.append {
                 NSColor(white: 1, alpha: 0.1).setFill()
                 NSBezierPath(roundedRect: b, xRadius: 5, yRadius: 5).fill()
                 NSColor.controlAccentColor.setFill()
                 CGRect(x: b.midX - 4.5, y: b.midY - 0.75, width: 9, height: 1.5).fill()
                 CGRect(x: b.midX - 0.75, y: b.midY - 4.5, width: 1.5, height: 9).fill()
+                }
             }
         }
         for seg in segments {
@@ -527,6 +692,19 @@ final class TimelineView: NSView {
         let ph = x(editor.playhead)
         NSColor.systemRed.setFill()
         NSRect(x: ph - 1, y: rulerTop + 4, width: 2, height: bounds.height - rulerTop - 10).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        let labels = labelQueue ?? []
+        labelQueue = nil
+        labels.forEach { $0() }
+        // Zoomed in, a slim bar along the bottom shows which part of the recording is in view.
+        if editor.zoomed, let b = panBar, let ctx = NSGraphicsContext.current?.cgContext {
+            ctx.saveGState()
+            ctx.translateBy(x: 0, y: scrollY)
+            NSColor(white: 1, alpha: 0.2).setFill()
+            NSBezierPath(roundedRect: b, xRadius: 1.5, yRadius: 1.5).fill()
+            ctx.restoreGState()
+        }
+        guard ph >= trackRect.minX - 1, ph <= trackRect.maxX + 1 else { return }
         let tag = Self.clock(editor.playhead, tenths: true) as NSString
         let tagAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.white]
         let size = tag.size(withAttributes: tagAttrs)
@@ -536,8 +714,23 @@ final class TimelineView: NSView {
         tag.draw(at: CGPoint(x: pill.minX + 6, y: pill.minY + 2), withAttributes: tagAttrs)
     }
 
+    /// Labels and +s met while the track is clipped, drawn once it is not.
+    private var labelQueue: [() -> Void]?
+
+    /// The slim bar along the bottom of the track while zoomed, in the view's (unscrolled) points.
+    private var panBar: CGRect? {
+        guard let editor, editor.zoomed, editor.duration > 0 else { return nil }
+        let w = max(16, CGFloat(span / editor.duration) * trackRect.width)
+        let at = trackRect.minX + CGFloat(origin / max(editor.duration - span, 0.001)) * (trackRect.width - w)
+        return CGRect(x: at, y: bounds.height - 6, width: w, height: 3)
+    }
+
     /// A row's label: a triangle when the row folds (`open` says which way), its symbol, and its name, cut to fit.
     private func drawLabel(_ text: String, symbol: String, y: CGFloat, height: CGFloat, attrs: [NSAttributedString.Key: Any], tint: NSColor, open: Bool? = nil, indent: CGFloat = 0, plus: Bool = false) {
+        if labelQueue != nil {
+            labelQueue?.append { [self] in drawLabel(text, symbol: symbol, y: y, height: height, attrs: attrs, tint: tint, open: open, indent: indent, plus: plus) }
+            return
+        }
         var at = Self.pad + indent
         if let open {
             let tri = NSBezierPath()
@@ -577,7 +770,9 @@ final class TimelineView: NSView {
         let name = (["smooth": "Smooth", "linear": "Linear", "spring": "Spring", "zoom": "Zoom through", "swipe": "Swipe",
                      "fade": "Fade", "spin": "Spin", "pop": "Pop"][m.style] ?? m.style) + (threeD ? " · 3D" : "") as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
-        if bar.width > name.size(withAttributes: attrs).width + 16 { name.draw(at: CGPoint(x: bar.minX + 6, y: bar.minY - 1), withAttributes: attrs) }
+        // Zoomed, the name stays in the part of the bar that shows.
+        let from = max(bar.minX, trackRect.minX), shown = min(bar.maxX, trackRect.maxX) - from
+        if shown > name.size(withAttributes: attrs).width + 16 { name.draw(at: CGPoint(x: from + 6, y: bar.minY - 1), withAttributes: attrs) }
         let d = diamond(m.t, in: r)
         let path = NSBezierPath()
         path.move(to: CGPoint(x: d.midX, y: d.minY)); path.line(to: CGPoint(x: d.maxX, y: d.midY))
@@ -637,7 +832,7 @@ final class TimelineView: NSView {
 
     /// The top-level segment under the pointer on a lane or an image's row.
     private func hit(_ p: CGPoint, in r: Row) -> Segment? {
-        guard let editor else { return nil }
+        guard let editor, p.x >= trackRect.minX - 4 else { return nil }
         let near = { (s: Segment) in p.x >= self.x(s.start) - 4 && p.x <= self.x(s.end) + 4 }
         let onRow: [Segment]
         switch r.kind {
@@ -651,10 +846,10 @@ final class TimelineView: NSView {
 
     /// The move under the pointer on a Position row: its diamond, else its travel bar.
     private func moveHit(_ p: CGPoint, _ moves: [Move], in r: Row) -> Move? {
-        guard let editor else { return nil }
+        guard let editor, editor.duration > 0, p.x >= trackRect.minX - 8 else { return nil }
         if let m = moves.first(where: { diamond($0.t, in: r).insetBy(dx: -5, dy: -6).contains(p) }) { return m }
         let at = t(p.x)
-        let slop = Double(6 / max(trackRect.width, 1)) * editor.duration
+        let slop = Double(6 / max(trackRect.width, 1)) * span
         return moves.filter { at >= $0.t - $0.duration - slop && at <= $0.t + slop }.min { abs($0.t - at) < abs($1.t - at) }
     }
 
@@ -720,6 +915,12 @@ final class TimelineView: NSView {
         let p = local(e)
         moved = false
         func scrub() { drag = .scrub; editor.seek(source: t(p.x)) }
+        // The slim bar under the zoomed track: drag it to slide the view; a click beside it centres there.
+        let v = convert(e.locationInWindow, from: nil)
+        if let b = panBar, v.y >= b.minY - 6, v.x >= trackRect.minX, v.x <= trackRect.maxX {
+            drag = .pan(b.contains(CGPoint(x: v.x, y: b.midY)) ? v.x - b.minX : b.width / 2)
+            return mouseDragged(with: e)
+        }
         // The lane sizes, in the corner.
         if p.y < Self.clipTop, p.x < Self.labelWidth {
             if let i = (0..<3).first(where: { sizeRect($0).insetBy(dx: -1, dy: -3).contains(p) }) {
@@ -759,7 +960,7 @@ final class TimelineView: NSView {
             } else { scrub() }
         case let .imageEffects(id, lane):
             guard let image = editor.edits.images.first(where: { $0.id == id }) else { return }
-            let on = (image.effects ?? []).filter { $0.lane == lane && p.x >= x($0.start) - 4 && p.x <= x($0.end) + 4 }
+            let on = (image.effects ?? []).filter { $0.lane == lane && p.x >= trackRect.minX - 4 && p.x >= x($0.start) - 4 && p.x <= x($0.end) + 4 }
             guard let fx = on.min(by: { ($0.end - $0.start) < ($1.end - $1.start) }) else { return scrub() }
             editor.select(Editor.childID("ie", image: id, fx.id))
             let edge: CGFloat = 7, wide = x(fx.end) - x(fx.start) > edge * 2
@@ -800,7 +1001,16 @@ final class TimelineView: NSView {
         guard let editor, let drag else { return }
         let p = local(e), now = t(p.x)
         moved = true
+        lastDrag = e
+        if edgeTimer == nil, editor.zoomed {
+            edgeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.autoPan() }
+        }
         switch drag {
+        case let .pan(grab):
+            guard let b = panBar else { return }
+            let x0 = convert(e.locationInWindow, from: nil).x - grab
+            editor.setZoom(editor.zoom, start: Double((x0 - trackRect.minX) / max(trackRect.width - b.width, 1)) * (editor.duration - span))
+            return
         case .scrub:
             editor.seek(source: now)
         case let .retime(id, grab):
@@ -841,9 +1051,12 @@ final class TimelineView: NSView {
             needsDisplay = true
             return
         }
+        edgeTimer?.invalidate()
+        edgeTimer = nil
+        lastDrag = nil
         if let drag, moved, let editor {
             switch drag {
-            case .scrub: break
+            case .scrub, .pan: break
             case let .retime(id, _): if let m = editor.edits.moves.first(where: { $0.id == id }) { editor.moveTime(id, to: m.t, live: false) }
             case let .imove(image, id, _):
                 if let m = editor.edits.images.first(where: { $0.id == image })?.moves?.first(where: { $0.id == id }) { editor.dragImageMove(image, id, to: m.t, live: false) }

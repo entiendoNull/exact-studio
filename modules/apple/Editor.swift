@@ -510,6 +510,42 @@ final class Editor {
         if folded.contains(group) { toggle(group: group) }
     }
 
+    // MARK: Timeline zoom
+    // @ref LLP 0005#zoom-the-timeline — view state, never part of the edit
+
+    /// How far the timeline is zoomed in (1: the whole recording fits) and the recording time at
+    /// its left edge. The timeline sets `zoomMax` from its width; it draws on `onZoom`.
+    private(set) var zoom = 1.0
+    private(set) var zoomStart = 0.0
+    var zoomMax = 1.0
+    var onZoom: () -> Void = {}
+    var zoomed: Bool { zoom > 1.0001 }
+    /// Whether the mouse wheel zooms the timeline (else it scrolls the rows). Kept between launches.
+    var wheelZoom: Bool { UserDefaults.standard.object(forKey: "ExactStudio.wheelZoom") as? Bool ?? true }
+
+    /// Zoom to `z`, with `start` at the left edge, kept inside the recording. Only redraws.
+    func setZoom(_ z: Double, start: Double) {
+        let was = zoomed
+        zoom = min(max(z, 1), max(zoomMax, 1))
+        let span = duration / zoom
+        zoomStart = min(max(start, 0), max(0, duration - span))
+        onZoom()
+        if was != zoomed { onChange() }
+    }
+
+    /// The zoom buttons: by `factor` around the playhead when it is in view, else around the middle.
+    func zoomStep(_ factor: Double) {
+        let span = duration / zoom
+        let at = playhead >= zoomStart && playhead <= zoomStart + span ? playhead : zoomStart + span / 2
+        let next = min(max(zoom * factor, 1), max(zoomMax, 1))
+        setZoom(next, start: at - (at - zoomStart) * zoom / next)
+    }
+
+    func setWheelZoom(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: "ExactStudio.wheelZoom")
+        onChange()
+    }
+
     /// The selection id of an image's own move ("im") or effect ("ie").
     static func childID(_ kind: String, image: String, _ id: String) -> String { "\(kind):\(image):\(id)" }
 
@@ -1376,7 +1412,8 @@ final class Editor {
                 "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),
                 "angleMove": (selectedMove ?? angleMove).map { Editor.stamp($0.t) } ?? "",
                 "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge,
-                "sound": hasSound, "volume": (edits.volume * 100).rounded()]
+                "sound": hasSound, "volume": (edits.volume * 100).rounded(),
+                "zoomed": zoomed, "wheelZoom": wheelZoom]
     }
 }
 
