@@ -1,6 +1,10 @@
 # Exact Studio
 
-A macOS screen recorder built with [Exact](https://github.com/expo/exact). It records, edits and exports polished screen videos.
+A macOS screen recorder and video editor built with [Exact](https://github.com/expo/exact), made so that **agents can edit your videos as well as you can**.
+
+Every edit you can make in the app, an agent can make too: through a command-line tool, through an MCP server, or by changing two plain JSON files. Nothing about an edit lives only in the app. Cut, add texts, images and sounds, zoom, move, turn it in 3D, change the look, render a frame to check it, export: all of it works without the window. The app shows an agent's change within a second, so you can work on the same video together.
+
+See [For agents](#for-agents) for the tools.
 
 ![Exact Studio: a Simulator recording turned in 3D, with texts and effects on the timeline](docs/screenshot.png)
 
@@ -59,6 +63,7 @@ To update, run `git pull` in both folders and run the last command again.
 - **Images:** put a logo, a badge or any picture on the video. Each image has its own moves and its own effects.
 - **Rows by kind:** effects for the video, texts, images, sounds, and effects for the whole frame each have their own rows. Each row has a + that adds its own kind of thing at the playhead.
 - **A tidy timeline:** every group folds away, and the rows have three heights to pick from.
+- **Zoom the timeline:** with the mouse wheel, a pinch, or the − and + buttons; Fit shows it all again. A trackpad scrolls instead, and a switch turns wheel zoom off.
 - **Templates:** Launch, Hero, Tour and Teaser. Each adds texts, effects and moves for the frame's shape.
 - **Zoom on clicks:** adds a zoom around each group of clicks.
 - **Sound follows the cuts:** the recorded sound has its own row under the clip, with its waveform. Cuts, speed and fades apply to it too. Mute it or set its volume.
@@ -85,6 +90,8 @@ To update, run `git pull` in both folders and run the last command again.
 </details>
 
 ## For agents
+
+This is what the app is built around: the app, the command-line tool and the MCP server are three ways into the same edit, and they draw with the same renderer. When a feature is added to the app, it is added to all three, with the format guide and the editing skill.
 
 Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions, effects, texts, images, sounds, zooms, speed, moves, 3D) and `look.json` (background, shape, padding, cursor). Edit them directly; the app reloads them within a second. `./exact-studio` checks and renders with the app's own renderer:
 

@@ -107,6 +107,8 @@ shape Summary
   edge: string
   sound: bool
   volume: number
+  zoomed: bool
+  wheelZoom: bool
 
 shape Reply
   ok: bool
@@ -287,6 +289,8 @@ component ExactStudio
     send edited = editClip(selected, "set", "", 0, k)
   action editDo(what: string)
     send edited = editClip(selected, what, "", 0, "")
+  action zoomTimeline(how: string)
+    send edited = editClip(selected, "timeline", how, 0, "")
   action toggleLeft
     if panelMode == "left"
       panelMode = "dock"
@@ -591,7 +595,19 @@ component ExactStudio
                     button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
                       image "symbol:sf/crop"
                       text "Crop"
-                    text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex=1 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
+                    // The zoom buttons and the length: one unit at the right end, wrapping together.
+                    row flex=1 gap=8 align-items="center" justify-content="flex-end"
+                      // Zoom the timeline; the last button says whether the mouse wheel zooms it too.
+                      row gap=4 align-items="center" testId="zoom-controls"
+                        button press=zoomTimeline("zoom-out") aria-label="Zoom out" buttonStyle="bordered" testId="zoom-out"
+                          image "symbol:sf/minus.magnifyingglass"
+                        button press=zoomTimeline("zoom-in") aria-label="Zoom in" buttonStyle="bordered" testId="zoom-in"
+                          image "symbol:sf/plus.magnifyingglass"
+                        button press=zoomTimeline("zoom-fit") disabled=(not summary.zoomed) aria-label="Fit the whole recording" buttonStyle="bordered" testId="zoom-fit"
+                          text "Fit"
+                        button press=zoomTimeline("wheel") aria-label="Zoom with the mouse wheel" aria-pressed=summary.wheelZoom buttonStyle="bordered" testId="zoom-wheel"
+                          image (summary.wheelZoom ? "symbol:sf/computermouse.fill" : "symbol:sf/computermouse")
+                      text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex-shrink=0 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
                   studio-timeline clip=rec.id aria-label="Timeline" height=timelineH testId="timeline"
                   if sel.id != "" and panelMode == "overlay"
                     button press=closePanel appearance="none" aria-label="Close the settings" position="absolute" inset=0 background-color="#00000073" testId="lightbox-backdrop"

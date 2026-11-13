@@ -85,6 +85,7 @@ final class Studio: ExactModule {
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "images": 0, "moves": 0, "length": 0, "source": 0, "playing": false,
         "device": false, "found": false, "cursorDrawn": false, "baseScale": 100, "canUndoTemplate": false,
         "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "angleMove": "", "thickness": 5, "edge": "metal",
+        "zoomed": false, "wheelZoom": true,
     ]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {
@@ -251,6 +252,15 @@ final class Studio: ExactModule {
         case "forget-device": e.forgetDevice()
         case "start": e.setTimes(start: Self.seconds(r["kind"] as? String), end: nil)
         case "end": e.setTimes(start: nil, end: Self.seconds(r["kind"] as? String))
+        case "timeline":
+            // The zoom buttons: view state only, nothing in the edit changes.
+            switch r["track"] as? String {
+            case "zoom-in": e.zoomStep(1.5)
+            case "zoom-out": e.zoomStep(1 / 1.5)
+            case "zoom-fit": e.setZoom(1, start: 0)
+            case "wheel": e.setWheelZoom(!e.wheelZoom)
+            default: break
+            }
         default: break
         }
     }

@@ -26,7 +26,7 @@ const sources: Sources = {
     return native.call({ op: 'selection', id }) as Result<'editSelection'>;
   },
   editSummary: async ([id], _store, _storage, native): Promise<Result<'editSummary'>> => {
-    if (!native?.available) return { parts: 1, removed: 0, effects: 0, lanes: 1, images: 0, moves: 0, length: 0, source: 0, playing: false, device: false, found: false, cursorDrawn: false, baseScale: 100, canUndoTemplate: false, threeOn: false, tilt: 0, turn: 0, roll: 0, angleMove: '', thickness: 5, edge: 'metal', sound: false, volume: 100 };
+    if (!native?.available) return { parts: 1, removed: 0, effects: 0, lanes: 1, images: 0, moves: 0, length: 0, source: 0, playing: false, device: false, found: false, cursorDrawn: false, baseScale: 100, canUndoTemplate: false, threeOn: false, tilt: 0, turn: 0, roll: 0, angleMove: '', thickness: 5, edge: 'metal', sound: false, volume: 100, zoomed: false, wheelZoom: true };
     native.watch('edits');
     return native.call({ op: 'summary', id }) as Result<'editSummary'>;
   },

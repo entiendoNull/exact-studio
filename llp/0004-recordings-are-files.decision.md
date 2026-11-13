@@ -16,6 +16,10 @@ A recording is a folder of plain files. The timeline is `edits.json`; the frame 
 Anything you can do in the UI, you can do by editing those files. Keep it that way: no edit state
 that only lives in the app.
 
+This is the app's first purpose, and the README says so at its top: agents edit the videos as well
+as a person does. A feature is not done until the command-line tool, the MCP server, the format
+guide, the schema and the editing skill have it too.
+
 - The app watches the files and shows a change within a second.
 - Files are saved pretty-printed with sorted keys, so diffs stay readable.
 - The format is in [`docs/edits.md`](../docs/edits.md). The schemas are in `schema/`.
