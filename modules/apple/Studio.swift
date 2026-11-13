@@ -3,7 +3,8 @@
 // watches: "status" (recording or not), "recordings" (the library changed)
 // and "edits" (a recording's edits or selection changed).
 //
-//   call   {op: "status"}                       → {recording, name, kind, sound, error}  error: the last start's, from here or the menu bar
+//   call   {op: "status"}                       → {recording, name, kind, sound, error, finished}  error: the last start's, from here or the menu bar;
+//                                                   finished: the id of the last recording that stopped, from either
 //          {op: "selection", id}                → {id, kind ("clip" for a part of the clip), level, rate, start, end,
 //                                                   startText, endText, removed, first, last, problem}
 //          {op: "summary", id}                  → {parts, removed, effects, lanes, length, source}
@@ -52,6 +53,8 @@ final class Studio: ExactModule {
     private static let soundKey = "ExactStudio.recordSound"
     /// Why the last start failed ("" when it did not), wherever it was asked from; the sidebar shows it.
     private var lastError = ""
+    /// The last recording that finished, wherever it was stopped; the view selects it when this changes.
+    private var finished = ""
     private var editors: [String: Editor] = [:]
     private var keys: Any?
     /// The recording the preview shows: Space plays and pauses it.
@@ -111,7 +114,7 @@ final class Studio: ExactModule {
     override func call(_ request: [String: Any]) throws -> [String: Any] {
         switch request["op"] as? String {
         case "status":
-            return ["recording": recorder != nil, "name": recorder?.name ?? "", "kind": recorder?.kind.rawValue ?? "", "sound": sound, "error": lastError]
+            return ["recording": recorder != nil, "name": recorder?.name ?? "", "kind": recorder?.kind.rawValue ?? "", "sound": sound, "error": lastError, "finished": finished]
         case "selection":
             return editor(request["id"] as? String ?? "")?.selection ?? Self.emptySelection
         case "look":
@@ -375,7 +378,9 @@ final class Studio: ExactModule {
         Task { @MainActor in
             do {
                 let meta = try await r.stop()
+                finished = meta.id
                 context.changed("recordings")
+                context.changed("status")
                 reply?.send(["ok": true, "error": "", "id": meta.id])
             } catch {
                 try? FileManager.default.removeItem(at: r.folder)

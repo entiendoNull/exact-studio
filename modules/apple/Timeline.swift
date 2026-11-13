@@ -429,7 +429,7 @@ final class TimelineView: NSView {
     }
 
     /// An added sound's blocks: a colour no other block has.
-    static let soundColor = NSColor(srgbRed: 0.73, green: 0.51, blue: 0.18, alpha: 1)
+    static let soundColor = NSColor(srgbRed: 0.50, green: 0.60, blue: 0.17, alpha: 1)
 
     static func color(_ s: Segment) -> NSColor {
         switch s.kind {
@@ -455,15 +455,17 @@ final class TimelineView: NSView {
         defer {
             if bounds.height > 40, contentHeight > bounds.height + 1 {
                 // How far down the lanes are scrolled.
-                let track = bounds.height - 24, k = bounds.height / contentHeight
+                let track = bounds.height - 24, h = max(16, track * bounds.height / contentHeight)
                 NSColor(white: 1, alpha: 0.2).setFill()
-                NSBezierPath(roundedRect: CGRect(x: bounds.maxX - 6, y: 12 + scrollY * k * track / bounds.height, width: 3, height: max(16, track * k)), xRadius: 1.5, yRadius: 1.5).fill()
+                NSBezierPath(roundedRect: CGRect(x: bounds.maxX - 6, y: 12 + scrollY / (contentHeight - bounds.height) * (track - h), width: 3, height: h), xRadius: 1.5, yRadius: 1.5).fill()
             }
         }
         guard let editor else { return }
         // The view's height is the person's (the handle above it): keep the scroll inside the content.
         scrollY = min(max(scrollY, 0), max(0, contentHeight - bounds.height))
         NSGraphicsContext.current?.cgContext.translateBy(x: 0, y: -scrollY)
+        // Undone before the indicator above is drawn: it stays at the view's edge, not in the content.
+        defer { NSGraphicsContext.current?.cgContext.translateBy(x: 0, y: scrollY) }
         let d = editor.duration
         let rulerTop = Self.rulerTop, rulerHeight = Self.rulerHeight, clipTop = Self.clipTop, clipHeight = Self.clipHeight
 
@@ -594,6 +596,13 @@ final class TimelineView: NSView {
             NSColor(white: 1, alpha: alpha).setFill()
             NSBezierPath(roundedRect: CGRect(x: trackRect.minX, y: r.y, width: trackRect.width, height: r.height), xRadius: 7, yRadius: 7).fill()
         }
+        // An empty row's hint, ending in an ellipsis where the track is too narrow for it.
+        let fit = NSMutableParagraphStyle()
+        fit.lineBreakMode = .byTruncatingTail
+        func drawHint(_ words: String, in r: Row) {
+            let room = trackRect.width - 24 - (removable(r) ? 26 : 0)
+            (words as NSString).draw(in: CGRect(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7, width: max(0, room), height: 16), withAttributes: hint.merging([.paragraphStyle: fit]) { $1 })
+        }
         func block(_ r: CGRect, _ color: NSColor, _ text: String, selected: Bool, dark: Bool = false, inside: ((CGRect) -> Void)? = nil) {
             color.withAlphaComponent(selected ? 0.95 : 0.78).setFill()
             NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
@@ -643,10 +652,9 @@ final class TimelineView: NSView {
                         }
                     }
                 } else if items.isEmpty, editor.edits.laneCount(space: group == "top" ? 1 : group == "sound" ? Edits.soundSpace : 3) == 0 {
-                    ((group == "top" ? "Press + to put a text or an image on top of the video."
+                    drawHint(group == "top" ? "Press + to put a text or an image on top of the video."
                         : group == "sound" ? "Press + to add music or another sound."
-                        : "Press + to blur the whole picture, or make it black and white.") as NSString)
-                        .draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                        : "Press + to blur the whole picture, or make it black and white.", in: r)
                 }
             case .sound:
                 // The recorded sound across the recording, its removed parts dimmed as the clip's are.
@@ -666,7 +674,7 @@ final class TimelineView: NSView {
                 drawLabel("Position", symbol: "arrow.up.and.down.and.arrow.left.and.right", y: r.y, height: r.height, attrs: label, tint: .systemTeal, plus: true)
                 bed(r)
                 if editor.edits.moves.isEmpty {
-                    ("Drag the video in the preview to place it. Press + to add a move that animates it." as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                    drawHint("Drag the video in the preview to place it. Press + to add a move that animates it.", in: r)
                 }
                 for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) { draw(move: m, in: r, selected: editor.selected == "m:" + m.id, threeD: m.angles != nil) }
             case let .lane(space, lane):
@@ -687,7 +695,7 @@ final class TimelineView: NSView {
                         : space == Edits.soundSpace ? "Press + to add music or another sound."
                         : space == 3 ? "A blur or black and white here covers the whole picture."
                         : "Press + to add an effect that changes the video: zoom, speed, blur and more."
-                    (words as NSString).draw(at: CGPoint(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7), withAttributes: hint)
+                    drawHint(words, in: r)
                 }
             case let .image(id):
                 guard let image = images.first(where: { $0.id == id }) else { continue }
@@ -1020,6 +1028,14 @@ final class TimelineView: NSView {
             return scrub()
         }
         if hasPlus(r), plusRect(r).insetBy(dx: -4, dy: -4).contains(p) { return showAdd(for: r) }
+        // Only a label that folds or selects its row acts; a click on any other label does nothing.
+        // Up to 8 points left of the track still reaches a block or a move that starts at its edge.
+        if p.x < trackRect.minX - 8 {
+            switch r.kind {
+            case .header, .sound, .image: break
+            default: return
+            }
+        }
         switch r.kind {
         case let .header(group):
             if p.x < Self.labelWidth { editor.toggle(group: group) } else { scrub() }
