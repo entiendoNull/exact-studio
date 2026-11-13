@@ -11,7 +11,8 @@ app's UI. The app watches the files: a change shows in its open preview within a
 ├── cursor.json     the cursor's path; never edited
 ├── mask-*.png      a device's silhouette, if one was found
 ├── images/         the pictures the edit puts on the video; `exact-studio image` copies them here
-├── edits.json      the timeline: cuts, transitions, effects, texts, images, zooms, speed, moves, 3D
+├── sounds/         the music and sounds the edit plays over the video; `exact-studio sound` copies them here
+├── edits.json      the timeline: cuts, transitions, effects, texts, images, sounds, zooms, speed, moves, 3D
 └── look.json       the frame: background, shape, padding, corners, shadow, cursor
 ```
 
@@ -23,6 +24,7 @@ JSON Schemas: [`schema/edits.schema.json`](../schema/edits.schema.json), [`schem
 ./exact-studio list                      # ids, newest first
 ./exact-studio show latest               # parts, segments, moves and look, in readable form
 ./exact-studio image latest logo.png --at 2 --for 6   # a picture on top of the video; prints the new segment
+./exact-studio sound latest music.m4a --at 0          # music over the video; prints the new sound
 # …edit edits.json / look.json…
 ./exact-studio validate latest           # exit 1 with one line per problem
 ./exact-studio frame latest 4.5          # .exact/frame.png: the frame at 4.5 s of the video
@@ -53,6 +55,11 @@ plays. Cuts and speed changes make the two differ: `show` prints both lengths, a
   "moves": [],
   "three": { "on": false, "tilt": 0, "turn": 0, "roll": 0, "thickness": 0.06, "edge": "metal" },
   "volume": 1,
+  "soundLanes": 1,
+  "sounds": [
+    { "id": "sound1", "file": "sounds/music.m4a", "lane": 0, "start": 0, "length": 18,
+      "offset": 0, "volume": 0.4, "fadeIn": 0, "fadeOut": 1.5 }
+  ],
   "segments": [
     { "id": "t1", "kind": "text", "start": 4.3, "end": 7.0, "lane": 0, "text": "Hello", "x": 0.5, "y": 0.15,
       "size": 0.08, "color": "white", "weight": "heavy", "style": "pill", "animIn": "letters", "animOut": "fade" },
@@ -75,7 +82,8 @@ plain cut.
 To cut out 10–14 s: add `10` and `14` to `splits`, `10` to `removed`.
 
 The recorded sound, if any, follows the picture: it is cut, sped up and faded at the same places.
-`volume` (0–1, default 1) sets how loud it is; 0 mutes it.
+`volume` (0–1, default 1) sets how loud it is; 0 mutes it. Sounds you add are different: see
+[Sounds](#sounds).
 
 ### Segments
 
@@ -167,6 +175,36 @@ overlap, nor two of the same kind on any lane.
 To blur or grey the whole picture instead, images included, use a `blur` or `mono` segment with
 `scope` `"frame"` (texts stay sharp) or `"all"` (texts too).
 
+### Sounds
+
+A sound is music or an effect played over the video, from a file in the recording's folder.
+
+```sh
+./exact-studio sound <id> ~/Music/theme.m4a --at 0 --for 18
+```
+
+copies the file to `sounds/theme.m4a`, adds a sound at 0 s of the recording that plays 18 s of the
+file (without `--for`: all of it, or what fits before the video ends), and prints it. Then edit it in
+`sounds` like anything else.
+
+**An added sound is not cut, sped up or slowed by the video's cuts and speed changes.** Only its
+`start` is in recording time, like every time in the file, so it stays with that moment of the video
+when you cut earlier parts. From there it plays straight through, in video time, for `length`
+seconds or until the video ends. A `start` inside a removed part begins at the next kept moment.
+Music that jumps at every cut sounds wrong; the recorded sound (`volume`) is the one that follows the
+cuts. `show` prints when each sound plays in video time.
+
+**Sound fields:** `id` (unique among the sounds, no colon); `file` (a path inside the recording's
+folder, in `sounds/`: M4A, MP3, WAV, AIFF, AAC or CAF); `lane` (0 up, below `soundLanes`); `start`
+(seconds of the recording); `length` (seconds of the file that play, above 0); `offset` (where in
+the file it starts, default 0; `offset` + `length` must fit in the file); `volume` (0–1, default 1);
+`fadeIn`, `fadeOut` (seconds, default 0). Two sounds on one lane must not play at the same time; put
+one on another lane (`soundLanes` counts them). Sounds on separate lanes mix with each other and
+with the recorded sound.
+
+To trim a sound's beginning, add the same amount to `offset` and `start` (when no cut lies between)
+and take it from `length`.
+
 ### Placement and moves: `base`, `moves`
 
 `base` is where the video sits before any move: `x`, `y` its centre (0–1, top-left origin), `scale`
@@ -210,4 +248,4 @@ the window's own corner radius (a share of its width), measured from its alpha.
 
 `./exact-studio template <id> <name>` replaces the texts, effects, zooms and moves with a ready-made
 edit (`launch`, `hero`, `tour`, `teaser`) laid out for `look.json`'s `aspect`, and keeps the cuts,
-transitions, 3D settings and images. A good start to adjust from.
+transitions, 3D settings, images and sounds. A good start to adjust from.

@@ -1,6 +1,6 @@
 ---
 name: edit-recording
-description: Edit an Exact Studio screen recording as files — cut it, add texts, images (logos, badges, pictures), zooms, effects, moves, 3D, change its look — then check it, look at frames and export, without the app's UI. Use when asked to edit, cut, title, brand, polish or export an Exact Studio recording or video.
+description: Edit an Exact Studio screen recording as files — cut it, add texts, images (logos, badges, pictures), music and sounds, zooms, effects, moves, 3D, change its look — then check it, look at frames and export, without the app's UI. Use when asked to edit, cut, title, brand, polish or export an Exact Studio recording or video.
 ---
 
 # Editing an Exact Studio recording
@@ -33,6 +33,11 @@ Rules that keep an edit looking good:
 - An effect on the video (zoom, blur, spotlight…) never touches a text or an image. To change one
   image, give it its own `moves` and `effects`. To blur or grey the whole picture at once, images included, use a `blur` or
   `mono` segment with `scope` `"frame"` (texts stay sharp) or `"all"` (texts too). `docs/edits.md` has the table of which lanes each kind uses.
+- For music or a sound effect, run `./exact-studio sound <id> <audio file> --at <t> [--for <seconds>]`:
+  it copies the file into `sounds/` and prints the new entry in `sounds`. An added sound is not cut
+  by the video's cuts or speed changes: it starts at recording time `start` and plays straight
+  through. So add music after the cuts are set and check `show` for when it plays. Keep music
+  under the recorded sound (`volume` 0.3–0.5) and give it a `fadeOut`; `volume` 0 mutes the recording.
 - Keep an image small and near a corner unless it is the subject: a logo at `size` 0.08–0.15, a
   picture that carries a moment at 0.3–0.5. Look at a frame after placing it.
 - An id must be unique within its list and hold no colon; any other string works.
