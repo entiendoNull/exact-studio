@@ -4,6 +4,30 @@ A macOS screen recorder built with [Exact](https://github.com/expo/exact). It re
 
 ![Exact Studio: a Simulator recording turned in 3D, with texts and effects on the timeline](docs/screenshot.png)
 
+## Install
+
+There is no download yet. You build the app on your Mac, which takes a few commands.
+
+You need:
+
+- A Mac with Apple silicon and macOS 14 or later.
+- Xcode 27. The build works with Xcode 27.2 and fails with Xcode 26.6.
+- [Bun](https://bun.sh).
+
+Clone this repository and [expo/exact](https://github.com/expo/exact) into the same folder, then build and open the app:
+
+```sh
+git clone https://github.com/entiendoNull/exact-studio.git
+git clone https://github.com/expo/exact.git
+cd exact-studio
+bun ../exact/scripts/exact.mjs setup    # once: installs Rust and the other tools that Exact pins
+bun exact.mjs mac --run                 # builds the app and opens it
+```
+
+The first build takes several minutes. The first recording asks for Screen Recording permission. Allow it in System Settings › Privacy & Security, then reopen the app.
+
+To update, run `git pull` in both folders and run the last command again.
+
 ## Features
 
 ### Record
@@ -85,7 +109,7 @@ claude mcp add exact-studio -- bun /path/to/exact-studio/mcp/server.ts
 bun exact.mjs mac --run
 ```
 
-The app uses the Exact checkout at `../exact`. The first recording asks for Screen Recording permission in System Settings › Privacy & Security; reopen the app after you allow it. While recording, a **Stop** item sits in the menu bar.
+The app uses the Exact checkout at `../exact`. [Install](#install) has the full steps. While recording, a **Stop** item sits in the menu bar.
 
 ## Layout
 
@@ -103,3 +127,11 @@ The app uses the Exact checkout at `../exact`. The first recording asks for Scre
 - `llp/`: the decisions behind the design, as short notes. Start at `llp/0000-exact-studio.explainer.md`. `./ref-check` checks them.
 
 Recordings are kept in `~/Movies/Exact Studio/Recordings/<id>/` as `capture.mov` (HEVC with alpha, and AAC sound when recorded), `meta.json`, `cursor.json`, `edits.json`, `look.json` and, for a device, `mask-*.png`.
+
+## Contributing
+
+Changes reach `main` through pull requests. [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the checks and the steps.
+
+## License
+
+[MIT](LICENSE)
