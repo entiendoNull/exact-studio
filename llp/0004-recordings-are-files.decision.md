@@ -19,10 +19,12 @@ that only lives in the app.
 - The app watches the files and shows a change within a second.
 - Files are saved pretty-printed with sorted keys, so diffs stay readable.
 - The format is in [`docs/edits.md`](../docs/edits.md). The schemas are in `schema/`.
+- A picture an edit uses is copied into the recording's `images/` folder, and `edits.json` names it
+  by its path inside the recording. `./exact-studio image` (and the MCP tool `add_image`) do the copy.
 
 ## The CLI
 
-`./exact-studio` (list, show, validate, frame, export, template, schema) builds from the app's own
+`./exact-studio` (list, show, validate, frame, export, template, image, schema) builds from the app's own
 renderer sources (LLP 0003), so a frame from the CLI is the frame the app exports.
 The `edit-recording` skill in `.claude/skills/` is the workflow for agents.
 

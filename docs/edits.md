@@ -10,7 +10,8 @@ app's UI. The app watches the files: a change shows in its open preview within a
 ├── meta.json       what the capture found: size, crop, clicks, silhouette; rarely edited
 ├── cursor.json     the cursor's path; never edited
 ├── mask-*.png      a device's silhouette, if one was found
-├── edits.json      the timeline: cuts, transitions, effects, texts, zooms, speed, moves, 3D
+├── images/         the pictures the edit puts on the video; `exact-studio image` copies them here
+├── edits.json      the timeline: cuts, transitions, effects, texts, images, zooms, speed, moves, 3D
 └── look.json       the frame: background, shape, padding, corners, shadow, cursor
 ```
 
@@ -21,6 +22,7 @@ JSON Schemas: [`schema/edits.schema.json`](../schema/edits.schema.json), [`schem
 ```sh
 ./exact-studio list                      # ids, newest first
 ./exact-studio show latest               # parts, segments, moves and look, in readable form
+./exact-studio image latest logo.png --at 2 --for 6   # a picture on top of the video; prints the new segment
 # …edit edits.json / look.json…
 ./exact-studio validate latest           # exit 1 with one line per problem
 ./exact-studio frame latest 4.5          # .exact/frame.png: the frame at 4.5 s of the video
@@ -44,7 +46,9 @@ plays. Cuts and speed changes make the two differ: `show` prints both lengths, a
   "splits": [4.2, 7.0],
   "removed": [0, 7.0],
   "transitions": { "4200": "crossfade" },
-  "lanes": 2,
+  "lanes": 1,
+  "textLanes": 1,
+  "frameLanes": 0,
   "base": { "x": 0.5, "y": 0.5, "scale": 1 },
   "moves": [],
   "three": { "on": false, "tilt": 0, "turn": 0, "roll": 0, "thickness": 0.06, "edge": "metal" },
@@ -52,7 +56,7 @@ plays. Cuts and speed changes make the two differ: `show` prints both lengths, a
   "segments": [
     { "id": "t1", "kind": "text", "start": 4.3, "end": 7.0, "lane": 0, "text": "Hello", "x": 0.5, "y": 0.15,
       "size": 0.08, "color": "white", "weight": "heavy", "style": "pill", "animIn": "letters", "animOut": "fade" },
-    { "id": "z1", "kind": "zoom", "start": 8.0, "end": 11.0, "lane": 1, "level": 1.6 }
+    { "id": "z1", "kind": "zoom", "start": 8.0, "end": 11.0, "lane": 0, "level": 1.6 }
   ]
 }
 ```
@@ -75,10 +79,24 @@ The recorded sound, if any, follows the picture: it is cut, sped up and faded at
 
 ### Segments
 
-Each has an `id` (any unique string), `kind`, `start`, `end` (at least 0.1 s apart) and `lane` (0 up;
-`lanes` is how many lanes the timeline shows). Two segments on one lane must not overlap in time,
-and these never overlap anywhere: two `zoom`s, two `speed`s, two `3d`s, or two of the same visual
-effect. Texts overlap freely on separate lanes.
+Each has an `id` (any unique string without a colon), `kind`, `start`, `end` (at least 0.1 s apart)
+and `lane` (0 up). A segment's kind decides which rows its `lane` counts:
+
+| what | kinds | its `lane` counts | how many there are |
+|---|---|---|---|
+| an effect on the video | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, and `blur` or `mono` with no `scope` | the video's effect lanes | `lanes` (at least 1) |
+| a text | `text` | the text lanes | `textLanes` |
+| an image | `image` | nothing shared: each image is its own row, and `lane` is its place among the images, 0 in front | one for each image |
+| an effect on the whole picture | `blur` or `mono` with `scope` `"frame"` or `"all"` | the whole-frame lanes | `frameLanes` |
+
+An effect on the video never touches a text or an image, and an image's own effects (below) never
+touch the video. Two segments on one lane must not overlap in time, and these never overlap
+anywhere: two `zoom`s, two `speed`s, two `3d`s, or two of the same visual effect with the same reach.
+Texts and images overlap freely. Images are drawn over the video with the lowest `lane` in front,
+and texts over the images.
+
+A file with no `textLanes` is an old one, where texts and whole-frame effects shared the effect
+lanes: the app sorts them into lanes of their own kind when it reads it.
 
 | kind | fields | |
 |---|---|---|
@@ -86,10 +104,11 @@ effect. Texts overlap freely on separate lanes.
 | `speed` | `rate` | 0.25–8; 0.5 is half speed |
 | `spotlight` | | darkens all but a circle around the cursor |
 | `highlight` | | a soft glow under the cursor |
-| `blur` | `scope` | `"video"` (default) or `"frame"`: the whole picture, background included; texts stay sharp |
-| `mono` | `scope` | black and white, the same scopes |
+| `blur` | `scope` | none: only the video. `"frame"`: the whole picture, background and images included; texts stay sharp on top. `"all"`: texts too |
+| `mono` | `scope` | black and white, the same reaches |
 | `3d` | `tilt`, `turn`, `roll`, `style` | turns the video in 3D over its span and back, even with 3D off; `style` `"hold"` or `"orbit"` (one full turn) |
 | `text` | see below | |
+| `image` | see below | |
 
 **Text fields:** `text` (the words); `x`, `y` (its centre, 0–1 of the frame, top-left origin);
 `size` (its height as a share of the frame's, 0.04–0.12 is usual); `color` (`white`, `black`, `yellow`,
@@ -100,6 +119,53 @@ shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees).
 
 Keep a text clear of the video: put it beside the video when the frame is wide, above or below it
 when tall, and not where a zoom pulls the video under it.
+
+### Images
+
+An image is a picture on top of the video: a logo, a badge, a screenshot, a sticker. Its file lives
+in the recording's folder, so the recording stays whole when it is copied.
+
+```sh
+./exact-studio image <id> ~/Desktop/logo.png --at 2 --for 6
+```
+
+copies the picture to `images/logo.png`, adds this segment at 2 s of the recording for 6 s, and
+prints it. Then edit the segment like any other:
+
+```json
+{ "id": "image1", "kind": "image", "start": 2, "end": 8, "lane": 0, "file": "images/logo.png",
+  "x": 0.2, "y": 0.2, "size": 0.18, "rotation": 0, "opacity": 1, "radius": 0.2, "shadow": true,
+  "animIn": "pop", "animOut": "fade",
+  "moves": [
+    { "id": "m1", "t": 5, "to": { "x": 0.85, "y": 0.15, "scale": 0.6 }, "style": "smooth", "duration": 1 }
+  ],
+  "effects": [
+    { "id": "e1", "kind": "pulse", "start": 2.5, "end": 4, "lane": 0 },
+    { "id": "e2", "kind": "fade", "start": 6, "end": 7.5, "lane": 0, "level": 0.3 }
+  ] }
+```
+
+**Image fields:** `file` (a path inside the recording's folder; PNG, JPEG, HEIC, TIFF, GIF, WebP or
+BMP; a PNG keeps its transparency); `x`, `y` (its centre, 0–1 of the frame, top-left origin); `size`
+(its height as a share of the frame's; its width follows the picture's shape); `rotation` (degrees);
+`opacity` (0–1); `radius` (rounded corners, as a share of its shorter side, 0–0.5); `shadow`;
+`animIn` (`pop`, `fade`, `rise`, `slide`, `spin`, `blur`, `none`); `animOut` (`fade`, `pop`, `sink`,
+`blur`, `none`).
+
+**Its own moves, `moves`:** an image moves the way the video does. Each move lands at time `t`
+(inside the image's span), having travelled for `duration` seconds before it, in `style` (`smooth`,
+`linear`, `spring`, `pop`, `swipe`, `fade`, `spin`, `zoom`). `to` is where it lands: `x`, `y`, and
+`scale`, which multiplies `size` (1 keeps it, 0.5 halves it). Before its first move the image is at
+`x`, `y` and `size`.
+
+**Its own effects, `effects`:** each has an `id`, `kind`, `start`, `end` (inside the image's span)
+and `lane` (its row under the image, 0 up). They ease in and out over 0.3 s and touch only this
+image. Kinds: `blur`; `mono` (black and white); `fade` (to `level`, an opacity of 0–1, default 0.3);
+`pulse`, `float` and `wiggle` (a gentle motion while they last). Two effects on one `lane` must not
+overlap, nor two of the same kind on any lane.
+
+To blur or grey the whole picture instead, images included, use a `blur` or `mono` segment with
+`scope` `"frame"` (texts stay sharp) or `"all"` (texts too).
 
 ### Placement and moves: `base`, `moves`
 
@@ -144,4 +210,4 @@ the window's own corner radius (a share of its width), measured from its alpha.
 
 `./exact-studio template <id> <name>` replaces the texts, effects, zooms and moves with a ready-made
 edit (`launch`, `hero`, `tour`, `teaser`) laid out for `look.json`'s `aspect`, and keeps the cuts,
-transitions and 3D settings. A good start to adjust from.
+transitions, 3D settings and images. A good start to adjust from.

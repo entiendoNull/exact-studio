@@ -74,12 +74,18 @@ shape SegmentInfo
   hasAngles: bool
   scope: string
   problem: string
+  file: string
+  opacity: number
+  radius: number
+  shadow: bool
+  fx: string
 
 shape Summary
   parts: number
   removed: number
   effects: number
   lanes: number
+  images: number
   moves: number
   length: number
   source: number
@@ -121,8 +127,9 @@ fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn kindTitle(kind: string, level: number, rate: number): string = kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
+fn imageFxLabel(kind: string): string = kind == "blur" ? "Blur" : kind == "mono" ? "Black & White" : kind == "fade" ? "Fade" : kind == "pulse" ? "Pulse" : kind == "float" ? "Float" : "Wiggle"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
 fn poseLabel(p: string): string = p == "hero" ? "Hero" : p == "lean-left" ? "Lean Left" : p == "lean-right" ? "Lean Right" : p == "lay-back" ? "Lay Back" : p == "tumble" ? "Tumble" : "Face On"
 fn countLine(n: number, one: string, many: string): string = n == 1 ? `1 ${one}` : `${n} ${many}`
@@ -352,6 +359,12 @@ component ExactStudio
     send edited = editClip(selected, "text", field, 0, v)
   action textNumber(field: string, v: number)
     send edited = editClip(selected, "text", field, 0, `${round(v)}`)
+  action imageField(field: string, v: string)
+    send edited = editClip(selected, "image", field, 0, v)
+  action imageNumber(field: string, v: number)
+    send edited = editClip(selected, "image", field, 0, `${v}`)
+  action imageBool(field: string, v: bool)
+    send edited = editClip(selected, "image", field, 0, `${v}`)
   action moveField(field: string, v: string)
     send edited = editClip(selected, "move", field, 0, v)
   action moveNumber(field: string, v: number)
@@ -404,7 +417,7 @@ component ExactStudio
             scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
               if cardLeft
                 column padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box"
-                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
+                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, threeField=threeField, threeNumber=threeNumber)
               else
                 column gap=30 padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
                   if status.recording
@@ -546,89 +559,10 @@ component ExactStudio
                     button press=editDo("play") aria-label=(summary.playing ? "Pause" : "Play") buttonStyle="filled" testId="play"
                       image (summary.playing ? "symbol:pause-fill" : "symbol:play-fill")
                     column width=1 height=22 background-color="-exact-separator"
-                    button popovertarget="add-menu" buttonStyle="bordered" testId="add"
-                      image "symbol:add"
-                      text "Add"
-                    column id="add-menu" popover="auto" role="menu" aria-label="Add at the playhead"
-                      button press=add("text") popovertarget="add-menu" popovertargetaction="hide" testId="add-text"
-                        image "symbol:sf/textformat"
-                        text "Text"
-                      hr
-                      button press=add("zoom-in") popovertarget="add-menu" popovertargetaction="hide" testId="add-zoom-in"
-                        image "symbol:sf/plus.magnifyingglass"
-                        text "Zoom In"
-                      button press=add("zoom-out") popovertarget="add-menu" popovertargetaction="hide" testId="add-zoom-out"
-                        image "symbol:sf/minus.magnifyingglass"
-                        text "Zoom Out"
-                      hr
-                      button press=add("slow") popovertarget="add-menu" popovertargetaction="hide" testId="add-slow"
-                        image "symbol:sf/tortoise"
-                        text "Slow Down"
-                      button press=add("fast") popovertarget="add-menu" popovertargetaction="hide" testId="add-fast"
-                        image "symbol:sf/hare"
-                        text "Speed Up"
-                      hr
-                      button press=add("spotlight") popovertarget="add-menu" popovertargetaction="hide" testId="add-spotlight"
-                        image "symbol:sf/flashlight.on.fill"
-                        text "Spotlight"
-                      button press=add("highlight") popovertarget="add-menu" popovertargetaction="hide" testId="add-highlight"
-                        image "symbol:sf/cursorarrow.rays"
-                        text "Cursor Highlight"
-                      button press=add("blur") popovertarget="add-menu" popovertargetaction="hide" testId="add-blur"
-                        image "symbol:sf/drop"
-                        text "Blur"
-                      button press=add("mono") popovertarget="add-menu" popovertargetaction="hide" testId="add-mono"
-                        image "symbol:sf/circle.lefthalf.filled"
-                        text "Black & White"
-                      hr
-                      button press=add("3d") popovertarget="add-menu" popovertargetaction="hide" testId="add-3d"
-                        image "symbol:sf/rotate.3d"
-                        text "3D Turn"
-                        text "Turns in 3D for a while, then back"
                     column width=1 height=22 background-color="-exact-separator"
                     button press=editDo("split-clip") buttonStyle="bordered" testId="split-clip"
                       image "symbol:sf/scissors"
                       text "Split Clip"
-                    button popovertarget="motion-menu" buttonStyle="bordered" testId="motion"
-                      image "symbol:sf/arrow.up.and.down.and.arrow.left.and.right"
-                      text "Position"
-                    column id="motion-menu" popover="auto" role="menu" aria-label="Where the video sits, and how it moves"
-                      button press=editDo("add-move") popovertarget="motion-menu" popovertargetaction="hide" testId="add-move"
-                        image "symbol:sf/diamond"
-                        text "Add Move Here"
-                        text "Then drag the video where it should go"
-                      hr
-                      button press=pattern("side") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-side"
-                        text "Side to Side"
-                        text "Left, right, back to the middle"
-                      button press=pattern("tour") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-tour"
-                        text "Zoom Tour"
-                        text "Through full screen to each side"
-                      button press=pattern("entrance") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-entrance"
-                        text "Entrance"
-                        text "Springs in from below"
-                      button press=pattern("bounce") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-bounce"
-                        text "Bounce"
-                        text "Pops from side to side"
-                      button press=pattern("drift") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-drift"
-                        text "Slow Push In"
-                        text "A gentle zoom over six seconds"
-                      hr
-                      button press=pattern("turntable") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-turntable"
-                        text "3D Turntable"
-                        text "Swings to each side, then faces front"
-                      button press=pattern("orbit") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-orbit"
-                        text "3D Orbit"
-                        text "One full turn around"
-                      button press=pattern("reveal") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-reveal"
-                        text "3D Hero Reveal"
-                        text "Rises from lying back into a hero angle"
-                      button press=pattern("flip") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-flip"
-                        text "3D Flip In"
-                        text "Turns in from edge-on with a spring"
-                      button press=pattern("float") popovertarget="motion-menu" popovertargetaction="hide" testId="pattern-float"
-                        text "3D Float"
-                        text "Drifts between gentle angles"
                     button popovertarget="template-menu" buttonStyle="bordered" testId="templates"
                       image "symbol:sf/wand.and.stars"
                       text "Templates"
@@ -652,9 +586,6 @@ component ExactStudio
                     button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
                       image "symbol:sf/crop"
                       text "Crop"
-                    button press=editDo("auto") buttonStyle="bordered" testId="auto-zoom"
-                      image "symbol:sf/cursorarrow.click.2"
-                      text "Zoom on Clicks"
                     text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex=1 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
                   studio-timeline clip=rec.id aria-label="Timeline" height=timelineH testId="timeline"
                   if sel.id != "" and panelMode == "overlay"
@@ -662,14 +593,14 @@ component ExactStudio
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
                       scroll width="24rem" max-height="85%" pointer-events="auto" border-radius=16 box-shadow="0px 18px 60px #00000080" background-color="-exact-secondary-background"
                         column padding=12
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, threeField=threeField, threeNumber=threeNumber)
                   if sel.id != "" and panelMode == "float"
                     column position="absolute" left=panelX top=panelY width="24rem" max-height="80%" border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0
                         column padding=12 padding-top=4
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, threeField=threeField, threeNumber=threeNumber)
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
@@ -680,7 +611,7 @@ component ExactStudio
                       image "symbol:alert" color="-exact-system-orange" aria-hidden=true
                       text sel.problem font="-exact-footnote" flex=1
                   if sel.id != "" and panelMode == "dock"
-                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, threeField=threeField, threeNumber=threeNumber)
+                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, threeField=threeField, threeNumber=threeNumber)
                   else
                     column gap=10
                       button press=toggleSection("place") appearance="none" aria-expanded=openPlace testId="sec-place" padding-top=2 padding-bottom=2
@@ -692,7 +623,7 @@ component ExactStudio
                           for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
                             button press=placeAt(pl) buttonStyle="bordered" testId=`place-${pl}`
                               text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
-                        text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. Position › Add Move Here, then drag, animates it.") font="-exact-caption1" color="-exact-tertiary-label"
+                        text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. The + on the Position row adds a move too; then drag the video where it should go.") font="-exact-caption1" color="-exact-tertiary-label"
                     column gap=10
                       button press=toggleSection("help") appearance="none" aria-expanded=openHelp testId="sec-help" padding-top=2 padding-bottom=2
                         row align-items="center" gap=6 flex=1
@@ -700,7 +631,7 @@ component ExactStudio
                           image (openHelp ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
                       text `${countLine(summary.parts, "clip part", "clip parts")} (${summary.removed} removed) · ${countLine(summary.effects, "effect", "effects")} on ${countLine(summary.lanes, "lane", "lanes")} · ${countLine(summary.moves, "move", "moves")}` font="-exact-footnote" color="-exact-secondary-label" testId="summary"
                       if openHelp
-                        text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. Add effects at the playhead with Add. They can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
+                        text "To cut, put the playhead where a cut should go and press Split Clip (or S). Then select a part of the clip and remove it. To add something at the playhead, press the + on its row in the timeline: an effect on the video, a move, a text, an image. Effects can overlap on separate lanes, except two zooms, two speed changes, or two of the same effect. Delete removes the selection; Space plays." font="-exact-footnote" color="-exact-tertiary-label"
 
                   if summary.sound
                     column gap=12 testId="sound"
@@ -927,6 +858,9 @@ component SettingsCard
     setTransition: action
     textField: action
     textNumber: action
+    imageField: action
+    imageNumber: action
+    imageBool: action
     threeField: action
     threeNumber: action
   view
@@ -982,10 +916,13 @@ component SettingsCard
         if sel.kind == "blur" or sel.kind == "mono"
           text "Covers" font="-exact-caption1" color="-exact-secondary-label"
           row role="radiogroup" aria-label="Covers"
-            button role="radio" aria-checked=(sel.scope != "frame") press=segField("scope", "video") flex=1 testId="scope-video"
+            button role="radio" aria-checked=(sel.scope != "frame" and sel.scope != "all") press=segField("scope", "video") flex=1 testId="scope-video"
               text "Video"
             button role="radio" aria-checked=(sel.scope == "frame") press=segField("scope", "frame") flex=1 testId="scope-frame"
               text "Whole Frame"
+            button role="radio" aria-checked=(sel.scope == "all") press=segField("scope", "all") flex=1 testId="scope-all"
+              text "Everything"
+          text (sel.scope == "all" ? "Covers the whole picture, texts too." : sel.scope == "frame" ? "Covers the video, the background and the images. Texts stay sharp on top." : "Covers only the video.") font="-exact-caption1" color="-exact-tertiary-label"
       if sel.kind == "3d"
         text "Turns in 3D over its span and back, even with Show in 3D off." font="-exact-caption1" color="-exact-tertiary-label"
         row role="radiogroup" aria-label="Turn style"
@@ -1069,6 +1006,85 @@ component SettingsCard
             option "Float" value="float"
             option "Wiggle" value="wiggle"
         text "Drag the text in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "image"
+        row align-items="center" gap=8
+          text sel.file flex=1 line-clamp=1 color="-exact-secondary-label" testId="image-file"
+          button press=imageField("replace", "") buttonStyle="bordered" testId="image-replace"
+            text "Replace…"
+        column gap=4
+          row
+            text "Size" flex=1
+            text `${round(sel.size)}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=2 max=100 step=0.5 value=sel.size change=imageNumber("size") aria-label="Image size" testId="image-size"
+        column gap=4
+          row
+            text "Opacity" flex=1
+            text `${sel.opacity}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=5 max=100 step=1 value=sel.opacity change=imageNumber("opacity") aria-label="Opacity" testId="image-opacity"
+        column gap=4
+          row
+            text "Tilt" flex=1
+            text `${sel.rotation}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=-45 max=45 step=1 value=sel.rotation change=imageNumber("rotation") aria-label="Tilt" testId="image-rotation"
+        column gap=4
+          row
+            text "Round corners" flex=1
+            text `${sel.radius}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=0 max=50 step=1 value=sel.radius change=imageNumber("radius") aria-label="Round corners" testId="image-radius"
+        row align-items="center" gap=8
+          text "Shadow" flex=1
+          input type="checkbox" switch checked=sel.shadow change=imageBool("shadow") aria-label="Shadow" testId="image-shadow"
+        row align-items="center" gap=8
+          text "In" flex=1
+          select value=sel.animIn change=imageField("in") aria-label="Animation in" testId="image-in"
+            option "Pop" value="pop"
+            option "Fade" value="fade"
+            option "Rise" value="rise"
+            option "Slide in" value="slide"
+            option "Spin in" value="spin"
+            option "Blur in" value="blur"
+            option "None" value="none"
+        row align-items="center" gap=8
+          text "Out" flex=1
+          select value=sel.animOut change=imageField("out") aria-label="Animation out" testId="image-out"
+            option "Fade" value="fade"
+            option "Pop away" value="pop"
+            option "Sink" value="sink"
+            option "Blur out" value="blur"
+            option "None" value="none"
+        text "Drag the image in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
+        text "To animate it or add an effect to it, use the + on its Position and Effects rows in the timeline." font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "imove"
+        text `A move of ${sel.file}. Drag the image in the preview to set where it lands; scroll over it to set its size there.` font="-exact-caption1" color="-exact-tertiary-label"
+        row align-items="center" gap=8
+          text "Motion" flex=1
+          select value=sel.moveStyle change=imageField("move-style") aria-label="Motion" testId="imove-style"
+            option "Smooth" value="smooth"
+            option "Linear" value="linear"
+            option "Spring" value="spring"
+            option "Pop" value="pop"
+            option "Swipe" value="swipe"
+            option "Fade" value="fade"
+            option "Spin" value="spin"
+            option "Through full screen" value="zoom"
+        column gap=4
+          row
+            text "Travel time" flex=1
+            text `${sel.duration} s` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=0.1 max=5 step=0.1 value=sel.duration change=imageNumber("move-duration") aria-label="Travel time" testId="imove-duration"
+        column gap=4
+          row
+            text "Size when it lands" flex=1
+            text `${sel.scale}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=10 max=400 step=5 value=sel.scale change=imageNumber("move-scale") aria-label="Size when it lands" testId="imove-scale"
+      if sel.kind == "ifx"
+        text `${imageFxLabel(sel.fx)} on ${sel.file}. Drag its block in the timeline to move it, or an edge to change how long it lasts.` font="-exact-caption1" color="-exact-tertiary-label"
+        if sel.fx == "fade"
+          column gap=4
+            row
+              text "Fades to" flex=1
+              text `${sel.level}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+            input type="range" min=0 max=95 step=5 value=sel.level change=imageNumber("effect-level") aria-label="Fades to" testId="ifx-level"
       if sel.kind == "move"
         text "Where it lands" font="-exact-caption1" color="-exact-secondary-label"
         row gap=6 flex-wrap="wrap"
@@ -1135,7 +1151,7 @@ component SettingsCard
           text "Used where removed parts lie between this part and the next." font="-exact-caption1" color="-exact-tertiary-label"
       else
         row gap=8
-          if sel.kind != "move"
+          if sel.kind != "move" and sel.kind != "imove" and sel.kind != "ifx"
             button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
               text "Split Here"
           button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"

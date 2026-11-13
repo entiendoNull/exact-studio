@@ -71,8 +71,8 @@ struct Look: Codable, Equatable {
 }
 
 /// One span on an effect lane. `kind` is "zoom", "speed", a visual effect
-/// ("spotlight", "highlight", "blur", "mono") or "text". `level` is a zoom's
-/// (below 1 zooms out), `rate` a speed's; the rest are a text's.
+/// ("spotlight", "highlight", "blur", "mono"), "text" or "image". `level` is a zoom's
+/// (below 1 zooms out), `rate` a speed's; the rest are a text's or an image's.
 struct Segment: Codable, Equatable {
     var id: String
     var kind: String
@@ -98,20 +98,42 @@ struct Segment: Codable, Equatable {
     var loop: String?
     /// Degrees, clockwise.
     var rotation: Double?
-    /// A blur's or black and white's reach: "video" (the default) or "frame", the whole picture.
+    /// A blur's or black and white's reach: "video" (the default); "frame", the whole picture
+    /// with its images, under the texts; or "all", the texts too.
     var scope: String?
     /// A 3D turn's pose, in degrees.
     var tilt: Double?
     var turn: Double?
     var roll: Double?
+    // An image's. It shares a text's x, y, size, rotation, animIn and animOut.
+    /// The picture's file, in the recording's folder.
+    var file: String?
+    var opacity: Double?
+    /// Its corners' radius as a share of its shorter side, 0 to 0.5.
+    var radius: Double?
+    var shadow: Bool?
+    /// Its own moves, as the video has: each lands at `t` at `to`, where `scale` multiplies its `size`.
+    var moves: [Move]?
+    /// Its own effects, each a span inside the image's: `kind` one of `Segment.imageEffects`,
+    /// `lane` its row under the image, `level` a fade's opacity.
+    var effects: [Segment]?
 
     static let visual = ["spotlight", "highlight", "blur", "mono"]
-    static let kinds = ["zoom", "speed", "text", "3d"] + visual
+    static let kinds = ["zoom", "speed", "text", "image", "3d"] + visual
+    /// What an image's own effect can be.
+    static let imageEffects = ["blur", "mono", "fade", "pulse", "float", "wiggle"]
 
     /// Two segments may overlap in time unless they share a group: one zoom at
     /// a time, one speed at a time, one of each visual effect at a time.
-    /// Texts never clash.
-    var group: String { kind == "text" ? "text:" + id : kind }
+    /// Texts and images never clash.
+    var group: String { isOverlay ? kind + ":" + id : coversFrame ? kind + ":frame" : kind }
+    /// A blur or black and white over the whole picture, not only the video.
+    var coversFrame: Bool { (kind == "blur" || kind == "mono") && (scope == "frame" || scope == "all") }
+    /// Drawn over the finished picture: a text or an image.
+    var isOverlay: Bool { kind == "text" || kind == "image" }
+    /// Which rows its `lane` counts: 0 the video's effect lanes, 1 the text lanes, 2 the images
+    /// (each its own row), 3 the whole-frame effect lanes.
+    var space: Int { kind == "text" ? 1 : kind == "image" ? 2 : coversFrame ? 3 : 0 }
 
     func overlaps(_ o: Segment) -> Bool { start < o.end - 0.0001 && o.start < end - 0.0001 }
 }
@@ -153,8 +175,14 @@ struct Edits: Codable, Equatable {
     /// How the video passes from a kept part into the next across removed
     /// ones, keyed by the kept part's end in milliseconds: "crossfade" or "fade".
     var transitions: [String: String] = [:]
-    /// Effect lanes, at least one; a lane may stay empty.
+    /// Effect lanes, at least one; a lane may stay empty. They hold what changes the video.
     var lanes: Int = 1
+    /// Text lanes: they hold the texts drawn over the video. A text's `lane` counts these.
+    /// An image has no lane to share: each is its own row, and its `lane` is its place among the images.
+    // @ref LLP 0002#rows — effects change the video; texts and images sit on top of it
+    var textLanes: Int = 0
+    /// Whole-frame lanes: they hold the blurs and black-and-whites that cover the whole picture.
+    var frameLanes: Int = 0
     /// Where the subject sits before any move.
     var base = Placement()
     var moves: [Move] = []
@@ -165,7 +193,7 @@ struct Edits: Codable, Equatable {
 
     init(segments: [Segment] = []) { self.segments = segments }
 
-    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, base, moves, three, volume }
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, frameLanes, base, moves, three, volume }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
@@ -184,7 +212,56 @@ struct Edits: Codable, Equatable {
         }
         segments.removeAll { $0.kind == "cut" }
         splits = Array(Set(splits.filter { $0 > 0.001 })).sorted()
-        lanes = max(lanes, (segments.map(\.lane).max() ?? -1) + 1, 1)
+        frameLanes = try c.decodeIfPresent(Int.self, forKey: .frameLanes) ?? 0
+        if let n = try c.decodeIfPresent(Int.self, forKey: .textLanes) {
+            textLanes = n
+        } else {
+            // Texts and whole-frame effects once shared the effect lanes: each lane that held one
+            // becomes a lane of its own kind, in the same order, and the effect lanes close up.
+            for space in [1, 3, 0] {
+                let used = Array(Set(segments.filter { $0.space == space }.map(\.lane))).sorted()
+                segments = segments.map { s in
+                    guard s.space == space, let i = used.firstIndex(of: s.lane) else { return s }
+                    var m = s; m.lane = i; return m
+                }
+                if space == 0 { lanes = used.count }
+            }
+        }
+        fitLanes()
+    }
+
+    /// How many rows there are in a space (`Segment.space`).
+    func laneCount(space: Int) -> Int { space == 1 ? textLanes : space == 2 ? images.count : space == 3 ? frameLanes : lanes }
+
+    /// Enough lanes of each kind for the segments, at least one effect lane, and each image on its own row.
+    mutating func fitLanes() {
+        lanes = max(lanes, (segments.filter { $0.space == 0 }.map(\.lane).max() ?? -1) + 1, 1)
+        textLanes = max(textLanes, (texts.map(\.lane).max() ?? -1) + 1, 0)
+        frameLanes = max(frameLanes, (segments.filter { $0.space == 3 }.map(\.lane).max() ?? -1) + 1, 0)
+        let order = segments.enumerated().filter { $0.element.kind == "image" }.sorted { ($0.element.lane, $0.offset) < ($1.element.lane, $1.offset) }
+        for (row, item) in order.enumerated() { segments[item.offset].lane = row }
+    }
+
+    /// The first lane of `s`'s kind where nothing overlaps it; one past the last when none has room.
+    /// A new image goes on top of the others.
+    func freeLane(for s: Segment) -> Int {
+        if s.kind == "image" { return -1 }
+        var lane = 0
+        while lane < laneCount(space: s.space), segments.contains(where: { $0.id != s.id && $0.space == s.space && $0.lane == lane && $0.overlaps(s) }) { lane += 1 }
+        return lane
+    }
+
+    /// Replace the segments with `made`, each on the first lane of its kind with room, and no lane more than they need.
+    mutating func pack(_ made: [Segment]) {
+        segments = []
+        lanes = 0; textLanes = 0; frameLanes = 0
+        for var seg in made.sorted(by: { $0.start < $1.start }) {
+            var lane = 0
+            while seg.kind != "image", segments.contains(where: { $0.space == seg.space && $0.lane == lane && $0.overlaps(seg) }) { lane += 1 }
+            if seg.kind != "image" { seg.lane = lane }
+            segments.append(seg)
+        }
+        fitLanes()
     }
 
     static func same(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.0015 }
@@ -204,14 +281,38 @@ struct Edits: Codable, Equatable {
     var speeds: [Segment] { segments.filter { $0.kind == "speed" } }
     var effects: [Segment] { segments.filter { Segment.visual.contains($0.kind) } }
     var texts: [Segment] { segments.filter { $0.kind == "text" } }
+    var images: [Segment] { segments.filter { $0.kind == "image" } }
+    /// The texts and images showing at `t`, back to front: the images, the top row in front, then
+    /// the texts over them, in the order they are listed, as they always were.
+    // @ref LLP 0002#images — row order is the stacking order
+    func overlays(at t: Double) -> [Segment] {
+        let showing = segments.filter { $0.isOverlay && t >= $0.start && t < $0.end }
+        return showing.filter { $0.kind == "image" }.sorted { $0.lane > $1.lane } + showing.filter { $0.kind == "text" }
+    }
     var turns: [Segment] { segments.filter { $0.kind == "3d" } }
 
     /// Why `s` cannot sit where it is, or nil when it can.
     func conflict(_ s: Segment) -> String? {
         for o in segments where o.id != s.id && o.overlaps(s) {
             if o.group == s.group { return "Two \(Segment.noun(s.kind)) can’t overlap." }
-            if o.lane == s.lane { return "That lane is taken there; drop it on another lane." }
+            if o.lane == s.lane, o.space == s.space, s.kind != "image" { return "That lane is taken there; drop it on another lane." }
         }
+        if s.kind == "image" { return Edits.conflict(in: s) }
+        return nil
+    }
+
+    /// Why an image's own moves and effects cannot sit where they are, or nil when they can.
+    static func conflict(in image: Segment) -> String? {
+        let fx = image.effects ?? []
+        for e in fx {
+            if !Segment.imageEffects.contains(e.kind) { return "An image has no \(e.kind) effect." }
+            if e.start < image.start - 0.001 || e.end > image.end + 0.001 { return "An image’s effect must stay inside the image’s time." }
+            for o in fx where o.id != e.id && o.overlaps(e) {
+                if o.kind == e.kind { return "Two of the same effect can’t overlap on one image." }
+                if o.lane == e.lane { return "That row is taken there; drop it on another row." }
+            }
+        }
+        for m in image.moves ?? [] where m.t < image.start - 0.001 || m.t > image.end + 0.001 { return "An image’s move must land inside the image’s time." }
         return nil
     }
 
@@ -235,7 +336,7 @@ struct Edits: Codable, Equatable {
 extension Segment {
     static func noun(_ kind: String) -> String {
         ["zoom": "zooms", "speed": "speed changes", "spotlight": "spotlights", "highlight": "cursor highlights",
-         "blur": "blurs", "mono": "black-and-white effects", "text": "texts", "3d": "3D turns"][kind] ?? "effects"
+         "blur": "blurs", "mono": "black-and-white effects", "text": "texts", "image": "images", "3d": "3D turns"][kind] ?? "effects"
     }
 }
 
@@ -542,6 +643,8 @@ struct Framing {
     let releases: [Double]
     private let background: CIImage
     private let moves: [Move]
+    /// The recording's folder, where an image's file is.
+    let folder: URL?
 
     var crop: UnitRect { meta.crop }
 
@@ -551,6 +654,7 @@ struct Framing {
 
     init(meta: RecordingMeta, look: Look, edits: Edits, cursor: [Point], folder: URL? = nil) {
         self.meta = meta
+        self.folder = folder
         silhouette = meta.mask.flatMap { name in folder.flatMap { Masks.image($0.appendingPathComponent(name)) } }
         deviceBody = meta.mask.flatMap { name in folder.flatMap { Masks.body($0.appendingPathComponent(name)) } }
         self.look = look
@@ -736,7 +840,7 @@ struct Framing {
         // Effects on the subject's pixels.
         let minSide = min(canvas.width, canvas.height)
         var overlays: [CIImage] = []
-        for fx in edits.effects where fx.scope != "frame" {
+        for fx in edits.effects where !fx.coversFrame {
             let a = presence(fx, at: t, ramp: 0.25)
             guard a > 0.001 else { continue }
             switch fx.kind {
@@ -952,26 +1056,31 @@ struct Framing {
         return texts ? overlay(scene, at: t) : scene
     }
 
-    /// The texts showing at `t`, over `scene`.
+    /// The texts and images showing at `t`, over `scene`.
     func overlay(_ scene: CIImage, at t: Double) -> CIImage {
         var out = scene
         let rect = CGRect(origin: .zero, size: canvas)
-        // Whole-frame effects, over the finished picture and under the texts.
-        for fx in edits.effects where fx.scope == "frame" {
-            let a = presence(fx, at: t, ramp: 0.3)
-            guard a > 0.001 else { continue }
-            if fx.kind == "blur" {
-                out = out.clampedToExtent().applyingGaussianBlur(sigma: Double(min(canvas.width, canvas.height)) * 0.03 * a).cropped(to: rect)
-            } else if fx.kind == "mono" {
-                let c = CIFilter.colorControls()
-                c.inputImage = out
-                c.saturation = Float(1 - a)
-                out = c.outputImage!.cropped(to: rect)
+        // Whole-frame effects: over the picture and its images and under the texts, or over the texts too.
+        func cover(_ scope: String) {
+            for fx in edits.effects where fx.scope == scope {
+                let a = presence(fx, at: t, ramp: 0.3)
+                guard a > 0.001 else { continue }
+                if fx.kind == "blur" {
+                    out = out.clampedToExtent().applyingGaussianBlur(sigma: Double(min(canvas.width, canvas.height)) * 0.03 * a).cropped(to: rect)
+                } else if fx.kind == "mono" {
+                    let c = CIFilter.colorControls()
+                    c.inputImage = out
+                    c.saturation = Float(1 - a)
+                    out = c.outputImage!.cropped(to: rect)
+                }
             }
         }
-        for text in edits.texts where t >= text.start && t < text.end {
-            out = renderText(text, at: t).composited(over: out)
-        }
+        // @ref LLP 0002#rows — a whole-frame effect covers the images; the words stay readable unless it covers everything
+        let over = edits.overlays(at: t)
+        for s in over where s.kind == "image" { out = renderImage(s, at: t).composited(over: out) }
+        cover("frame")
+        for s in over where s.kind == "text" { out = renderText(s, at: t).composited(over: out) }
+        cover("all")
         return out.cropped(to: CGRect(origin: .zero, size: canvas))
     }
 

@@ -54,8 +54,11 @@ To update, run `git pull` in both folders and run the last command again.
 
 - **Crop:** drag the corners or edges of a grid over the whole recording.
 - **Timeline:** split the clip (S), remove parts, and crossfade between them.
-- **Effects:** zoom, speed, spotlight, cursor highlight, blur, and black and white, on as many lanes as you need.
+- **Effects:** zoom, speed, spotlight, cursor highlight, blur, and black and white, on as many lanes as you need. A blur or black and white can cover the video, the whole frame, or everything.
 - **Text:** styled texts with entrance, exit and loop animations.
+- **Images:** put a logo, a badge or any picture on the video. Each image has its own moves and its own effects.
+- **Rows by kind:** effects for the video, texts, images, and effects for the whole frame each have their own rows. Each row has a + that adds its own kind of thing at the playhead.
+- **A tidy timeline:** every group folds away, and the rows have three heights to pick from.
 - **Templates:** Launch, Hero, Tour and Teaser. Each adds texts, effects and moves for the frame's shape.
 - **Zoom on clicks:** adds a zoom around each group of clicks.
 - **Sound follows the cuts:** cuts, speed and fades apply to the sound too. Mute it or set its volume.
@@ -82,7 +85,7 @@ To update, run `git pull` in both folders and run the last command again.
 
 ## For agents
 
-Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions, effects, texts, zooms, speed, moves, 3D) and `look.json` (background, shape, padding, cursor). Edit them directly; the app reloads them within a second. `./exact-studio` checks and renders with the app's own renderer:
+Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions, effects, texts, images, zooms, speed, moves, 3D) and `look.json` (background, shape, padding, cursor). Edit them directly; the app reloads them within a second. `./exact-studio` checks and renders with the app's own renderer:
 
 ```sh
 ./exact-studio list
@@ -91,13 +94,14 @@ Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions,
 ./exact-studio frame latest 4.5     # .exact/frame.png
 ./exact-studio export latest
 ./exact-studio template latest hero
+./exact-studio image latest logo.png --at 2 --for 6
 ```
 
 [`docs/edits.md`](docs/edits.md) documents every field; [`schema/`](schema) has the JSON Schemas; the `edit-recording` skill (`.claude/skills/`) is the workflow.
 
 ### MCP
 
-`mcp/server.ts` gives the same verbs to any MCP client: `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template` and `edit_format`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
+`mcp/server.ts` gives the same verbs to any MCP client: `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `add_image`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template` and `edit_format`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
 
 ```sh
 claude mcp add exact-studio -- bun /path/to/exact-studio/mcp/server.ts
@@ -120,6 +124,7 @@ The app uses the Exact checkout at `../exact`. [Install](#install) has the full 
 - `modules/apple/Editor.swift`: one open recording: its edits, its player, the selection.
 - `modules/apple/Timeline.swift`: the timeline view.
 - `modules/apple/Templates.swift`: the ready-made edits.
+- `modules/apple/Images.swift`: pictures on the video: their files, moves, effects and drawing.
 - `modules/apple/Scene3D.swift`: the 3D stage: the slab, its materials, lights and camera.
 - `cli/main.swift`, `exact-studio`: the command-line tool.
 - `mcp/server.ts`, `.mcp.json`: the MCP server around it.

@@ -64,7 +64,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'show_recording',
-    description: 'One recording in readable form: its length, clip parts, segments (texts, effects, zooms, speed, 3D), moves and look.',
+    description: 'One recording in readable form: its length, clip parts, segments (texts, images with their own moves and effects, effects, zooms, speed, 3D), moves and look.',
     inputSchema: { type: 'object', properties: { id }, required: ['id'] },
     call: async (a) => outOf(await run(['show', a.id])),
   },
@@ -141,6 +141,23 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
     call: async (a) => outOf(await run(['template', a.id, a.name])),
   },
   {
+    name: 'add_image',
+    description:
+      'Puts a picture on top of the video: copies the file into the recording and adds an image segment, which it returns. Then use read_edits and write_edits to set its place (x, y), size, moves and effects. This is the only way to bring a picture file into a recording.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id,
+        path: { type: 'string', description: 'The picture file (an absolute path): PNG, JPEG, HEIC, TIFF, GIF, WebP or BMP.' },
+        at: { type: 'number', description: 'When it appears, in seconds of the recording. Default 0.' },
+        for: { type: 'number', description: 'How long it shows, in seconds. Default 4.' },
+      },
+      required: ['id', 'path'],
+    },
+    call: async (a) =>
+      outOf(await run(['image', a.id, a.path, ...(a.at !== undefined ? ['--at', String(a.at)] : []), ...(a.for !== undefined ? ['--for', String(a.for)] : [])])),
+  },
+  {
     name: 'edit_format',
     description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, with examples. Read it before write_edits.',
     inputSchema: { type: 'object', properties: {} },
@@ -156,7 +173,7 @@ async function handle(msg: any): Promise<unknown> {
         capabilities: { tools: {} },
         serverInfo: { name: 'exact-studio', version: '0.1.0' },
         instructions:
-          'Edit Exact Studio screen recordings. Loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing.',
+          'Edit Exact Studio screen recordings. Loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns.',
       };
     case 'ping':
       return {};
