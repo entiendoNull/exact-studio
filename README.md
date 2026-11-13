@@ -32,10 +32,11 @@ To update, run `git pull` in both folders and run the last command again.
 
 ### Record
 
-- **Sources:** drag out an area, pick a window on screen, or choose a display, a window, or a Simulator or emulator from the sidebar.
+- **Sources:** a display, a window, an area or a Simulator. Each is picked on the screen, and only the Start Recording button (or Return) starts it. A named Simulator or emulator in the sidebar records with one click.
 - **Devices:** cropped to the bezel automatically.
 - **Windows:** keep their own shape, rounded corners included.
 - **System sound:** on by default, with one switch to turn it off.
+- **Menu bar:** an Exact Studio mark is always there. Its menu starts each picker. While recording, it turns red with the time, and one click stops.
 
 ### Look
 
@@ -79,7 +80,7 @@ To update, run `git pull` in both folders and run the last command again.
 | ← → | Step one frame (with Shift: one second) |
 | ⌥-drag | Turn the video in 3D |
 | ⌘O | Open a recording |
-| Return / Escape | Start or cancel an area recording |
+| Return / Escape | Start or cancel a recording in a picker |
 
 </details>
 
@@ -113,12 +114,12 @@ claude mcp add exact-studio -- bun /path/to/exact-studio/mcp/server.ts
 bun exact.mjs mac --run
 ```
 
-The app uses the Exact checkout at `../exact`. [Install](#install) has the full steps. While recording, a **Stop** item sits in the menu bar.
+The app uses the Exact checkout at `../exact`. [Install](#install) has the full steps. While recording, click the red mark in the menu bar to stop.
 
 ## Layout
 
 - `app.contract`: the view. `app.ts`: forwards each request to the native module.
-- `modules/apple/Capture.swift`: source listing, the area picker, the ScreenCaptureKit recorder, cursor and click tracking.
+- `modules/apple/Capture.swift`: source listing, the pickers, the ScreenCaptureKit recorder, cursor and click tracking.
 - `modules/apple/Bezel.swift`: finds the device in a captured window.
 - `modules/apple/Compositor.swift`: the look, zooms and effects rendered per frame, and the time map across cuts and speed. The preview and the export share it.
 - `modules/apple/Editor.swift`: one open recording: its edits, its player, the selection.

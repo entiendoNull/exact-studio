@@ -33,11 +33,36 @@ The silhouette is found off the capture queue, at about frame 10, so recording n
 
 ## Sources
 
-- A window, an area you draw, or a Simulator. Simulator windows are listed under **Simulators**.
-- **Area picker**: the selection stays until you confirm it. The rest of the screen is dimmed, and
-  a Record / Cancel bar shows next to it.
-- **Window picker** (Pick a Window): the window under the pointer lights up with its name; a click
-  records it, Escape cancels. The sidebar list is the other way in.
+Asked for by Jacob on 2026-11-13: four sources, each picked on the screen.
+
+- **Display**, **Window**, **Area** and **Simulator** are four equal buttons in the New Recording card.
+- Each opens a picker over every display. The pickers share one look: the screen dimmed a little,
+  the candidate under the pointer lit with an outline, a hint at the bottom, Escape or a right-click
+  to cancel.
+- The lit candidate shows its app's icon, its name, its size and a **Start Recording** button.
+- Only that button, or Return, starts a recording. A click on the screen only lights a candidate.
+  A stray click must never start a recording.
+- A card that does not fit inside a small candidate sits just below it, else above it.
+- **Display picker**: with one display, it is lit at once.
+- **Window picker**: other apps' windows, never Simulator or emulator windows, and never ours.
+- **Simulator picker**: only Simulator and emulator windows. It lights the phone, not the window:
+  one screenshot of the window goes through the same bezel finder as a recording. Until that
+  lands, or if it finds nothing, the whole window is lit.
+- With no Simulator or emulator open, there is no overlay; the card says to open one.
+- **Area picker**: the selection stays until you confirm it, with a Start Recording / Cancel bar
+  beside it.
+- The Displays and Windows lists are gone; the pickers replace them.
+- The **Simulators** list stays: one click on a named device records it. That is the main use.
+
+## Menu bar
+
+- An Exact Studio mark sits in the menu bar while the app runs: a rounded frame around a dot.
+- Its menu starts each picker, switches System Sound, opens the window, or quits.
+- While recording, the mark turns red with the time. One click stops; no menu is in the way.
+- System Sound is one setting, kept by the native module. The sidebar switch and the menu item
+  both change it.
+- A start from the menu that fails brings the window forward, where the card shows why.
+- Under the agent there is no menu bar item.
 
 ## Windows keep their own shape
 

@@ -3,13 +3,15 @@
 // watches: "status" (recording or not), "recordings" (the library changed)
 // and "edits" (a recording's edits or selection changed).
 //
-//   call   {op: "status"}                       → {recording, name, kind}
+//   call   {op: "status"}                       → {recording, name, kind, sound, error}  error: the last start's, from here or the menu bar
 //          {op: "selection", id}                → {id, kind ("clip" for a part of the clip), level, rate, start, end,
 //                                                   startText, endText, removed, first, last, problem}
 //          {op: "summary", id}                  → {parts, removed, effects, lanes, length, source}
 //   later  {op: "sources"}                      → {items: [{id, name, app, kind}], allowed}
-//          {op: "start", source}                → {ok, error}   source "area" or "pick-window" opens a picker
+//          {op: "start", source}                → {ok, error}   source "pick-display", "pick-window", "area" or
+//                                                   "pick-simulator" opens a picker; else a listed source's id
 //          {op: "stop"}                         → {ok, error, id}
+//          {op: "sound", on}                    → {ok}  system sound for new recordings (status.sound)
 //          {op: "recordings"}                   → {items: [{id, name, kind, created, duration}]}
 //          {op: "edit", id, do, track?, number?, kind?}  → {ok}
 //                 do: add (track: a kind, or zoom-in, zoom-out, slow, fast), set (number | kind),
@@ -37,9 +39,19 @@ final class Studio: ExactModule {
 
     private var recorder: Recorder?
     private var starting = false
-    /// The area or window picker while it is open.
+    /// The picker while it is open.
     private var picker: AnyObject?
     private var statusItem: NSStatusItem?
+    private var statusMenu: NSMenu?
+    private var soundItem: NSMenuItem?
+    private var clock: Timer?
+    private var recordingSince = Date()
+    /// System sound for new recordings. The module owns it, so the sidebar's switch and the
+    /// menu bar's item are one setting. Kept in UserDefaults, except under the agent.
+    private var sound = true
+    private static let soundKey = "ExactStudio.recordSound"
+    /// Why the last start failed ("" when it did not), wherever it was asked from; the sidebar shows it.
+    private var lastError = ""
     private var editors: [String: Editor] = [:]
     private var keys: Any?
     /// The recording the preview shows: Space plays and pauses it.
@@ -48,6 +60,10 @@ final class Studio: ExactModule {
     override func destroy() {
         if let keys { NSEvent.removeMonitor(keys) }
         keys = nil
+        clock?.invalidate()
+        clock = nil
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+        statusItem = nil
     }
 
     required init(context: ExactModuleContext) {
@@ -62,6 +78,10 @@ final class Studio: ExactModule {
             Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true)
             Pictures.mayAsk = false
             print("exact-studio library: \(Library.root.path)")
+        } else {
+            sound = UserDefaults.standard.object(forKey: Self.soundKey) as? Bool ?? true
+            // An automated run gets no menu bar item: it would outlive nothing and only clutter the bar.
+            DispatchQueue.main.async { [weak self] in self?.installStatusItem() }
         }
     }
 
@@ -90,7 +110,7 @@ final class Studio: ExactModule {
     override func call(_ request: [String: Any]) throws -> [String: Any] {
         switch request["op"] as? String {
         case "status":
-            return ["recording": recorder != nil, "name": recorder?.name ?? "", "kind": recorder?.kind.rawValue ?? ""]
+            return ["recording": recorder != nil, "name": recorder?.name ?? "", "kind": recorder?.kind.rawValue ?? "", "sound": sound, "error": lastError]
         case "selection":
             return editor(request["id"] as? String ?? "")?.selection ?? Self.emptySelection
         case "look":
@@ -143,7 +163,10 @@ final class Studio: ExactModule {
                 catch { reply.send(["items": [], "allowed": false]) }
             }
         case "start":
-            start(request["source"] as? String ?? "", sound: request["sound"] as? Bool ?? true, reply: reply)
+            start(request["source"] as? String ?? "", reply: reply)
+        case "sound":
+            setSound(request["on"] as? Bool ?? true)
+            reply.send(["ok": true])
         case "stop":
             stop(reply: reply)
         case "recordings":
@@ -242,57 +265,87 @@ final class Studio: ExactModule {
 
     // MARK: Recording
 
-    private func start(_ source: String, sound: Bool, reply: ExactReply) {
-        guard recorder == nil, !starting else { return reply.send(["ok": false, "error": "Already recording."]) }
+    /// Starts a recording of `source`, or opens its picker first. `reply` is nil when the
+    /// menu bar asked: then a failure brings the window forward, where the sidebar shows it.
+    private func start(_ source: String, reply: ExactReply?) {
+        // A second picker would open over the first; the first one is answered when it closes.
+        if picker != nil { reply?.send(["ok": false, "error": ""]); return }
+        guard recorder == nil, !starting else { return started("Already recording.", reply) }
         guard CGPreflightScreenCaptureAccess() else {
             if !context.agent { CGRequestScreenCaptureAccess() }
-            return reply.send(["ok": false, "error": "Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen it."])
+            return started("Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen it.", reply)
         }
+        let picks: [String: SourcePicker.Kind] = ["pick-display": .display, "pick-window": .window, "pick-simulator": .simulator]
         if source == "area" {
             let picker = AreaPicker()
             self.picker = picker
             picker.pick { [weak self] area in
                 self?.picker = nil
-                guard let area else { return reply.send(["ok": false, "error": ""]) }
-                self?.begin(source, area: area, sound: sound, reply: reply)
+                guard let area else { self?.started("", reply); return }
+                self?.begin(source, area: area, reply: reply)
             }
-        } else if source == "pick-window" {
-            let picker = WindowPicker()
+        } else if let kind = picks[source] {
+            let found = SourcePicker.candidates(kind)
+            guard !found.isEmpty else {
+                // @ref LLP 0001#sources — no empty overlay; the card says what to do
+                return started(kind == .simulator ? "Open a Simulator or an emulator first." : "There is nothing to record on the screen.", reply)
+            }
+            let picker = SourcePicker(kind)
             self.picker = picker
-            picker.pick { [weak self] id in
+            picker.pick(found) { [weak self] picked in
                 self?.picker = nil
-                guard let id else { return reply.send(["ok": false, "error": ""]) }
-                self?.begin("window:\(id)", area: nil, sound: sound, reply: reply)
+                guard let picked else { self?.started("", reply); return }
+                self?.begin(picked, area: nil, reply: reply)
             }
         } else {
-            begin(source, area: nil, sound: sound, reply: reply)
+            begin(source, area: nil, reply: reply)
         }
     }
 
-    private func begin(_ source: String, area: (NSScreen, CGRect)?, sound: Bool, reply: ExactReply) {
+    /// The end of a start: `error` is "" when it worked or was cancelled.
+    private func started(_ error: String, _ reply: ExactReply?) {
+        if error != lastError {
+            lastError = error
+            context.changed("status")
+        }
+        reply?.send(["ok": error.isEmpty && recorder != nil, "error": error])
+        if reply == nil && !error.isEmpty { showMainWindow() }
+    }
+
+    private func begin(_ source: String, area: (NSScreen, CGRect)?, reply: ExactReply?) {
         starting = true
         let id = Self.newID()
         let folder = Library.recordings.appendingPathComponent(id, isDirectory: true)
+        let sound = self.sound
         Task { @MainActor in
             defer { starting = false }
             do {
                 let r = try await Recorder.make(source: source, area: area, folder: folder, id: id, sound: sound)
                 try await r.start()
                 recorder = r
-                showStatusItem()
+                recordingSince = Date()
+                updateStatusItem()
                 context.changed("status")
-                reply.send(["ok": true, "error": ""])
+                started("", reply)
             } catch {
                 try? FileManager.default.removeItem(at: folder)
-                reply.send(["ok": false, "error": "Couldn’t start recording: \(error)"])
+                started("Couldn’t start recording: \(error)", reply)
             }
         }
+    }
+
+    private func setSound(_ on: Bool) {
+        guard on != sound else { return }
+        sound = on
+        if !context.agent { UserDefaults.standard.set(on, forKey: Self.soundKey) }
+        soundItem?.state = on ? .on : .off
+        context.changed("status")
     }
 
     private func stop(reply: ExactReply?) {
         guard let r = recorder else { reply?.send(["ok": false, "error": "Not recording.", "id": ""]); return }
         recorder = nil
-        hideStatusItem()
+        updateStatusItem()
         context.changed("status")
         Task { @MainActor in
             do {
@@ -313,21 +366,106 @@ final class Studio: ExactModule {
         return f.string(from: Date())
     }
 
-    /// While recording, a menu bar item stops it, so the app's window can stay out of the shot.
-    private func showStatusItem() {
+    // MARK: Menu bar
+
+    // @ref LLP 0001#menu-bar — always there; one click stops a recording
+    /// One item in the menu bar while the app runs. Idle, it opens a menu that starts each
+    /// picker; while recording, it turns red with the time, and one click stops.
+    private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "stop.circle.fill", accessibilityDescription: "Stop recording")
-        item.button?.title = " Stop"
-        item.button?.imagePosition = .imageLeading
-        item.button?.contentTintColor = .systemRed
-        item.button?.target = self
-        item.button?.action = #selector(stopFromMenuBar)
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for (title, symbol, source) in [("Record Display", "display", "pick-display"), ("Record Window", "macwindow", "pick-window"),
+                                        ("Record Area", "rectangle.dashed", "area"), ("Record Simulator", "iphone", "pick-simulator")] {
+            let m = NSMenuItem(title: title, action: #selector(recordFromMenuBar(_:)), keyEquivalent: "")
+            m.target = self
+            m.representedObject = source
+            m.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+            menu.addItem(m)
+        }
+        menu.addItem(.separator())
+        let s = NSMenuItem(title: "System Sound", action: #selector(toggleSoundFromMenuBar), keyEquivalent: "")
+        s.target = self
+        s.state = sound ? .on : .off
+        menu.addItem(s)
+        menu.addItem(.separator())
+        let open = NSMenuItem(title: "Open Exact Studio", action: #selector(openFromMenuBar), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+        let quit = NSMenuItem(title: "Quit Exact Studio", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        quit.target = NSApp
+        menu.addItem(quit)
         statusItem = item
+        statusMenu = menu
+        soundItem = s
+        updateStatusItem()
     }
 
-    private func hideStatusItem() {
-        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
-        statusItem = nil
+    private func updateStatusItem() {
+        guard let item = statusItem, let button = item.button else { return }
+        let recording = recorder != nil
+        button.image = Self.glyph(recording: recording)
+        button.imagePosition = .imageLeading
+        button.contentTintColor = recording ? .systemRed : nil
+        button.toolTip = recording ? "Stop Recording" : "Exact Studio"
+        clock?.invalidate()
+        clock = nil
+        if recording {
+            // A click stops at once; the menu comes back when it has.
+            item.menu = nil
+            button.target = self
+            button.action = #selector(stopFromMenuBar)
+            let attrs: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.systemRed,
+                                                        .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium)]
+            let tick = { [weak self, weak button] in
+                guard let self else { return }
+                let s = Int(Date().timeIntervalSince(self.recordingSince))
+                button?.attributedTitle = NSAttributedString(string: String(format: " %d:%02d", s / 60, s % 60), attributes: attrs)
+            }
+            tick()
+            clock = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in tick() }
+        } else {
+            button.attributedTitle = NSAttributedString(string: "")
+            button.action = nil
+            item.menu = statusMenu
+        }
+    }
+
+    /// Our mark: a rounded frame around a dot (recording: around a stop square). A template,
+    /// so it follows the menu bar's light or dark look; drawn per resolution, so it stays crisp.
+    private static func glyph(recording: Bool) -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
+            NSColor.black.set()
+            let frame = NSBezierPath(roundedRect: NSRect(x: 2, y: 3.5, width: 14, height: 11), xRadius: 3, yRadius: 3)
+            frame.lineWidth = 1.5
+            frame.stroke()
+            if recording {
+                NSBezierPath(roundedRect: NSRect(x: 6.5, y: 6.5, width: 5, height: 5), xRadius: 1, yRadius: 1).fill()
+            } else {
+                NSBezierPath(ovalIn: NSRect(x: 6.25, y: 6.25, width: 5.5, height: 5.5)).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = recording ? "Stop Recording" : "Exact Studio"
+        return image
+    }
+
+    @objc private func recordFromMenuBar(_ sender: NSMenuItem) {
+        start(sender.representedObject as? String ?? "", reply: nil)
+    }
+
+    @objc private func toggleSoundFromMenuBar() { setSound(!sound) }
+
+    @objc private func openFromMenuBar() { showMainWindow() }
+
+    /// The app's own window, forward and unminimised.
+    private func showMainWindow() {
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        guard let w = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }
+        if w.isMiniaturized { w.deminiaturize(nil) }
+        w.makeKeyAndOrderFront(nil)
     }
 
     @objc private func stopFromMenuBar() {

@@ -7,6 +7,10 @@ shape Status
   recording: bool
   name: string
   kind: string
+  // System sound for new recordings: the module's, shared with the menu bar item.
+  sound: bool
+  // Why the last start failed, from the sidebar or the menu bar; "" when it did not.
+  error: string
 
 shape Source
   id: string
@@ -126,6 +130,10 @@ shape Done
 fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
+fn sourceSymbol(k: string): string = k == "pick-display" ? "symbol:sf/display" : k == "pick-window" ? "symbol:sf/macwindow" : k == "area" ? "symbol:sf/rectangle.dashed" : "symbol:sf/iphone"
+fn sourceLabel(k: string): string = k == "pick-display" ? "Display" : k == "pick-window" ? "Window" : k == "area" ? "Area" : "Simulator"
+fn sourceCaption(k: string): string = k == "pick-display" ? "A whole screen" : k == "pick-window" ? "Its real shape" : k == "area" ? "Drag a rectangle" : "Only the phone"
+fn sourceTestId(k: string): string = k == "pick-display" ? "record-display" : k == "pick-window" ? "record-pick-window" : k == "area" ? "record-area" : "record-simulator"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
 fn kindTitle(kind: string, level: number, rate: number): string = kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
@@ -148,8 +156,6 @@ component ExactStudio
   state open3d = true persist
   // The sidebar's sections, each folded on its own.
   state openSims = true persist
-  state openDisplays = true persist
-  state openWindows = true persist
   state openLibrary = true persist
   state leftOpen = true persist
   state rightOpen = true persist
@@ -159,7 +165,6 @@ component ExactStudio
   state exportOpen = false
   // The preview shows the whole recorded frame with the crop's grid and handles.
   state cropping = false
-  state recordSound = true persist
   state panelX = 24 persist
   // The timeline's height, set by dragging the handle under the preview; the preview takes the rest.
   state timelineH = 330 persist
@@ -167,7 +172,6 @@ component ExactStudio
   state startedAt = 0
   state now = 0
   state listed = 0
-  state allWindows = false
   resource status = recorderStatus() as shape Status else empty()
   resource sources = captureSources(listed) as shape SourceList else empty()
   resource library = recordings() as shape RecordingList else empty()
@@ -176,6 +180,7 @@ component ExactStudio
   // The recording's own look (look.json beside it).
   resource lk = recordingLook(selected) as shape LookInfo else empty()
   mutation started as shape Reply then afterStart
+  mutation soundSet as shape Done
   mutation stopped as shape Stopped refreshes library then afterStop
   mutation exported as shape Exported
   mutation deleted as shape Reply refreshes library
@@ -186,8 +191,6 @@ component ExactStudio
   derive current = first(library.items.filter(r => r.id == selected))
   derive isDevice = summary.device or (match current { case some(r) => r.kind == "simulator" or r.kind == "emulator", case none => false })
   derive devices = sources.items.filter(s => s.kind == "simulator" or s.kind == "emulator")
-  derive displays = sources.items.filter(s => s.kind == "display")
-  derive windows = sources.items.filter(s => s.kind == "window")
   derive cardLeft = panelMode == "left" and sel.id != ""
   derive leftShown = leftOpen or cardLeft
   derive gradients = ["ocean", "sunset", "mint", "midnight", "graphite", "paper", "peach", "lagoon", "berry", "aurora", "ember", "lavender", "citrus", "forest", "sky", "rose", "dusk", "steel", "candy", "deepsea", "sand", "neon", "glow", "noir"]
@@ -205,23 +208,27 @@ component ExactStudio
   derive customAngle = lk.customAngle
   derive customRadial = lk.customRadial
   derive look = `{"background":"${background}","customA":"${customA}","customB":"${customB}","customAngle":${customAngle},"customRadial":${customRadial},"aspect":"${aspect}","padding":${padding},"radius":${radius},"shadow":${shadow},"cursor":${cursorOn},"cursorSize":${cursorSize / 100},"clickEffect":${clickEffect},"smoothCursor":${smoothCursor}}`
-  derive startError = match started { case some(r) => r.error, case none => "" }
+  // The module's, so a start from the menu bar shows its error here too.
+  derive startError = status.error
   derive stopError = match stopped { case some(r) => r.error, case none => "" }
   derive openError = match opened { case some(r) => r.error, case none => "" }
   derive exportLine = match exported { case some(r) => (r.ok ? (r.copied ? "Copied. Paste it into Slack, Messages or Finder." : "Saved.") : r.error), case none => "" }
   derive exportPath = match exported { case some(r) => (r.copied ? "" : r.path), case none => "" }
   task tick when status.recording
     every(500, step)
+  // A recording can start from the menu bar too, so its clock starts when the status says so.
+  task began when status.recording
+    after(1, markStart)
 
   action step
     now = performanceNow()
   action refresh
     listed = listed + 1
-  action toggleWindows
-    allWindows = not allWindows
   action record(source: string)
-    send started = startRecording(source, recordSound)
+    send started = startRecording(source)
   action afterStart
+    listed = listed + 1
+  action markStart
     startedAt = performanceNow()
     now = performanceNow()
   action stop
@@ -262,7 +269,7 @@ component ExactStudio
   action exportIt(to: string)
     send exported = exportRecording(selected, exportQuality, to)
   action setRecordSound(v: bool)
-    recordSound = v
+    send soundSet = setSystemSound(v)
   action setMuted(v: bool)
     send edited = editClip(selected, "volume", "", (v ? 0 : 100), "")
   action setVolume(v: number)
@@ -331,10 +338,6 @@ component ExactStudio
       open3d = not open3d
     if name == "sims"
       openSims = not openSims
-    if name == "displays"
-      openDisplays = not openDisplays
-    if name == "windows"
-      openWindows = not openWindows
     if name == "library"
       openLibrary = not openLibrary
   action setCustomA(v: string)
@@ -429,33 +432,33 @@ component ExactStudio
                       text status.name font="-exact-footnote" color="-exact-secondary-label" line-clamp=2
                       button press=stop buttonStyle="filled" disabled=pending(stopped) testId="stop"
                         text "Stop Recording"
-                      text "Or press Stop in the menu bar." font="-exact-caption1" color="-exact-tertiary-label"
+                      text "Or click the red mark in the menu bar." font="-exact-caption1" color="-exact-tertiary-label"
                   else
-                    column gap=12 padding=16 border-radius=16 background-color="-exact-tertiary-background"
+                    column gap=14 padding=16 border-radius=16 background-color="-exact-tertiary-background"
                       row gap=12 align-items="center"
                         column width=40 height=40 border-radius=20 background-color="-exact-system-red" align-items="center" justify-content="center"
                           image "symbol:sf/record.circle" color="white" font="-exact-title3" aria-hidden=true
                         column flex=1 min-width=0
                           text "New Recording" font="-exact-headline"
                           text "Pick what to capture" font="-exact-footnote" color="-exact-secondary-label"
-                      button press=record("area") buttonStyle="filled" disabled=pending(started) testId="record-area"
-                        image "symbol:sf/rectangle.dashed"
-                        text "Drag Out an Area"
-                      // Light up the window under the pointer and click it; recorded in its own shape.
-                      button press=record("pick-window") buttonStyle="bordered" disabled=pending(started) testId="record-pick-window"
-                        image "symbol:sf/macwindow.on.rectangle"
-                        text "Pick a Window"
+                      // Four sources, each opening its picker on the screen.
+                      row flex-wrap="wrap" gap=10
+                        for k in ["pick-display", "pick-window", "area", "pick-simulator"] key=k
+                          button press=record(k) disabled=pending(started) testId=sourceTestId(k) aria-label=`${sourceLabel(k)}: ${sourceCaption(k)}` appearance="none" width="calc(50% - 5px)" box-sizing="border-box" padding="16px 8px 14px" border-radius=12 background-color="-exact-tertiary-fill"
+                            column align-items="center" gap=2 flex=1 min-width=0
+                              column height=28 align-items="center" justify-content="center" margin-bottom=4
+                                image sourceSymbol(k) font="-exact-title2" aria-hidden=true
+                              text sourceLabel(k) font-weight=600
+                              text sourceCaption(k) font="-exact-caption1" color="-exact-secondary-label" line-clamp=1
                       if not sources.allowed and not pending(sources)
                         text "Allow Exact Studio in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen the app." font="-exact-footnote" color="-exact-system-orange" testId="permission"
                       if startError != "" and not pending(started)
                         text startError font="-exact-footnote" color="-exact-system-red" testId="start-error"
-                    // Sound applies to every source below, so it sits outside the area card.
-                    row align-items="center" gap=12 padding="12px 16px" border-radius=14 background-color="-exact-tertiary-background" testId="sound-setting"
-                      image (recordSound ? "symbol:sf/speaker.wave.2.fill" : "symbol:sf/speaker.slash.fill") color=(recordSound ? "AccentColor" : "-exact-secondary-label") font="-exact-title3" width=28 text-align="center" aria-hidden=true
-                      column flex=1 min-width=0 gap=2
-                        text "System Sound" font="-exact-headline"
-                        text (recordSound ? "On for every recording" : "Off for every recording") font="-exact-footnote" color="-exact-secondary-label"
-                      input type="checkbox" switch checked=recordSound change=setRecordSound aria-label="Record system sound in every recording" testId="record-sound"
+                      // Sound applies to every source, so it closes the card as one quiet row.
+                      column height=1 background-color="-exact-separator" margin-top=4
+                      row align-items="center" gap=12 testId="sound-setting"
+                        text "System Sound" font="-exact-subheadline" flex=1
+                        input type="checkbox" switch checked=status.sound change=setRecordSound aria-label="Record system sound in every recording" testId="record-sound"
                     if devices.length > 0
                       column gap=6
                         row align-items="center"
@@ -464,6 +467,8 @@ component ExactStudio
                               text "SIMULATORS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
                               image (openSims ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
                               view flex=1
+                          button press=refresh aria-label="Refresh sources" testId="refresh"
+                            image "symbol:refresh"
                         if openSims
                           for s in devices key=s.id
                             button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color="-exact-tertiary-background"
@@ -474,39 +479,6 @@ component ExactStudio
                                   text s.name line-clamp=1 font-weight=500 text-align="left" align-self="stretch"
                                   text `${s.app} · fits the bezel` font="-exact-caption1" color="-exact-system-teal" line-clamp=1
                                 image "symbol:sf/record.circle" color="-exact-system-red" aria-hidden=true
-                    column gap=4
-                      row align-items="center"
-                        button press=toggleSection("displays") appearance="none" aria-expanded=openDisplays testId="sec-displays" flex=1 padding-top=2 padding-bottom=2
-                          row align-items="center" gap=6 flex=1
-                            text "DISPLAYS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
-                            image (openDisplays ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
-                            view flex=1
-                        button press=refresh aria-label="Refresh sources" testId="refresh"
-                          image "symbol:refresh"
-                      if openDisplays
-                        for s in displays key=s.id
-                          button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
-                            row gap=10 align-items="center" min-width=0 flex=1
-                              image "symbol:sf/display" color="-exact-secondary-label" aria-hidden=true
-                              text s.name line-clamp=1 flex=1 text-align="left"
-                    column gap=4
-                      row align-items="center"
-                        button press=toggleSection("windows") appearance="none" aria-expanded=openWindows testId="sec-windows" flex=1 padding-top=2 padding-bottom=2
-                          row align-items="center" gap=6 flex=1
-                            text "WINDOWS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
-                            image (openWindows ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
-                            view flex=1
-                        if openWindows and windows.length > 6
-                          button press=toggleWindows testId="all-windows"
-                            text (allWindows ? "Fewer" : `All ${windows.length}`) font="-exact-caption1"
-                      if openWindows
-                        for s in (allWindows ? windows : windows.slice(0, 6)) key=s.id
-                          button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=8 border-radius=10
-                            row gap=10 align-items="center" min-width=0 flex=1
-                              image "symbol:sf/macwindow" color="-exact-secondary-label" aria-hidden=true
-                              column min-width=0 flex=1 align-items="flex-start"
-                                text s.name line-clamp=1 text-align="left" align-self="stretch"
-                                text s.app font="-exact-caption2" color="-exact-tertiary-label" line-clamp=1 text-align="left" align-self="stretch"
                   column gap=6
                     row align-items="center"
                       button press=toggleSection("library") appearance="none" aria-expanded=openLibrary testId="sec-library" flex=1 padding-top=2 padding-bottom=2
@@ -540,7 +512,7 @@ component ExactStudio
                   column width=72 height=72 border-radius=20 background-color="-exact-tertiary-background" align-items="center" justify-content="center"
                     image "symbol:sf/rectangle.dashed.badge.record" font="-exact-large-title" color="-exact-secondary-label" aria-hidden=true
                   text "Record something to start" font="-exact-title2" font-weight=600
-                  text "Drag out an area, or pick a window or a device in the sidebar. A Simulator or an emulator is cropped to its bezel, nothing more." color="-exact-secondary-label" text-align="center" max-width="28rem"
+                  text "Pick a display, a window, an area or a Simulator in the sidebar. A Simulator or an emulator is cropped to its bezel, nothing more." color="-exact-secondary-label" text-align="center" max-width="28rem"
               case some(rec)
                 column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease"
                   studio-preview clip=rec.id look=look cropping=(cropping ? "true" : "") aria-label="Preview" flex=1 min-height=200 testId="preview"

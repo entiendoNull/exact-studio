@@ -10,7 +10,7 @@ const later = async <T>(native: Native, request: Record<string, unknown>, fallba
 
 const sources: Sources = {
   recorderStatus: async (_args, _store, _storage, native): Promise<Result<'recorderStatus'>> => {
-    if (!native?.available) return { recording: false, name: '', kind: '' };
+    if (!native?.available) return { recording: false, name: '', kind: '', sound: true, error: '' };
     native.watch('status');
     return native.call({ op: 'status' }) as Result<'recorderStatus'>;
   },
@@ -37,8 +37,9 @@ const sources: Sources = {
   },
   editClip: ([id, what, track, number, kind], _store, _storage, native) =>
     later(native, { op: 'edit', id, do: what, track, number, kind }, { ok: false }),
-  startRecording: ([source, sound], _store, _storage, native) =>
-    later(native, { op: 'start', source, sound }, { ok: false, error: 'Recording needs the Mac app.' }),
+  startRecording: ([source], _store, _storage, native) =>
+    later(native, { op: 'start', source }, { ok: false, error: 'Recording needs the Mac app.' }),
+  setSystemSound: ([on], _store, _storage, native) => later(native, { op: 'sound', on }, { ok: false }),
   stopRecording: (_args, _store, _storage, native) =>
     later(native, { op: 'stop' }, { ok: false, error: 'Not recording.', id: '' }),
   exportRecording: ([id, quality, to], _store, _storage, native) =>
