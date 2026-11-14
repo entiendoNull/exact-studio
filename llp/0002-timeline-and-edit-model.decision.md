@@ -20,7 +20,8 @@ The rows are in four groups, and a row holds one kind of thing:
   part and remove it; kept parts can crossfade or fade into each other. Its **Sound**, when it has
   one: the recorded sound's waveform, with the removed parts dimmed (see Sound). Its **Position**: where
   the video sits and how it moves, one track, because the video can only be in one place at a
-  time. Its **Effects** lanes: zooms, speed, blur, mono, spotlight, highlight and 3D turns.
+  time. Its **Effects** lanes: zooms, speed, blur, mono, spotlight, highlight, 3D turns and masks
+  (LLP 0006).
 - **On top of the video.** **Text** lanes, then **Image** lanes (below).
 - **Sound.** Lanes for the sounds you add: music on one, short sounds on another (see Sound).
 - **The whole frame.** Lanes for a blur or black and white that covers the whole picture: the
@@ -58,7 +59,7 @@ an image's effect only that image, and a whole-frame effect everything. Nobody h
 
 - Two segments on one lane never overlap.
 - Never two zooms, two speeds, two 3D turns, or two of the same visual effect with the same
-  reach at one time, even on separate lanes. Texts and images on separate lanes overlap freely.
+  reach at one time, even on separate lanes. Texts, images and masks on separate lanes overlap freely.
 - On one image: never two of the same effect at one time, and its moves and effects stay inside
   its span.
 

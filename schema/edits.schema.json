@@ -32,7 +32,7 @@
     "lanes": {
       "type": "integer",
       "minimum": 1,
-      "description": "How many effect lanes the video has: they hold zoom, speed, spotlight, highlight, 3d, and a blur or mono with no scope"
+      "description": "How many effect lanes the video has: they hold zoom, speed, spotlight, highlight, 3d, mask, and a blur or mono with no scope"
     },
     "textLanes": {
       "type": "integer",
@@ -255,6 +255,7 @@
               "text",
               "image",
               "3d",
+              "mask",
               "spotlight",
               "highlight",
               "blur",
@@ -305,7 +306,7 @@
           },
           "style": {
             "type": "string",
-            "description": "text: plain, pill, box, outline, shadow; 3d: hold, orbit"
+            "description": "text: plain, pill, box, outline, shadow; 3d: hold, orbit; mask: blur (the default), pixels, solid"
           },
           "text": {
             "type": "string"
@@ -323,14 +324,23 @@
             "description": "text, image: height as a share of the frame's"
           },
           "color": {
-            "enum": [
-              "white",
-              "black",
-              "yellow",
-              "pink",
-              "blue",
-              "mint"
-            ]
+            "anyOf": [
+              {
+                "enum": [
+                  "white",
+                  "black",
+                  "yellow",
+                  "pink",
+                  "blue",
+                  "mint"
+                ]
+              },
+              {
+                "type": "string",
+                "pattern": "^#?[0-9A-Fa-f]{6}$"
+              }
+            ],
+            "description": "text: one of the names. mask (solid): \"#RRGGBB\" or one of the names; default black"
           },
           "weight": {
             "enum": [
@@ -395,7 +405,7 @@
             "type": "number",
             "minimum": 0,
             "maximum": 0.5,
-            "description": "image: rounded corners, as a share of its shorter side"
+            "description": "image, mask: rounded corners, as a share of its shorter side"
           },
           "shadow": {
             "type": "boolean",
@@ -507,6 +517,43 @@
               ],
               "additionalProperties": false
             }
+          },
+          "rect": {
+            "type": "object",
+            "description": "mask: what it hides, in 0–1 of the full recorded frame (before the crop), origin top-left, so a later crop never moves it off the secret. Only the part inside the crop shows. `exact-studio frame <id> <t> --raw` renders that picture",
+            "properties": {
+              "x": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Left edge"
+              },
+              "y": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "Top edge"
+              },
+              "w": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "description": "Width; x + w is at most 1"
+              },
+              "h": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1,
+                "description": "Height; y + h is at most 1"
+              }
+            },
+            "required": [
+              "x",
+              "y",
+              "w",
+              "h"
+            ],
+            "additionalProperties": false
           }
         },
         "additionalProperties": false,
@@ -515,6 +562,22 @@
           "kind",
           "start",
           "end"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "mask"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "rect"
+              ]
+            }
+          }
         ]
       }
     }

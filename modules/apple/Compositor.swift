@@ -71,8 +71,8 @@ struct Look: Codable, Equatable {
 }
 
 /// One span on an effect lane. `kind` is "zoom", "speed", a visual effect
-/// ("spotlight", "highlight", "blur", "mono"), "text" or "image". `level` is a zoom's
-/// (below 1 zooms out), `rate` a speed's; the rest are a text's or an image's.
+/// ("spotlight", "highlight", "blur", "mono"), "mask", "text" or "image". `level` is a zoom's
+/// (below 1 zooms out), `rate` a speed's; the rest are a text's, an image's or a mask's.
 struct Segment: Codable, Equatable {
     var id: String
     var kind: String
@@ -117,16 +117,23 @@ struct Segment: Codable, Equatable {
     /// Its own effects, each a span inside the image's: `kind` one of `Segment.imageEffects`,
     /// `lane` its row under the image, `level` a fade's opacity.
     var effects: [Segment]?
+    // A mask's. It shares a text's `style` ("blur", "pixels" or "solid") and `color`, and an image's `radius`.
+    /// What it hides: unit coordinates of the full recorded frame (the capture, before the crop), origin
+    /// top-left. So a later crop never moves it off what it hides.
+    // @ref LLP 0006#follows-the-video — full-frame units, not the crop's
+    var rect: UnitRect?
 
     static let visual = ["spotlight", "highlight", "blur", "mono"]
-    static let kinds = ["zoom", "speed", "text", "image", "3d"] + visual
+    static let kinds = ["zoom", "speed", "text", "image", "3d", "mask"] + visual
+    /// How a mask hides what is under it; the first is the default.
+    static let maskStyles = ["blur", "pixels", "solid"]
     /// What an image's own effect can be.
     static let imageEffects = ["blur", "mono", "fade", "pulse", "float", "wiggle"]
 
     /// Two segments may overlap in time unless they share a group: one zoom at
     /// a time, one speed at a time, one of each visual effect at a time.
-    /// Texts and images never clash.
-    var group: String { isOverlay ? kind + ":" + id : coversFrame ? kind + ":frame" : kind }
+    /// Texts, images and masks never clash.
+    var group: String { isOverlay || kind == "mask" ? kind + ":" + id : coversFrame ? kind + ":frame" : kind }
     /// A blur or black and white over the whole picture, not only the video.
     var coversFrame: Bool { (kind == "blur" || kind == "mono") && (scope == "frame" || scope == "all") }
     /// Drawn over the finished picture: a text or an image.
@@ -351,6 +358,7 @@ struct Edits: Codable, Equatable {
     var effects: [Segment] { segments.filter { Segment.visual.contains($0.kind) } }
     var texts: [Segment] { segments.filter { $0.kind == "text" } }
     var images: [Segment] { segments.filter { $0.kind == "image" } }
+    var masks: [Segment] { segments.filter { $0.kind == "mask" } }
     /// The texts and images showing at `t`, back to front: the images, the lowest lane in front, then
     /// the texts over them, in the order they are listed, as they always were.
     // @ref LLP 0002#images — lane order is the stacking order
@@ -423,9 +431,19 @@ struct Edits: Codable, Equatable {
 }
 
 extension Segment {
+    /// A mask's fill colour as "#RRGGBB": its `color`, a hex colour or a text colour's name; black when it has none.
+    /// Nil when `color` is neither.
+    static func maskHex(_ color: String?) -> String? {
+        let named = ["black": "#000000", "white": "#FFFFFF", "yellow": "#FFD633", "pink": "#FF458C", "blue": "#408CFF", "mint": "#59EBB3"]
+        guard let c = color?.trimmingCharacters(in: .whitespaces), !c.isEmpty else { return "#000000" }
+        if let hex = named[c] { return hex }
+        guard Backgrounds.hex(c) != nil else { return nil }
+        return "#" + c.replacingOccurrences(of: "#", with: "").uppercased()
+    }
+
     static func noun(_ kind: String) -> String {
         ["zoom": "zooms", "speed": "speed changes", "spotlight": "spotlights", "highlight": "cursor highlights",
-         "blur": "blurs", "mono": "black-and-white effects", "text": "texts", "image": "images", "3d": "3D turns"][kind] ?? "effects"
+         "blur": "blurs", "mono": "black-and-white effects", "text": "texts", "image": "images", "3d": "3D turns", "mask": "masks"][kind] ?? "effects"
     }
 }
 
@@ -924,7 +942,12 @@ struct Framing {
             .concatenating(CGAffineTransform(scaleX: subject.width / cropRect.width, y: subject.height / cropRect.height))
             .concatenating(CGAffineTransform(translationX: subject.minX, y: subject.minY))
         let source = frame.cropped(to: cropRect).transformed(by: toSubject)
-        var subjectImage = source
+        // The masks hide their part of the recording before anything else touches it, on the recording's
+        // own pixels, so it is scaled once, as without them. The hidden picture feeds the "video"
+        // background too; the raw one still gives a window its shape.
+        // @ref LLP 0006#follows-the-video — on the recording itself, so zoom, moves and 3D carry it
+        let shown = hide(frame, crop: cropRect, at: t).cropped(to: cropRect).transformed(by: toSubject)
+        var subjectImage = shown
 
         // Effects on the subject's pixels.
         let minSide = min(canvas.width, canvas.height)
@@ -1001,11 +1024,97 @@ struct Framing {
                     body = BodyOnCanvas(rect: r, radius: CGFloat(d.radius) * r.width, buttons: d.buttons.map(onCanvas))
                 }
             }
-            return finish(subjectImage, at: t, opacity: opacity, texts: texts, source: source, body: body)
+            return finish(subjectImage, at: t, opacity: opacity, texts: texts, source: shown, body: body)
         } else {
             subjectImage = shaped(subjectImage, source: source)
         }
-        return finish(subjectImage, at: t, opacity: opacity, texts: texts, source: source)
+        return finish(subjectImage, at: t, opacity: opacity, texts: texts, source: shown)
+    }
+
+    /// The masks showing at `t` applied to a frame as recorded (`cropRect` is the crop in its pixels): each
+    /// replaces the pixels of its rectangle that the crop shows with a deep blur, big cells or a solid fill.
+    /// Full strength from its start to its end. Sizes are in recorded pixels, where 12 pt text is about 24
+    /// pixels tall; a mask partly outside the crop is sized by the part that shows.
+    // @ref LLP 0006#never-fades — no ramp: a fading mask would show the secret for a few frames
+    static let maskSlack = 0.005
+    private func hide(_ image: CIImage, crop cropRect: CGRect, at t: Double) -> CIImage {
+        var fills: CIImage?
+        // A few milliseconds early and late: rounding in the time map never drops the first or the last frame.
+        for m in edits.masks where t >= m.start - Framing.maskSlack && t < m.end + Framing.maskSlack {
+            guard let u = m.rect else { continue }
+            // The rect is in the whole frame's units; only the part inside the crop is drawn.
+            let e = image.extent
+            let r = CGRect(x: e.minX + u.x * e.width, y: e.minY + (1 - u.y - u.h) * e.height,
+                           width: u.w * e.width, height: u.h * e.height).intersection(cropRect).integral
+            guard !r.isNull, r.width >= 1, r.height >= 1 else { continue }
+            // Only the rectangle's own pixels, their edges repeated: nothing outside is smeared in.
+            let region = image.cropped(to: r).clampedToExtent()
+            var fill: CIImage
+            // @ref LLP 0006#three-styles — each hides 12 pt text at any size
+            switch m.style ?? "blur" {
+            case "solid":
+                fill = CIImage(color: Backgrounds.hex(Segment.maskHex(m.color)) ?? CIColor(red: 0, green: 0, blue: 0))
+            case "pixels":
+                let p = CIFilter.pixellate()
+                p.inputImage = region
+                p.center = r.origin
+                p.scale = Float(max(min(r.width, r.height) / 6, 28))
+                fill = p.outputImage!
+            default:
+                // Cells first, then a deep blur: the cells throw away the fine detail that a blur alone keeps.
+                let sigma = max(min(r.width, r.height) * 0.12, 24)
+                let p = CIFilter.pixellate()
+                p.inputImage = region
+                p.center = r.origin
+                p.scale = Float(sigma)
+                fill = p.outputImage!.clampedToExtent().applyingGaussianBlur(sigma: sigma)
+            }
+            // Opaque, so nothing under it shows through, and cut to the rectangle (rounded when it has a radius).
+            let solid = CIFilter.colorMatrix()
+            solid.inputImage = fill
+            solid.aVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+            solid.biasVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+            let shape = CIFilter.roundedRectangleGenerator()
+            shape.extent = r
+            shape.radius = Float(min(max(m.radius ?? 0, 0), 0.5) * min(r.width, r.height))
+            shape.color = .white
+            let cut = CIFilter.blendWithMask()
+            cut.inputImage = solid.outputImage!.cropped(to: r)
+            cut.backgroundImage = CIImage.empty()
+            cut.maskImage = shape.outputImage!
+            fill = cut.outputImage!.cropped(to: r)
+            fills = fills.map { fill.composited(over: $0) } ?? fill
+        }
+        // All of them laid over the frame in one step: the frame is sampled as it is without masks,
+        // so every pixel outside them stays exactly as it was.
+        guard let fills else { return image }
+        return fills.composited(over: image).cropped(to: image.extent)
+    }
+
+    /// Where the subject's own unit coordinates (origin top-left) are on the canvas at `t`, in Core Image
+    /// coordinates: through its place, its turn in the picture and the zoom. Nil while it is turned in 3D,
+    /// where a flat transform cannot follow it.
+    /// Where the full recorded frame's unit coordinates (origin top-left, before the crop) are on the
+    /// canvas at `t`: a mask's rect. Nil while the video is turned in 3D.
+    func frameToCanvas(at t: Double) -> CGAffineTransform? {
+        let c = crop
+        let toSubject = CGAffineTransform(a: 1 / max(c.w, 0.0001), b: 0, c: 0, d: 1 / max(c.h, 0.0001),
+                                          tx: -c.x / max(c.w, 0.0001), ty: -c.y / max(c.h, 0.0001))
+        return subjectToCanvas(at: t).map { toSubject.concatenating($0) }
+    }
+
+    func subjectToCanvas(at t: Double) -> CGAffineTransform? {
+        let p = pose(at: t)
+        if inDepth(at: t), abs(p.angles.tilt) + abs(p.angles.turn.truncatingRemainder(dividingBy: 360)) + abs(p.angles.roll) > 0.01 { return nil }
+        let place = placement(p)
+        var m = CGAffineTransform(a: subject.width, b: 0, c: 0, d: -subject.height, tx: subject.minX, ty: subject.maxY).concatenating(place)
+        let (s, c) = camera(at: t, place: place)
+        if abs(s - 1) > 0.0005 {
+            m = m.concatenating(CGAffineTransform(translationX: -c.x, y: -c.y))
+                .concatenating(CGAffineTransform(scaleX: s, y: s))
+                .concatenating(CGAffineTransform(translationX: canvas.width / 2, y: canvas.height / 2))
+        }
+        return m
     }
 
     /// The recording itself, stretched to cover the canvas, blurred deep and dimmed.

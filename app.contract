@@ -140,7 +140,7 @@ fn sourceLabel(k: string): string = k == "pick-display" ? "Display" : k == "pick
 fn sourceCaption(k: string): string = k == "pick-display" ? "A whole screen" : k == "pick-window" ? "Its real shape" : k == "area" ? "Drag a rectangle" : "Only the phone"
 fn sourceTestId(k: string): string = k == "pick-display" ? "record-display" : k == "pick-window" ? "record-pick-window" : k == "area" ? "record-area" : "record-simulator"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn kindTitle(kind: string, level: number, rate: number): string = kind == "recorded" ? "Recorded Sound" : kind == "sound" ? "Sound" : kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "recorded" ? "Recorded Sound" : kind == "sound" ? "Sound" : kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "mask" ? "Mask" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn imageFxLabel(kind: string): string = kind == "blur" ? "Blur" : kind == "mono" ? "Black & White" : kind == "fade" ? "Fade" : kind == "pulse" ? "Pulse" : kind == "float" ? "Float" : "Wiggle"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
@@ -943,6 +943,18 @@ component SettingsCard
             button role="radio" aria-checked=(sel.scope == "all") press=segField("scope", "all") flex=1 testId="scope-all"
               text "Everything"
           text (sel.scope == "all" ? "Covers the whole picture, texts too." : sel.scope == "frame" ? "Covers the video, the background and the images. Texts stay sharp on top." : "Covers only the video.") font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "mask"
+        text "Hides a part of the recording. It stays on that part when you crop, or when the video moves, zooms or turns." font="-exact-caption1" color="-exact-tertiary-label"
+        text "Hide with" font="-exact-caption1" color="-exact-secondary-label"
+        row role="radiogroup" aria-label="Hide with"
+          for m in ["blur", "pixels", "solid"] key=m
+            button role="radio" aria-checked=(sel.style == m) press=segField("style", m) flex=1 testId=`mask-${m}`
+              text (m == "blur" ? "Blur" : m == "pixels" ? "Pixels" : "Solid")
+        if sel.style == "solid"
+          row align-items="center" gap=8
+            text "Colour" flex=1
+            studio-color hex=sel.color change=segField("color") aria-label="Mask colour" width=64 height=28 testId="mask-color"
+        text "Drag the box in the preview to move it; drag a corner or an edge to resize it." font="-exact-caption1" color="-exact-tertiary-label"
       if sel.kind == "3d"
         text "Turns in 3D over its span and back, even with Show in 3D off." font="-exact-caption1" color="-exact-tertiary-label"
         row role="radiogroup" aria-label="Turn style"

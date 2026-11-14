@@ -15,9 +15,12 @@ exact-studio — edit Exact Studio recordings from the command line
   exact-studio list                         the recordings, newest first
   exact-studio show <id> [--json]           its length, clip parts, segments, sounds, moves and look
   exact-studio validate <id>                checks edits.json and look.json; exit 1 on a problem
-  exact-studio frame <id> <time> [--out f.png] [--source]
+  exact-studio frame <id> <time> [--out f.png] [--source] [--raw]
                                             renders one frame at <time> seconds of the video
                                             (--source: of the recording); default .exact/frame.png
+                                            --raw: the full recorded frame there, before the crop, at its own pixel
+                                            size, with no edits: a pixel at (px, py) is (px/width, py/height) in a
+                                            mask's rect
   exact-studio export <id> [--out f.mp4] [--quality best|1080p|720p|small]
                                             renders the video; default ~/Movies/Exact Studio/<name>.mp4
   exact-studio template <id> <name>         replaces texts, effects and moves with a template:
@@ -32,6 +35,13 @@ exact-studio — edit Exact Studio recordings from the command line
                                             folder and adds a sound from <t> seconds of the recording (default 0)
                                             playing <seconds> of the file (default all of it, or what fits);
                                             it plays straight through, not cut by the video's cuts; prints it
+  exact-studio mask <id> --rect x,y,w,h [--at <t>] [--for <seconds>] [--style blur|pixels|solid] [--color '#000000']
+                                            hides a part of the recording (an API key, an email, a name): x, y, w, h
+                                            are 0–1 of the full recorded frame (before the crop; frame --raw shows
+                                            it), origin top-left, so a later crop never moves it off the secret;
+                                            from <t> seconds of the recording (default 0) for <seconds> (default 4), at
+                                            full strength throughout; it follows the video through zooms, moves and 3D;
+                                            on the first effect lane free then (else a new one); prints the new segment
   exact-studio schema                       prints where the docs and JSON Schemas are
 
   <id> is a recording folder's name, a unique start of one, or "latest".
@@ -108,6 +118,23 @@ func composition(_ r: Recording) -> (asset: AVAsset, video: AVMutableVideoCompos
 
 func stamp(_ s: Double) -> String { (s < 0 ? "-" : "") + String(format: "%d:%05.2f", Int(abs(s)) / 60, abs(s).truncatingRemainder(dividingBy: 60)) }
 
+/// What is wrong with a mask's own fields; empty when nothing is.
+func maskProblems(_ s: Segment) -> [String] {
+    var out: [String] = []
+    if let u = s.rect {
+        if u.w <= 0 || u.h <= 0 { out.append("its rect needs a width and a height above 0") }
+        if u.x < 0 || u.y < 0 || u.x + u.w > 1.0001 || u.y + u.h > 1.0001 {
+            out.append("its rect must lie inside the frame: x, y, w, h are 0–1 of the full recorded frame (before the crop), with x + w and y + h at most 1")
+        }
+    } else {
+        out.append("a mask needs its rect, {\"x\", \"y\", \"w\", \"h\"} in 0–1 of the full recorded frame (before the crop)")
+    }
+    if let style = s.style, !Segment.maskStyles.contains(style) { out.append("no mask style \(style); one of \(Segment.maskStyles.joined(separator: ", "))") }
+    if Segment.maskHex(s.color) == nil { out.append("color \(s.color ?? "") is not \"#RRGGBB\" or a text colour (black, white, yellow, pink, blue, mint)") }
+    if let r = s.radius, !(0...0.5).contains(r) { out.append("radius must be 0–0.5") }
+    return out
+}
+
 /// Problems with a recording's edits, each a line; empty when it is fine.
 func problems(_ r: Recording) -> [String] {
     var out: [String] = []
@@ -154,6 +181,11 @@ func problems(_ r: Recording) -> [String] {
             if Set(ids).count != ids.count { out.append("\(at): two of its moves or effects share an id") }
         } else if s.moves != nil || s.effects != nil {
             out.append("\(at): only an image has moves and effects of its own")
+        }
+        if s.kind == "mask" {
+            out += maskProblems(s).map { "\(at): \($0)" }
+        } else if s.rect != nil {
+            out.append("\(at): only a mask has a rect")
         }
     }
     let map = TimeMap(duration: d, edits: e)
@@ -220,6 +252,16 @@ case "show":
         case "text": what += " “\(s.text ?? "")” \(s.style ?? "plain") in:\(s.animIn ?? "") out:\(s.animOut ?? "")"
         case "image": what += " \(s.file ?? "") at x \(s.x ?? 0.5) y \(s.y ?? 0.5) size \(s.size ?? 0.25) in:\(s.animIn ?? "fade") out:\(s.animOut ?? "fade")"
         case "3d": what += " \(s.style ?? "hold") tilt \(s.tilt ?? 0) turn \(s.turn ?? 0)"
+        case "mask":
+            let u = s.rect
+            what += " \(s.style ?? "blur")\(s.style == "solid" ? " \(s.color ?? "black")" : "") rect x \(u?.x ?? 0) y \(u?.y ?? 0) w \(u?.w ?? 0) h \(u?.h ?? 0) (full frame)"
+            // A mask the crop leaves out hides nothing; say so, and say when only part of it shows.
+            if let u {
+                let c = r.meta.crop
+                let ix = min(u.x + u.w, c.x + c.w) - max(u.x, c.x), iy = min(u.y + u.h, c.y + c.h) - max(u.y, c.y)
+                if ix <= 0 || iy <= 0 { what += " — outside the crop: hides nothing now" }
+                else if ix < u.w - 0.0001 || iy < u.h - 0.0001 { what += " — partly outside the crop" }
+            }
         default: if s.coversFrame { what += s.scope == "all" ? " (whole frame, texts too)" : " (whole frame)" }
         }
         print("  \(["e", "t", "i", "f"][s.space])\(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]")
@@ -249,11 +291,36 @@ case "validate":
 
 case "frame":
     guard args.count >= 2, let at = Double(args[1]) else { fail(usage) }
-    let source = flag("--source")
+    let source = flag("--source"), raw = flag("--raw")
     let out = URL(fileURLWithPath: option("--out") ?? ".exact/frame.png")
     let r = open(args[0])
     let (mix, comp, map, _) = composition(r)
     let t = source ? map.output(at) : min(max(at, 0), map.outputDuration - 0.02)
+    if raw {
+        // The full frame as captured at that moment, before the crop: the picture a mask's rect measures.
+        // @ref LLP 0006#follows-the-video — a mask's coordinates are the full recorded frame's, not the crop's or the canvas's
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: r.folder.appendingPathComponent("capture.mov")))
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        let src = source ? min(max(at, 0), r.meta.duration) : map.source(t)
+        final class Got: @unchecked Sendable { var image: CGImage?; var error: Error? }
+        let got = Got(), done = DispatchSemaphore(value: 0)
+        gen.generateCGImageAsynchronously(for: CMTime(seconds: src, preferredTimescale: 600)) { image, _, error in
+            got.image = image; got.error = error; done.signal()
+        }
+        done.wait()
+        do {
+            guard let whole = got.image else { throw got.error ?? CocoaError(.fileReadUnknown) }
+            let img = whole, c = r.meta.crop
+            try FileManager.default.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])!.write(to: out)
+            func px(_ v: Double, _ n: Int) -> Int { Int((v * Double(n)).rounded()) }
+            print("\(out.path)  \(img.width)×\(img.height)  the full recorded frame at \(stamp(src)) (video \(stamp(map.output(src)))), before the crop, no edits")
+            print("a pixel at (px, py) is x = px/\(img.width), y = py/\(img.height) in a mask's rect; w and h likewise")
+            print("the crop (what the video shows) is pixels x \(px(c.x, img.width))–\(px(c.x + c.w, img.width)), y \(px(c.y, img.height))–\(px(c.y + c.h, img.height)): rect x \(c.x) y \(c.y) w \(c.w) h \(c.h)")
+        } catch { fail("couldn't read the frame: \(error)") }
+        break
+    }
     let gen = AVAssetImageGenerator(asset: mix)
     gen.videoComposition = comp
     gen.requestedTimeToleranceBefore = .zero
@@ -292,8 +359,8 @@ case "template":
     let map = TimeMap(duration: r.meta.duration, edits: r.edits)
     guard let made = Templates.make(args[1], duration: map.outputDuration, source: { map.source($0) }, aspect: r.look.aspect,
                                     clicks: r.meta.clicks, three: r.edits.three) else { fail("no template \(args[1]); one of \(Templates.names.joined(separator: ", "))") }
-    // The images stay: a template knows nothing of them.
-    r.edits.pack(made.segments + r.edits.images)
+    // The images and masks stay: a template knows nothing of them, and a mask hides something.
+    r.edits.pack(made.segments + r.edits.images + r.edits.masks)
     r.edits.moves = made.moves
     r.edits.base = made.base
     write(r.edits, r.folder.appendingPathComponent("edits.json"))
@@ -345,6 +412,34 @@ case "sound":
         print("added to \(r.id) (edits.json), sound copied to \(file):")
         print(String(data: try e.encode(s), encoding: .utf8)!)
     } catch let refused as Sounds.Refused { fail(refused.why) } catch { fail("\(error)") }
+
+case "mask":
+    let at = option("--at").flatMap(Double.init) ?? 0, length = option("--for").flatMap(Double.init) ?? 4
+    let style = option("--style"), color = option("--color"), rectText = option("--rect")
+    guard let ref = args.first else { fail(usage) }
+    var r = open(ref)
+    let d = r.meta.duration
+    guard at >= 0, at < d - 0.1, length >= 0.1 else { fail("--at must be inside the recording, 0–\(stamp(d)), and --for at least 0.1") }
+    let parts = (rectText ?? "").split(separator: ",").map { Double($0.trimmingCharacters(in: .whitespaces)) }
+    guard parts.count == 4, parts.allSatisfy({ $0 != nil }) else {
+        fail("--rect x,y,w,h is needed: 0–1 of the full recorded frame (before the crop), origin top-left (frame <id> <t> --raw shows that picture)")
+    }
+    var n = r.edits.masks.count + 1
+    while r.edits.segments.contains(where: { $0.id == "mask\(n)" }) { n += 1 }
+    var s = Segment(id: "mask\(n)", kind: "mask", start: at, end: min(d, at + length))
+    s.rect = UnitRect(x: parts[0]!, y: parts[1]!, w: parts[2]!, h: parts[3]!)
+    s.style = style ?? "blur"
+    if s.style == "solid" { s.color = color ?? "#000000" } else if let color { s.color = color }
+    if case let found = maskProblems(s), !found.isEmpty { fail(found.joined(separator: "\n")) }
+    // On the first effect lane free at that time, else a new one.
+    s.lane = r.edits.freeLane(for: s)
+    r.edits.segments.append(s)
+    r.edits.fitLanes()
+    write(r.edits, r.folder.appendingPathComponent("edits.json"))
+    let e = JSONEncoder()
+    e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+    print("added to \(r.id) (edits.json):")
+    print(String(data: try! e.encode(s), encoding: .utf8)!)
 
 case "schema":
     let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

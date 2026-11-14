@@ -459,6 +459,11 @@ final class Editor {
         case "blur-frame": s.kind = "blur"; s.scope = "frame"
         case "mono-frame": s.kind = "mono"; s.scope = "frame"
         case "3d": s.style = "hold"; s.tilt = 12; s.turn = -28; s.roll = 0
+        case "mask":
+            // A third of the visible video's width and a fifth of its height, in its middle: drag it onto what
+            // it hides. The rect is in the full frame's units, so it goes through the crop.
+            let c = meta.crop
+            s.style = "blur"; s.rect = UnitRect(x: c.x + c.w / 3, y: c.y + c.h * 0.4, w: c.w / 3, h: c.h * 0.2)
         case "text":
             s.text = "Your text here"; s.x = 0.5; s.y = 0.16; s.size = 0.075; s.color = "white"; s.weight = "heavy"
             s.style = "pill"; s.animIn = "letters"; s.animOut = "fade"; s.loop = "none"; s.rotation = 0
@@ -1073,8 +1078,9 @@ final class Editor {
         select("")
     }
 
-    /// Set one field of the selected segment: a blur's or black and white's "scope", or a 3D
-    /// turn's "pose" (a named pose), "tilt", "turn", "roll" or "style" ("hold" or "orbit").
+    /// Set one field of the selected segment: a blur's or black and white's "scope", a 3D
+    /// turn's "pose" (a named pose), "tilt", "turn", "roll" or "style" ("hold" or "orbit"), or a
+    /// mask's "style" ("blur", "pixels" or "solid") or "color" ("#RRGGBB").
     func setSegment(_ field: String, _ value: String) {
         guard var s = selectedSegment else { return }
         let n = Double(value)
@@ -1096,7 +1102,13 @@ final class Editor {
         case "tilt": if let n { s.tilt = min(max(n, -80), 80) }
         case "turn": if let n { s.turn = min(max(n, -80), 80) }
         case "roll": if let n { s.roll = min(max(n, -45), 45) }
-        case "style": s.style = value
+        case "style":
+            if s.kind == "mask" && !Segment.maskStyles.contains(value) { return }
+            s.style = value
+            if s.kind == "mask", value == "solid", s.color == nil { s.color = "#000000" }
+        case "color":
+            guard s.kind == "mask", Segment.maskHex(value) != nil else { return }
+            s.color = Segment.maskHex(value)
         default: return
         }
         replace(s)
@@ -1116,8 +1128,8 @@ final class Editor {
                                         clicks: meta.clicks, three: edits.three) else { return }
         beforeTemplate = edits
         var next = edits
-        // The images stay: a template knows nothing of them.
-        next.pack(made.segments + edits.images)
+        // The images and masks stay: a template knows nothing of them, and a mask hides something.
+        next.pack(made.segments + edits.images + edits.masks)
         next.moves = made.moves
         next.base = made.base
         apply(next)
@@ -1373,6 +1385,19 @@ final class Editor {
 
     // MARK: Texts, images and moves dragged in the preview
 
+    /// Put a mask's rectangle at `rect` (full-frame units), kept inside the frame and at least 0.5% on each
+    /// side. `live` draws it without saving (a drag); the drop saves.
+    // @ref LLP 0006#follows-the-video — the rect is in the full recorded frame's units
+    func setMaskRect(_ id: String, _ rect: UnitRect, live: Bool) {
+        let m = 0.005
+        var u = rect
+        u.w = min(max(u.w, m), 1); u.h = min(max(u.h, m), 1)
+        u.x = min(max(u.x, 0), 1 - u.w); u.y = min(max(u.y, 0), 1 - u.h)
+        var next = edits
+        next.segments = next.segments.map { var s = $0; if s.id == id, s.kind == "mask" { s.rect = u }; return s }
+        if live { edits = next; redraw() } else { apply(next) }
+    }
+
     func dragText(_ id: String, x: Double, y: Double, live: Bool) {
         var next = edits
         next.segments = next.segments.map { s in
@@ -1505,6 +1530,9 @@ final class Editor {
                        "startText": Editor.stamp(s.start), "endText": Editor.stamp(s.end), "text": s.text ?? "",
                        "size": ((s.size ?? 0) * 1000).rounded() / 10, "color": s.color ?? "", "weight": s.weight ?? "", "style": s.style ?? "",
                        "animIn": s.animIn ?? "", "animOut": s.animOut ?? "", "loop": s.loop ?? "", "rotation": s.rotation ?? 0]) { $1 }
+            if s.kind == "mask" {
+                out.merge(["style": s.style ?? "blur", "color": Segment.maskHex(s.color) ?? "#000000"]) { $1 }
+            }
             if s.kind == "image" {
                 out.merge(["file": URL(fileURLWithPath: s.file ?? "").lastPathComponent, "opacity": ((s.opacity ?? 1) * 100).rounded(),
                            "size": ((s.size ?? 0.25) * 1000).rounded() / 10, "radius": ((s.radius ?? 0) * 100).rounded(), "shadow": s.shadow ?? false]) { $1 }
@@ -1558,7 +1586,7 @@ extension Editor {
 extension Segment {
     static func article(_ kind: String) -> String {
         ["zoom": "a zoom", "speed": "a speed change", "spotlight": "a spotlight", "highlight": "a cursor highlight",
-         "blur": "a blur", "mono": "a black-and-white effect", "text": "a text", "image": "an image"][kind] ?? "an effect"
+         "blur": "a blur", "mono": "a black-and-white effect", "text": "a text", "image": "an image", "mask": "a mask"][kind] ?? "an effect"
     }
 }
 #endif

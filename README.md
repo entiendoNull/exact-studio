@@ -61,6 +61,7 @@ To update, run `git pull` in both folders and run the last command again.
 - **Timeline:** split the clip (S), remove parts, and crossfade between them.
 - **Effects:** zoom, speed, spotlight, cursor highlight, blur, and black and white, on as many lanes as you need. A blur or black and white can cover the video, the whole frame, or everything.
 - **Text:** styled texts with entrance, exit and loop animations.
+- **Masks:** hide an API key, an email or a name with a blur, big pixels or a solid box. A mask is placed on the full recorded frame (before the crop), so it stays on that part of the recording when the crop changes or the video zooms, moves or turns in 3D. It never fades.
 - **Images:** put a logo, a badge or any picture on the video. Each image has its own moves and its own effects.
 - **Image lanes:** images that follow one another share a lane. Images that show at the same time go on separate lanes; the top lane is in front.
 - **Rows by kind:** effects for the video, texts, images, sounds, and effects for the whole frame each have their own rows. Each row has a + that adds its own kind of thing at the playhead.
@@ -95,7 +96,7 @@ To update, run `git pull` in both folders and run the last command again.
 
 This is what the app is built around: the app, the command-line tool and the MCP server are three ways into the same edit, and they draw with the same renderer. When a feature is added to the app, it is added to all three, with the format guide and the editing skill.
 
-Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions, effects, texts, images, sounds, zooms, speed, moves, 3D) and `look.json` (background, shape, padding, cursor). Edit them directly; the app reloads them within a second. `./exact-studio` checks and renders with the app's own renderer:
+Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions, effects, masks, texts, images, sounds, zooms, speed, moves, 3D) and `look.json` (background, shape, padding, cursor). Edit them directly; the app reloads them within a second. `./exact-studio` checks and renders with the app's own renderer:
 
 ```sh
 ./exact-studio list
@@ -106,13 +107,15 @@ Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions,
 ./exact-studio template latest hero
 ./exact-studio image latest logo.png --at 2 --for 6
 ./exact-studio sound latest music.m4a --at 0
+./exact-studio frame latest 4.5 --raw    # the full recorded frame, to measure a mask on
+./exact-studio mask latest --rect 0.1,0.2,0.3,0.05 --at 2 --for 6
 ```
 
 [`docs/edits.md`](docs/edits.md) documents every field; [`schema/`](schema) has the JSON Schemas; the `edit-recording` skill (`.claude/skills/`) is the workflow.
 
 ### MCP
 
-`mcp/server.ts` gives the same verbs to any MCP client: `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `add_image`, `add_sound`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template` and `edit_format`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
+`mcp/server.ts` gives the same verbs to any MCP client: `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `add_image`, `add_sound`, `add_mask`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template` and `edit_format`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
 
 ```sh
 claude mcp add exact-studio -- bun /path/to/exact-studio/mcp/server.ts

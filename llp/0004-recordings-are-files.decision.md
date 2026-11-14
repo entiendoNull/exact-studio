@@ -29,7 +29,7 @@ guide, the schema and the editing skill have it too.
 
 ## The CLI
 
-`./exact-studio` (list, show, validate, frame, export, template, image, sound, schema) builds from the app's own
+`./exact-studio` (list, show, validate, frame, export, template, image, sound, mask, schema) builds from the app's own
 renderer sources (LLP 0003), so a frame from the CLI is the frame the app exports.
 The `edit-recording` skill in `.claude/skills/` is the workflow for agents.
 

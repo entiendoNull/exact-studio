@@ -647,8 +647,9 @@ final class PlayerHost: NSView {
     private let cropLines = CAShapeLayer()
     private let cropGrid = CAShapeLayer()
     private let cropHandles = CAShapeLayer()
-    private enum CropDrag { case edges(left: Bool, right: Bool, top: Bool, bottom: Bool, from: CGPoint, start: UnitRect), move(CGPoint, UnitRect) }
-    private var cropDrag: CropDrag?
+    /// A rectangle being dragged by its sides (a corner moves two) or as a whole: the crop's, or a mask's.
+    private enum RectDrag { case edges(left: Bool, right: Bool, top: Bool, bottom: Bool, from: CGPoint, start: UnitRect), move(CGPoint, UnitRect) }
+    private var cropDrag: RectDrag?
     /// The crop while it is dragged, before it is saved.
     private var cropLive: UnitRect?
     /// The smallest crop, as a share of each side.
@@ -694,6 +695,130 @@ final class PlayerHost: NSView {
         cropHandles.shadowRadius = 2
         cropHandles.shadowOffset = .zero
         for l in [rawFrame, cropShade, cropGrid, cropLines, cropHandles] { l.isHidden = true; layer?.addSublayer(l) }
+        // A selected mask: its rectangle and the crop's handles, on the video where it is now.
+        maskLines.fillColor = nil
+        maskLines.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
+        maskLines.lineWidth = 1.5
+        maskHandles.fillColor = nil
+        maskHandles.strokeColor = NSColor.white.cgColor
+        maskHandles.lineWidth = 4
+        maskHandles.lineCap = .round
+        maskHandles.shadowColor = NSColor.black.cgColor
+        maskHandles.shadowOpacity = 0.5
+        maskHandles.shadowRadius = 2
+        maskHandles.shadowOffset = .zero
+        // Clipped to the video: a mask the zoom pushes past the edge shows only its part on the video.
+        maskClip.masksToBounds = true
+        for l in [maskLines, maskHandles] { maskClip.addSublayer(l) }
+        layer?.addSublayer(maskClip)
+    }
+
+    // MARK: Masks
+    // @ref LLP 0006#follows-the-video — the box sits on the video as it is placed and zoomed now
+
+    private let maskClip = CALayer()
+    private let maskLines = CAShapeLayer()
+    private let maskHandles = CAShapeLayer()
+    /// A mask's rectangle being dragged, and the view transform it was grabbed in.
+    private var maskDrag: (id: String, grab: RectDrag, view: CGAffineTransform)?
+
+    /// Where the full recorded frame's unit coordinates (origin top-left, before the crop), a mask's
+    /// rect, are in this view at the playhead: nil while the video is turned in 3D or spun, where a flat
+    /// box cannot follow it.
+    private var recordingInView: CGAffineTransform? {
+        guard let editor, let m = editor.framing.frameToCanvas(at: editor.playhead) else { return nil }
+        let c = editor.framing.canvas
+        let t = m.concatenating(CGAffineTransform(scaleX: video.width / c.width, y: video.height / c.height))
+            .concatenating(CGAffineTransform(translationX: video.minX, y: video.minY))
+        return abs(t.b) < 1e-6 && abs(t.c) < 1e-6 ? t : nil
+    }
+
+    private static func box(_ u: UnitRect) -> CGRect { CGRect(x: u.x, y: u.y, width: u.w, height: u.h) }
+
+    /// What a press at `p` takes hold of a rectangle drawn at `r` (both in this view): a side, or two
+    /// near a corner; else the inside, to move it; else nothing. `u` is the press in the rectangle's units.
+    /// A side is held from up to 14 points outside it, and from inside only up to a quarter of the box,
+    /// so a small box still moves when pressed in its middle.
+    private static func grab(_ p: CGPoint, _ r: CGRect, unit u: CGPoint, start: UnitRect) -> RectDrag? {
+        let reach: CGFloat = 14, inX = min(reach, r.width / 4), inY = min(reach, r.height / 4)
+        let spanY = p.y >= r.minY - reach && p.y <= r.maxY + reach, spanX = p.x >= r.minX - reach && p.x <= r.maxX + reach
+        let left = p.x >= r.minX - reach && p.x <= r.minX + inX && spanY
+        let right = p.x >= r.maxX - inX && p.x <= r.maxX + reach && spanY && !left
+        let bottom = p.y >= r.minY - reach && p.y <= r.minY + inY && spanX
+        let top = p.y >= r.maxY - inY && p.y <= r.maxY + reach && spanX && !bottom
+        if left || right || top || bottom { return .edges(left: left, right: right, top: top, bottom: bottom, from: u, start: start) }
+        return r.contains(p) ? .move(u, start) : nil
+    }
+
+    /// The rectangle a grab has been dragged to, at `u`: inside `bounds` (the whole frame for the crop,
+    /// the visible video for a mask), at least `m` on each side.
+    private static func dragged(_ d: RectDrag, to u: CGPoint, minimum m: Double, within bounds: UnitRect = .full) -> UnitRect {
+        let bx0 = bounds.x, bx1 = bounds.x + bounds.w, by0 = bounds.y, by1 = bounds.y + bounds.h
+        switch d {
+        case let .move(from, start):
+            var c = start
+            c.x = min(max(start.x + u.x - from.x, bx0), max(bx0, bx1 - start.w))
+            c.y = min(max(start.y + u.y - from.y, by0), max(by0, by1 - start.h))
+            return c
+        case let .edges(left, right, top, bottom, from, start):
+            var x0 = start.x, x1 = start.x + start.w, y0 = start.y, y1 = start.y + start.h
+            let dx = u.x - from.x, dy = u.y - from.y
+            if left { x0 = min(max(start.x + dx, bx0), x1 - m) }
+            if right { x1 = max(min(start.x + start.w + dx, bx1), x0 + m) }
+            if top { y0 = min(max(start.y + dy, by0), y1 - m) }
+            if bottom { y1 = max(min(start.y + start.h + dy, by1), y0 + m) }
+            return UnitRect(x: x0, y: y0, w: x1 - x0, h: y1 - y0)
+        }
+    }
+
+    /// An L at each corner, a short bar at the middle of each side long enough for one.
+    private static func handles(_ r: CGRect) -> CGPath {
+        let k = min(18, r.width / 4, r.height / 4), b = min(12, r.width / 6, r.height / 6)
+        let h = CGMutablePath()
+        for (c, dx, dy) in [(CGPoint(x: r.minX, y: r.minY), 1.0, 1.0), (CGPoint(x: r.maxX, y: r.minY), -1.0, 1.0),
+                            (CGPoint(x: r.maxX, y: r.maxY), -1.0, -1.0), (CGPoint(x: r.minX, y: r.maxY), 1.0, -1.0)] {
+            h.move(to: CGPoint(x: c.x + dx * k, y: c.y)); h.addLine(to: c); h.addLine(to: CGPoint(x: c.x, y: c.y + dy * k))
+        }
+        if r.width >= 60 {
+            h.move(to: CGPoint(x: r.midX - b, y: r.minY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.minY))
+            h.move(to: CGPoint(x: r.midX - b, y: r.maxY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.maxY))
+        }
+        if r.height >= 60 {
+            h.move(to: CGPoint(x: r.minX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.minX, y: r.midY + b))
+            h.move(to: CGPoint(x: r.maxX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.maxX, y: r.midY + b))
+        }
+        return h
+    }
+
+    /// The selected mask's box and handles, or none.
+    private func drawMask() {
+        guard !cropping, let s = editor?.selectedSegment, s.kind == "mask", let u = s.rect, let t = maskDrag?.view ?? recordingInView else {
+            maskLines.path = nil; maskHandles.path = nil; return
+        }
+        maskClip.frame = video
+        for l in [maskLines, maskHandles] { l.frame = maskClip.bounds }
+        let r = Self.box(u).applying(t).offsetBy(dx: -video.minX, dy: -video.minY)
+        maskLines.path = CGPath(rect: r, transform: nil)
+        // Thinner on a small box, so the handles never hide what it covers.
+        maskHandles.lineWidth = min(4, max(2, min(r.width, r.height) / 8))
+        maskHandles.path = Self.handles(r)
+    }
+
+    /// A press on the selected mask's box, or on a mask showing now: hold it to move or resize it.
+    private func maskDown(_ p: CGPoint) -> Bool {
+        guard let editor, video.insetBy(dx: -14, dy: -14).contains(p), let t = recordingInView else { return false }
+        let at = p.applying(t.inverted())
+        if let s = editor.selectedSegment, s.kind == "mask", let u = s.rect, let g = Self.grab(p, Self.box(u).applying(t), unit: at, start: u) {
+            maskDrag = (s.id, g, t)
+            return true
+        }
+        let now = editor.playhead
+        if let s = editor.edits.masks.last(where: { now >= $0.start && now < $0.end && $0.rect.map { Self.box($0).applying(t).contains(p) } == true }), let u = s.rect {
+            editor.select(s.id)
+            maskDrag = (s.id, .move(at, u), t)
+            return true
+        }
+        return false
     }
 
     /// The recorded frame at the playhead, as captured.
@@ -729,7 +854,7 @@ final class PlayerHost: NSView {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         for l in [rawFrame, cropShade, cropGrid, cropLines, cropHandles] { l.isHidden = !cropping }
-        for l in [player, still, outline, guides] as [CALayer] { l.opacity = cropping ? 0 : 1 }
+        for l in [player, still, outline, guides, maskClip] as [CALayer] { l.opacity = cropping ? 0 : 1 }
         guard cropping else { return }
         let f = frameRect
         rawFrame.frame = f
@@ -746,59 +871,21 @@ final class PlayerHost: NSView {
             grid.move(to: CGPoint(x: r.minX, y: y)); grid.addLine(to: CGPoint(x: r.maxX, y: y))
         }
         cropGrid.path = grid
-        // An L at each corner, a short bar at each edge's middle.
-        let k = min(18, r.width / 4, r.height / 4), b = min(12, r.width / 6, r.height / 6)
-        let h = CGMutablePath()
-        for (c, dx, dy) in [(CGPoint(x: r.minX, y: r.minY), 1.0, 1.0), (CGPoint(x: r.maxX, y: r.minY), -1.0, 1.0),
-                            (CGPoint(x: r.maxX, y: r.maxY), -1.0, -1.0), (CGPoint(x: r.minX, y: r.maxY), 1.0, -1.0)] {
-            h.move(to: CGPoint(x: c.x + dx * k, y: c.y)); h.addLine(to: c); h.addLine(to: CGPoint(x: c.x, y: c.y + dy * k))
-        }
-        h.move(to: CGPoint(x: r.midX - b, y: r.minY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.minY))
-        h.move(to: CGPoint(x: r.midX - b, y: r.maxY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.maxY))
-        h.move(to: CGPoint(x: r.minX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.minX, y: r.midY + b))
-        h.move(to: CGPoint(x: r.maxX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.maxX, y: r.midY + b))
-        cropHandles.path = h
+        cropHandles.path = Self.handles(r)
     }
 
     private func cropDown(_ p: CGPoint) {
-        let r = onFrame(cropNow), f = frameRect
+        let f = frameRect
         let u = CGPoint(x: (p.x - f.minX) / f.width, y: 1 - (p.y - f.minY) / f.height)
         // Within reach of a side: that side moves; of two sides (a corner): both.
-        let reach: CGFloat = 14
-        let near = { (a: CGFloat, b: CGFloat) in abs(a - b) <= reach }
-        let inY = p.y >= r.minY - reach && p.y <= r.maxY + reach, inX = p.x >= r.minX - reach && p.x <= r.maxX + reach
-        let left = near(p.x, r.minX) && inY, right = near(p.x, r.maxX) && inY && !left
-        let bottom = near(p.y, r.minY) && inX, top = near(p.y, r.maxY) && inX && !bottom
-        if left || right || top || bottom {
-            cropDrag = .edges(left: left, right: right, top: top, bottom: bottom, from: u, start: cropNow)
-        } else if r.contains(p) {
-            cropDrag = .move(u, cropNow)
-        } else {
-            cropDrag = nil
-        }
+        cropDrag = Self.grab(p, onFrame(cropNow), unit: u, start: cropNow)
     }
 
     private func cropDragged(_ p: CGPoint) {
         guard let cropDrag else { return }
         let f = frameRect
         let u = CGPoint(x: (p.x - f.minX) / f.width, y: 1 - (p.y - f.minY) / f.height)
-        let m = Self.cropMinimum
-        var c: UnitRect
-        switch cropDrag {
-        case let .move(from, start):
-            c = start
-            c.x = min(max(start.x + u.x - from.x, 0), 1 - start.w)
-            c.y = min(max(start.y + u.y - from.y, 0), 1 - start.h)
-        case let .edges(left, right, top, bottom, from, start):
-            var x0 = start.x, x1 = start.x + start.w, y0 = start.y, y1 = start.y + start.h
-            let dx = u.x - from.x, dy = u.y - from.y
-            if left { x0 = min(max(start.x + dx, 0), x1 - m) }
-            if right { x1 = max(min(start.x + start.w + dx, 1), x0 + m) }
-            if top { y0 = min(max(start.y + dy, 0), y1 - m) }
-            if bottom { y1 = max(min(start.y + start.h + dy, 1), y0 + m) }
-            c = UnitRect(x: x0, y: y0, w: x1 - x0, h: y1 - y0)
-        }
-        cropLive = c
+        cropLive = Self.dragged(cropDrag, to: u, minimum: Self.cropMinimum)
         layoutCrop()
     }
 
@@ -822,7 +909,8 @@ final class PlayerHost: NSView {
         // An image moves as time passes, so its outline follows the playhead.
         watched = editor?.player
         ticking = editor?.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in
-            guard let self, self.editor?.selectedImage != nil, self.drag == nil else { return }
+            // A mask's box follows the video as it moves.
+            guard let self, self.editor?.selectedImage != nil || self.editor?.selectedSegment?.kind == "mask", self.drag == nil, self.maskDrag == nil else { return }
             self.drawOverlay()
         }
         editor?.freeze = { [weak self] image in
@@ -877,6 +965,7 @@ final class PlayerHost: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
+        drawMask()
         guard let editor else { outline.path = nil; guides.path = nil; return }
         if cropping { layoutCrop(); return }
         let f = editor.framing
@@ -897,6 +986,8 @@ final class PlayerHost: NSView {
         guard let editor else { return }
         if cropping { return cropDown(convert(e.locationInWindow, from: nil)) }
         dragged = false
+        // The selected mask's box first: its handles reach a little outside it.
+        if case let p = convert(e.locationInWindow, from: nil), editor.selectedSegment?.kind == "mask", maskDown(p) { drag = nil; return drawOverlay() }
         let u = unit(convert(e.locationInWindow, from: nil))
         let f = editor.framing
         let t = editor.playhead
@@ -909,6 +1000,8 @@ final class PlayerHost: NSView {
             if s.id != held { editor.select(s.id) }
             let box = frame(s)
             drag = .text(s.id, u, CGPoint(x: box.x + box.w / 2, y: box.y + box.h / 2))
+        } else if maskDown(convert(e.locationInWindow, from: nil)) {
+            drag = nil
         } else if contains(f.subjectFrame(at: t), u) {
             if editor.selectedSegment?.isOverlay == true { editor.select("") }
             // ⌥-drag turns it in 3D (switching 3D on); a plain drag moves it.
@@ -932,6 +1025,14 @@ final class PlayerHost: NSView {
 
     override func mouseDragged(with e: NSEvent) {
         if cropping { return cropDragged(convert(e.locationInWindow, from: nil)) }
+        if let md = maskDrag, let editor {
+            dragged = true
+            let u = convert(e.locationInWindow, from: nil).applying(md.view.inverted())
+            // Kept on the visible video: a mask is placed where it can be seen.
+            let c = editor.meta.crop
+            editor.setMaskRect(md.id, Self.dragged(md.grab, to: u, minimum: 0.02 * min(c.w, c.h), within: c), live: true)
+            return drawOverlay()
+        }
         guard let editor, let drag else { return }
         dragged = true
         let u = unit(convert(e.locationInWindow, from: nil))
@@ -965,6 +1066,11 @@ final class PlayerHost: NSView {
 
     override func mouseUp(with e: NSEvent) {
         if cropping { return cropUp() }
+        if let md = maskDrag {
+            maskDrag = nil
+            if dragged, let u = editor?.edits.segments.first(where: { $0.id == md.id })?.rect { editor?.setMaskRect(md.id, u, live: false) }
+            return drawOverlay()
+        }
         guard let editor, let drag else { return }
         switch drag {
         case .subject: editor.endPlace()

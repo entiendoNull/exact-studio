@@ -417,6 +417,8 @@ final class TimelineView: NSView {
 
     /// An added sound's blocks: a colour no other block has.
     static let soundColor = NSColor(srgbRed: 0.50, green: 0.60, blue: 0.17, alpha: 1)
+    /// A mask's blocks: a deep red no other block has.
+    static let maskColor = NSColor(srgbRed: 0.66, green: 0.20, blue: 0.24, alpha: 1)
 
     static func color(_ s: Segment) -> NSColor {
         switch s.kind {
@@ -429,6 +431,7 @@ final class TimelineView: NSView {
         case "text": return .systemPink
         case "image": return .systemGreen
         case "3d": return .systemMint
+        case "mask": return maskColor
         default: return .systemPink
         }
     }
@@ -886,8 +889,13 @@ final class TimelineView: NSView {
 
     private func title(_ text: String, in r: CGRect, dark: Bool = false) {
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: dark ? NSColor.black : NSColor.white]
-        let s = text as NSString
-        let size = s.size(withAttributes: attrs)
+        var s = text as NSString
+        var size = s.size(withAttributes: attrs)
+        // Too long: the name before its " · " detail, when that fits.
+        if r.width <= size.width + 16, let short = text.components(separatedBy: " · ").first, short != text {
+            s = short as NSString
+            size = s.size(withAttributes: attrs)
+        }
         guard r.width > size.width + 16 else { return }
         s.draw(at: CGPoint(x: r.minX + 10, y: r.midY - size.height / 2), withAttributes: attrs)
     }
@@ -905,6 +913,7 @@ final class TimelineView: NSView {
         case "blur": return s.scope == "frame" ? "Blur · whole frame" : "Blur"
         case "mono": return s.scope == "frame" ? "Black & white · whole frame" : "Black & white"
         case "3d": return s.style == "orbit" ? "3D orbit" : "3D turn"
+        case "mask": return s.style == "pixels" ? "Mask · pixels" : s.style == "solid" ? "Mask · solid" : "Mask · blur"
         case "text": return "“\(s.text ?? "")”"
         case "image":
             let moves = s.moves?.count ?? 0, effects = s.effects?.count ?? 0
@@ -982,7 +991,7 @@ final class TimelineView: NSView {
                    ("Zoom In", { editor.add("zoom-in") }), ("Zoom Out", { editor.add("zoom-out") }), ("Zoom on Clicks", { editor.autoZoom() }), ("-", nil),
                    ("Slow Down", { editor.add("slow") }), ("Speed Up", { editor.add("fast") }), ("-", nil),
                    ("Spotlight", { editor.add("spotlight") }), ("Cursor Highlight", { editor.add("highlight") }),
-                   ("Blur", { editor.add("blur") }), ("Black & White", { editor.add("mono") }), ("-", nil),
+                   ("Blur", { editor.add("blur") }), ("Black & White", { editor.add("mono") }), ("Mask", { editor.add("mask") }), ("-", nil),
                    ("3D Turn", { editor.add("3d") }), ("-", nil), ("New Effects Lane", { editor.addLane(space: 0) })], under: at)
         case .header("top"):
             popUp([("Text", { editor.add("text") }), ("Image…", { Pictures.pick { editor.addImage($0) } }), ("-", nil),

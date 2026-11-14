@@ -64,7 +64,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'show_recording',
-    description: 'One recording in readable form: its length, clip parts, segments (texts, images with their own moves and effects, effects, zooms, speed, 3D), sounds added over it, moves and look.',
+    description: 'One recording in readable form: its length, clip parts, segments (texts, images with their own moves and effects, effects, masks with their rect, zooms, speed, 3D), sounds added over it, moves and look.',
     inputSchema: { type: 'object', properties: { id }, required: ['id'] },
     call: async (a) => outOf(await run(['show', a.id])),
   },
@@ -98,19 +98,21 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'render_frame',
-    description: 'Renders one frame with the app\'s own renderer and returns it as an image. Use it to look at an edit before exporting.',
+    description:
+      'Renders one frame with the app\'s own renderer and returns it as an image. Use it to look at an edit before exporting. With raw, it returns the full recorded frame at that time instead: before the crop, at its own pixel size, with no edits. That is the picture a mask\'s rect measures: a pixel at (px, py) is x = px / width, y = py / height; the text says the size and where the crop is.',
     inputSchema: {
       type: 'object',
       properties: {
         id,
         time: { type: 'number', description: 'Seconds into the edited video (or into the raw recording with source).' },
         source: { type: 'boolean', description: 'Time is in the raw recording, before cuts and speed.' },
+        raw: { type: 'boolean', description: 'Return the full recorded frame (before the crop, no edits) to measure a mask\'s rect on, not the finished frame.' },
       },
       required: ['id', 'time'],
     },
     call: async (a) => {
       const out = join(mkdtempSync(join(tmpdir(), 'exact-studio-mcp-')), 'frame.png');
-      const r = await run(['frame', a.id, String(a.time), '--out', out, ...(a.source ? ['--source'] : [])]);
+      const r = await run(['frame', a.id, String(a.time), '--out', out, ...(a.source ? ['--source'] : []), ...(a.raw ? ['--raw'] : [])]);
       if (r.code || !existsSync(out)) return outOf(r);
       return { content: [{ type: 'image', data: readFileSync(out).toString('base64'), mimeType: 'image/png' }, { type: 'text', text: r.out.trim() || out }] };
     },
@@ -175,8 +177,43 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
       outOf(await run(['sound', a.id, a.path, ...(a.at !== undefined ? ['--at', String(a.at)] : []), ...(a.for !== undefined ? ['--for', String(a.for)] : [])])),
   },
   {
+    name: 'add_mask',
+    description:
+      'Hides a part of the recording (an API key, a token, an email, a name) with a blur, big pixels or a solid box, and returns the new mask segment. rect is in 0–1 of the full recorded frame (before the crop), not of the finished frame: measure it on render_frame with raw. So a later crop never moves it off the secret, and it stays on that part of the recording when the video zooms, moves or turns in 3D. Only the part inside the crop shows. It never fades: it is at full strength from at to at + for, so start a little before the secret shows and end a little after. Then look at render_frame at its start, middle and end.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id,
+        rect: {
+          type: 'object',
+          description: 'What it hides, in 0–1 of the full recorded frame (before the crop), origin top-left; x + w and y + h at most 1.',
+          properties: { x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' } },
+          required: ['x', 'y', 'w', 'h'],
+        },
+        at: { type: 'number', description: 'When it starts, in seconds of the recording. Default 0.' },
+        for: { type: 'number', description: 'How long it lasts, in seconds. Default 4.' },
+        style: { type: 'string', enum: ['blur', 'pixels', 'solid'], description: 'How it hides. Default blur.' },
+        color: { type: 'string', description: 'For solid: "#RRGGBB". Default black.' },
+      },
+      required: ['id', 'rect'],
+    },
+    call: async (a) => {
+      const r = a.rect ?? {};
+      if (![r.x, r.y, r.w, r.h].every((v) => typeof v === 'number')) return text('rect needs numbers x, y, w and h.', true);
+      return outOf(
+        await run([
+          'mask', a.id, '--rect', `${r.x},${r.y},${r.w},${r.h}`,
+          ...(a.at !== undefined ? ['--at', String(a.at)] : []),
+          ...(a.for !== undefined ? ['--for', String(a.for)] : []),
+          ...(a.style ? ['--style', a.style] : []),
+          ...(a.color ? ['--color', a.color] : []),
+        ]),
+      );
+    },
+  },
+  {
     name: 'edit_format',
-    description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, with examples. Read it before write_edits.',
+    description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, masks included, with examples. Read it before write_edits.',
     inputSchema: { type: 'object', properties: {} },
     call: async () => text(readFileSync(join(root, 'docs/edits.md'), 'utf8')),
   },
@@ -190,7 +227,7 @@ async function handle(msg: any): Promise<unknown> {
         capabilities: { tools: {} },
         serverInfo: { name: 'exact-studio', version: '0.1.0' },
         instructions:
-          'Edit Exact Studio screen recordings. Loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts.',
+          'Edit Exact Studio screen recordings. Loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end.',
       };
     case 'ping':
       return {};
