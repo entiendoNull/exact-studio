@@ -574,7 +574,7 @@ component ExactStudio
                       image "symbol:sf/crop"
                       text "Crop"
                     // The zoom buttons and the length: one unit at the right end, wrapping together.
-                    row flex=1 gap=8 align-items="center" justify-content="flex-end"
+                    row flex-grow=1 flex-shrink=0 gap=8 align-items="center" justify-content="flex-end"
                       // Zoom the timeline; the last button says whether the mouse wheel zooms it too.
                       row gap=4 align-items="center" testId="zoom-controls"
                         button press=zoomTimeline("zoom-out") aria-label="Zoom out" buttonStyle="bordered" testId="zoom-out"
@@ -586,7 +586,7 @@ component ExactStudio
                         button press=zoomTimeline("wheel") aria-label="Zoom with the mouse wheel" aria-pressed=summary.wheelZoom buttonStyle="bordered" testId="zoom-wheel"
                           image (summary.wheelZoom ? "symbol:sf/computermouse.fill" : "symbol:sf/computermouse")
                       text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex-shrink=0 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
-                  studio-timeline clip=rec.id aria-label="Timeline" height=timelineH testId="timeline"
+                  studio-timeline clip=rec.id aria-label="Timeline" height=timelineH flex-shrink=1 min-height=150 testId="timeline"
                   if sel.id != "" and panelMode == "overlay"
                     button press=closePanel appearance="none" aria-label="Close the settings" position="absolute" inset=0 background-color="#00000073" testId="lightbox-backdrop"
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"

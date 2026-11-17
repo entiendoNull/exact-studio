@@ -166,7 +166,8 @@ final class TimelineView: NSView {
     /// A mouse event's point in the content, which scrolls under the view.
     private func local(_ e: NSEvent) -> CGPoint {
         let p = convert(e.locationInWindow, from: nil)
-        return CGPoint(x: p.x, y: p.y + scrollY)
+        // The ruler and the lane sizes do not scroll.
+        return CGPoint(x: p.x, y: p.y < Self.clipTop ? p.y : p.y + scrollY)
     }
 
     // @ref LLP 0005#zoom-the-timeline — a mouse wheel zooms, a trackpad scrolls
@@ -453,9 +454,16 @@ final class TimelineView: NSView {
         guard let editor else { return }
         // The view's height is the person's (the handle above it): keep the scroll inside the content.
         scrollY = min(max(scrollY, 0), max(0, contentHeight - bounds.height))
-        NSGraphicsContext.current?.cgContext.translateBy(x: 0, y: -scrollY)
+        // The rows scroll under the ruler: the ruler, the lane sizes and the playhead stay put.
         // Undone before the indicator above is drawn: it stays at the view's edge, not in the content.
-        defer { NSGraphicsContext.current?.cgContext.translateBy(x: 0, y: scrollY) }
+        let scroller = NSGraphicsContext.current?.cgContext
+        scroller?.saveGState()
+        scroller?.clip(to: CGRect(x: 0, y: Self.clipTop - max(0, 12 - scrollY), width: bounds.width, height: bounds.height))
+        scroller?.translateBy(x: 0, y: -scrollY)
+        var scrolling = true
+        func pin() { if scrolling { scrolling = false; scroller?.restoreGState() } }
+        defer { pin() }
+        let pinnedClip = CGRect(x: trackRect.minX - 2, y: 0, width: trackRect.width + 4, height: bounds.height - (editor.zoomed ? 8 : 0))
         let d = editor.duration
         let rulerTop = Self.rulerTop, rulerHeight = Self.rulerHeight, clipTop = Self.clipTop, clipHeight = Self.clipHeight
 
@@ -469,8 +477,11 @@ final class TimelineView: NSView {
         let perPoint = span / Double(trackRect.width)
         let step = [0.1, 0.2, 0.5, 1, 2, 5, 10, 30, 60].first { $0 / perPoint >= ($0 < 1 ? 58 : 46) } ?? 60 * ceil(46 * perPoint / 60)
         let small: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium), .foregroundColor: NSColor(white: 1, alpha: 0.45)]
+        let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor(white: 1, alpha: 0.7)]
+        // The ruler and the lane sizes, drawn last and unscrolled.
+        func drawBand() {
         NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: trackClip).addClip()
+        NSBezierPath(rect: pinnedClip).addClip()
         var tick = floor(origin / step)
         while tick * step <= min(d, origin + span) + 0.001 {
             let s = tick * step, px = x(s)
@@ -484,15 +495,15 @@ final class TimelineView: NSView {
         }
         NSGraphicsContext.restoreGraphicsState()
 
-        let label: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor(white: 1, alpha: 0.7)]
         // The lane sizes: three bars, thin to thick; the chosen one lit.
         for i in 0..<3 {
             let b = sizeRect(i)
-            NSColor(white: 1, alpha: i == size ? 0.16 : 0.05).setFill()
+            NSColor(white: 1, alpha: i == self.size ? 0.16 : 0.05).setFill()
             NSBezierPath(roundedRect: b, xRadius: 5, yRadius: 5).fill()
-            NSColor(white: 1, alpha: i == size ? 0.9 : 0.45).setFill()
+            NSColor(white: 1, alpha: i == self.size ? 0.9 : 0.45).setFill()
             let h = CGFloat(3 + i * 3)
             NSBezierPath(roundedRect: CGRect(x: b.minX + 5, y: b.midY - h / 2, width: b.width - 10, height: h), xRadius: 1.5, yRadius: 1.5).fill()
+        }
         }
         drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7), open: editor.videoOpen)
         // From here to the playhead, labels and +s wait in `labelQueue` and are drawn after, unclipped.
@@ -769,19 +780,21 @@ final class TimelineView: NSView {
 
         // The playhead.
         let ph = x(editor.playhead)
-        NSColor.systemRed.setFill()
-        NSRect(x: ph - 1, y: rulerTop + 4, width: 2, height: bounds.height - rulerTop - 10).fill()
         NSGraphicsContext.restoreGraphicsState()
         let labels = labelQueue ?? []
         labelQueue = nil
         labels.forEach { $0() }
+        pin()
+        drawBand()
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: pinnedClip).addClip()
+        NSColor.systemRed.setFill()
+        NSRect(x: ph - 1, y: rulerTop + 4, width: 2, height: bounds.height - rulerTop - 10).fill()
+        NSGraphicsContext.restoreGraphicsState()
         // Zoomed in, a slim bar along the bottom shows which part of the recording is in view.
-        if editor.zoomed, let b = panBar, let ctx = NSGraphicsContext.current?.cgContext {
-            ctx.saveGState()
-            ctx.translateBy(x: 0, y: scrollY)
+        if editor.zoomed, let b = panBar {
             NSColor(white: 1, alpha: 0.2).setFill()
             NSBezierPath(roundedRect: b, xRadius: 1.5, yRadius: 1.5).fill()
-            ctx.restoreGState()
         }
         guard ph >= trackRect.minX - 1, ph <= trackRect.maxX + 1 else { return }
         let tag = Self.clock(editor.playhead, tenths: true) as NSString
@@ -1230,6 +1243,7 @@ final class Timeline: ExactNativeInstance {
         self.studio = studio
         super.init(events: events)
         strip.onHeight = { h in events.intrinsicSize(CGSize(width: 800, height: h)) }
+        strip.clipsToBounds = true
         events.intrinsicSize(CGSize(width: 800, height: TimelineView.height(lanes: 1)))
         try? setProps(props)
     }
