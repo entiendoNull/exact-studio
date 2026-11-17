@@ -32,9 +32,11 @@ whether notes are sent and whether to keep a diary; under `never`, skip all of t
 ## Editing recordings as files
 
 Recordings are folders of plain files: `edits.json` is the timeline, `look.json` the frame. Agents
-edit them directly and use `./exact-studio` (list, show, validate, frame, export, template) to
-check and render with the app's own renderer. `docs/edits.md` is the format; the
-`edit-recording` skill is the workflow. The app reloads changed files within a second.
+edit them directly and use `./exact-studio` (list, show, validate, frame, export, template, image,
+sound, mask) to check and render with the app's own renderer. `./exact-studio sources` and
+`record start|status|stop` record without a person, through the running app (LLP 0007).
+`docs/edits.md` is the format; the `edit-recording` skill is the workflow. The app reloads changed
+files within a second.
 
 ## Design notes (LLP)
 

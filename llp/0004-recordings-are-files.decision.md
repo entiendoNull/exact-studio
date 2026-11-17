@@ -5,7 +5,7 @@
 **Systems:** Library, CLI
 **Author:** Jacob Clausen / Claude
 **Date:** 2026-11-12
-**Related:** LLP 0000, LLP 0002, LLP 0003
+**Related:** LLP 0000, LLP 0002, LLP 0003, LLP 0007
 
 Decided by Jacob while building v1 (2026-11-11), after a colleague asked whether agents can edit
 the timeline. Answer: yes, and this is vital.
@@ -31,6 +31,7 @@ guide, the schema and the editing skill have it too.
 
 `./exact-studio` (list, show, validate, frame, export, template, image, sound, mask, schema) builds from the app's own
 renderer sources (LLP 0003), so a frame from the CLI is the frame the app exports.
+`sources` and `record start|status|stop` ask the running app to record (LLP 0007).
 The `edit-recording` skill in `.claude/skills/` is the workflow for agents.
 
 ## Opening

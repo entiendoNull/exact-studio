@@ -6,7 +6,7 @@
 **Role:** Root
 **Author:** Jacob Clausen / Claude
 **Date:** 2026-11-12
-**Related:** LLP 0001, LLP 0002, LLP 0003, LLP 0004, LLP 0005, LLP 0006
+**Related:** LLP 0001, LLP 0002, LLP 0003, LLP 0004, LLP 0005, LLP 0006, LLP 0007
 
 Start here. Then read the doc for the part you change.
 
@@ -32,6 +32,7 @@ capture  →  recording folder  →  editor  →  renderer  →  preview / expor
 | Files as the API, CLI for agents | `cli/main.swift`, `exact-studio`, `docs/edits.md`, `schema/` | [LLP 0004](./0004-recordings-are-files.decision.md) |
 | The UI | `app.contract`, `app.ts`, `Timeline.swift`, `Studio.swift` | [LLP 0005](./0005-ui.principles.md) |
 | Masks that hide secrets | `Compositor.swift` (`hide`), `Studio.swift` (the box), `cli/main.swift` (`mask`, `frame --raw`) | [LLP 0006](./0006-masks.decision.md) |
+| Agents record through the running app | `Control.swift`, `Studio.swift` (`agentRequest`), `cli/main.swift` (`sources`, `record`), `mcp/server.ts` | [LLP 0007](./0007-agents-record.decision.md) |
 
 `app.contract` is the view. `app.ts` talks to the native module. `Studio.swift` is that module:
 it takes ops (`edit`, `look`, `export`, …) and hosts the native preview and timeline views.

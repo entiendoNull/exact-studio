@@ -22,6 +22,7 @@
 //          {op: "delete", id}                   → {ok, error}
 //          {op: "reveal", path}                 → {ok}
 //          {op: "crop", id, edge, by}           → {ok}  nudges a recording's crop by `by` (unit) at an edge
+//   Agents reach the recorder through Control.swift's folder, not through these ops: see `serve`.
 #if os(macOS)
 import AppKit
 import AVFoundation
@@ -59,6 +60,16 @@ final class Studio: ExactModule {
     private var keys: Any?
     /// The recording the preview shows: Space plays and pauses it.
     var active = ""
+    /// Who started the recording running now: "app" (the sidebar or the menu bar) or "agent".
+    private var recordingBy = "app"
+    private var maxTimer: Timer?
+    private var maxSeconds = 0.0
+    /// Whether the running recording takes the system's sound.
+    private var recordingSound = false
+    /// The last recording that ended, for an agent that asks after it stopped: id, folder, name, kind, duration, by, stoppedBy.
+    private var last: [String: Any] = [:]
+    /// Answers agents' requests (Control.swift).
+    private var control: ControlServer?
 
     override func destroy() {
         if let keys { NSEvent.removeMonitor(keys) }
@@ -67,6 +78,10 @@ final class Studio: ExactModule {
         clock = nil
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
         statusItem = nil
+        maxTimer?.invalidate()
+        maxTimer = nil
+        control?.stop()
+        control = nil
     }
 
     required init(context: ExactModuleContext) {
@@ -86,6 +101,9 @@ final class Studio: ExactModule {
             // An automated run gets no menu bar item: it would outlive nothing and only clutter the bar.
             DispatchQueue.main.async { [weak self] in self?.installStatusItem() }
         }
+        // Under the agent, the control folder is the scratch library's, so a drive never answers the person's tools.
+        let root = context.agent ? Library.root.appendingPathComponent("control", isDirectory: true) : Control.folder
+        DispatchQueue.main.async { [weak self] in self?.serve(root) }
     }
 
     /// The open recording's editor, made on first use.
@@ -331,33 +349,38 @@ final class Studio: ExactModule {
     }
 
     /// The end of a start: `error` is "" when it worked or was cancelled.
-    private func started(_ error: String, _ reply: ExactReply?) {
+    /// `then` is an agent's: it gets the error ("" when it started), and no window comes forward.
+    private func started(_ error: String, _ reply: ExactReply?, _ then: ((String) -> Void)? = nil) {
         if error != lastError {
             lastError = error
             context.changed("status")
         }
         reply?.send(["ok": error.isEmpty && recorder != nil, "error": error])
-        if reply == nil && !error.isEmpty { showMainWindow() }
+        then?(error)
+        if reply == nil && then == nil && !error.isEmpty { showMainWindow() }
     }
 
-    private func begin(_ source: String, area: (NSScreen, CGRect)?, reply: ExactReply?) {
+    private func begin(_ source: String, area: (NSScreen, CGRect)?, reply: ExactReply?, sound: Bool? = nil, by: String = "app",
+                       then: ((String) -> Void)? = nil) {
         starting = true
         let id = Self.newID()
         let folder = Library.recordings.appendingPathComponent(id, isDirectory: true)
-        let sound = self.sound
+        let sound = sound ?? self.sound
         Task { @MainActor in
             defer { starting = false }
             do {
                 let r = try await Recorder.make(source: source, area: area, folder: folder, id: id, sound: sound)
                 try await r.start()
                 recorder = r
+                recordingBy = by
+                recordingSound = sound
                 recordingSince = Date()
                 updateStatusItem()
                 context.changed("status")
-                started("", reply)
+                started("", reply, then)
             } catch {
                 try? FileManager.default.removeItem(at: folder)
-                started("Couldn’t start recording: \(error)", reply)
+                started("Couldn’t start recording: \(error)", reply, then)
             }
         }
     }
@@ -370,22 +393,36 @@ final class Studio: ExactModule {
         context.changed("status")
     }
 
-    private func stop(reply: ExactReply?) {
-        guard let r = recorder else { reply?.send(["ok": false, "error": "Not recording.", "id": ""]); return }
+    /// `stoppedBy`: "app", "menu", "agent" or "max". `then` is an agent's: the finished recording, or the error.
+    private func stop(reply: ExactReply?, stoppedBy: String = "app", then: ((RecordingMeta?, String) -> Void)? = nil) {
+        guard let r = recorder else {
+            reply?.send(["ok": false, "error": "Not recording.", "id": ""])
+            then?(nil, "Not recording.")
+            return
+        }
         recorder = nil
+        maxTimer?.invalidate()
+        maxTimer = nil
+        let by = recordingBy
         updateStatusItem()
         context.changed("status")
         Task { @MainActor in
             do {
                 let meta = try await r.stop()
+                last = ["id": meta.id, "folder": r.folder.path, "name": meta.name, "kind": meta.kind, "duration": meta.duration,
+                        "by": by, "stoppedBy": stoppedBy]
                 finished = meta.id
                 context.changed("recordings")
                 context.changed("status")
                 reply?.send(["ok": true, "error": "", "id": meta.id])
+                then?(meta, "")
             } catch {
                 try? FileManager.default.removeItem(at: r.folder)
+                last = ["id": "", "folder": "", "name": r.name, "kind": r.kind.rawValue, "duration": 0, "by": by, "stoppedBy": stoppedBy,
+                        "error": "\(error)"]
                 context.changed("recordings")
                 reply?.send(["ok": false, "error": "\(error)", "id": ""])
+                then?(nil, "\(error)")
             }
         }
     }
@@ -394,6 +431,125 @@ final class Studio: ExactModule {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd-HHmmss"
         return f.string(from: Date())
+    }
+
+    // MARK: Agents
+
+    /// Answers agents' requests from the control folder: sources, start, status, stop.
+    // @ref LLP 0007#the-channel — the app records for the agent, so the permission and the menu bar mark are the app's
+    private func serve(_ root: URL) {
+        let server = ControlServer(root: root) { [weak self] request, reply in
+            guard let self else { return reply(["ok": false, "code": "failed", "error": "Exact Studio is closing."]) }
+            self.agentRequest(request, reply: reply)
+        }
+        do {
+            try server.start()
+            control = server
+        } catch {
+            NSLog("exact-studio: agents can't record: \(error)")
+        }
+    }
+
+    private func agentRequest(_ r: [String: Any], reply: @escaping ([String: Any]) -> Void) {
+        func refuse(_ code: String, _ error: String) { reply(["ok": false, "code": code, "error": error, "last": last]) }
+        let permission = "Screen Recording is not allowed for Exact Studio. A person must allow it in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen Exact Studio."
+        switch r["op"] as? String ?? "" {
+        case "sources":
+            let allowed = CGPreflightScreenCaptureAccess()
+            if !allowed && !context.agent { CGRequestScreenCaptureAccess() }
+            reply(["ok": true, "allowed": allowed, "items": agentSources().map(\.json)])
+        case "status":
+            reply(agentStatus())
+        case "start":
+            let source = r["source"] as? String ?? ""
+            guard source.hasPrefix("window:") || source.hasPrefix("display:") else { return refuse("nomatch", "No source \(source).") }
+            // @ref LLP 0007#never-take-over — a running recording, or a picker the person has open, is theirs
+            if let rec = recorder {
+                return refuse("busy", "Already recording \(rec.name) (\(rec.kind.rawValue)), started \(recordingBy == "agent" ? "by an agent" : "in the app") \(Int(Date().timeIntervalSince(recordingSince))) s ago. It was left running; stop it first if it is yours.")
+            }
+            if starting { return refuse("busy", "A recording is starting in Exact Studio now. It was left alone.") }
+            if picker != nil { return refuse("busy", "A person has a recording picker open in Exact Studio. It was left alone; try again when it is closed.") }
+            guard CGPreflightScreenCaptureAccess() else {
+                if !context.agent { CGRequestScreenCaptureAccess() }
+                return refuse("permission", permission)
+            }
+            var area: (NSScreen, CGRect)?
+            if let a = r["area"] as? [NSNumber], a.count == 4 {
+                let did = UInt32(source.dropFirst(8))
+                guard source.hasPrefix("display:"),
+                      let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == did }) else {
+                    return refuse("nomatch", "That display is gone.")
+                }
+                let rect = CGRect(x: a[0].doubleValue, y: a[1].doubleValue, width: a[2].doubleValue, height: a[3].doubleValue)
+                guard rect.width >= 40, rect.height >= 40, CGRect(origin: .zero, size: screen.frame.size).contains(rect) else {
+                    return refuse("nomatch", "That area is not inside the display.")
+                }
+                area = (screen, rect)
+            }
+            let sound = (r["sound"] as? String).flatMap { ["on": true, "off": false][$0] }
+            let limit = (r["max"] as? NSNumber)?.doubleValue ?? 0
+            begin(source, area: area, reply: nil, sound: sound, by: "agent") { [weak self] error in
+                guard let self else { return }
+                guard error.isEmpty, let rec = self.recorder else {
+                    let gone = error.contains("gone") ? "That window or display is gone; list the sources again. " : ""
+                    return refuse(CGPreflightScreenCaptureAccess() ? "failed" : "permission", gone + (CGPreflightScreenCaptureAccess() ? error : permission))
+                }
+                self.maxSeconds = limit
+                if limit > 0 {
+                    self.maxTimer = Timer.scheduledTimer(withTimeInterval: limit, repeats: false) { [weak self, weak rec] _ in
+                        guard let self, let rec, self.recorder === rec else { return }
+                        self.stop(reply: nil, stoppedBy: "max")
+                    }
+                }
+                reply(self.agentStatus())
+            }
+        case "stop":
+            guard let rec = recorder else {
+                if starting { return refuse("busy", "A recording is starting; ask again in a moment.") }
+                let ended = (last["id"] as? String).map { $0.isEmpty ? "" : " The last recording, \($0), was stopped \(Self.stopper(last["stoppedBy"] as? String ?? ""))." } ?? ""
+                return refuse("notrecording", "Not recording." + ended)
+            }
+            if recordingBy != "agent" && (r["any"] as? Bool) != true {
+                return refuse("notyours", "The recording running now (\(rec.name), \(Int(Date().timeIntervalSince(recordingSince))) s) was started in the app, not by an agent. It was left running. Stop it only if the person asked you to (any: true, or --any).")
+            }
+            stop(reply: nil, stoppedBy: "agent") { [weak self] meta, error in
+                guard let self else { return }
+                guard meta != nil else { return refuse("failed", error) }
+                reply(["ok": true, "recording": false, "last": self.last])
+            }
+        default:
+            refuse("unknown", "Exact Studio answers sources, status, start and stop.")
+        }
+    }
+
+    private static func stopper(_ by: String) -> String {
+        ["menu": "from the menu bar", "app": "in the app", "agent": "by an agent", "max": "by itself at its --max limit"][by] ?? "in the app"
+    }
+
+    private func agentStatus() -> [String: Any] {
+        guard let rec = recorder else {
+            return ["ok": true, "recording": false, "starting": starting, "sound": sound, "last": last]
+        }
+        return ["ok": true, "recording": true, "starting": false, "id": rec.id, "folder": rec.folder.path, "name": rec.name, "kind": rec.kind.rawValue,
+                "by": recordingBy, "elapsed": Date().timeIntervalSince(recordingSince), "max": recordingBy == "agent" ? maxSeconds : 0,
+                "sound": recordingSound, "last": last]
+    }
+
+    /// What an agent can name: the displays, the other apps' windows and the Simulators, as the pickers list them.
+    // @ref LLP 0007#names — the same lists the pickers end in, so a Simulator is cropped to the phone and a window keeps its shape
+    private func agentSources() -> [SourceEntry] {
+        let displays = SourcePicker.candidates(.display).map { c in
+            SourceEntry(id: c.source, kind: "display", name: c.title, width: Int(c.frame.width), height: Int(c.frame.height))
+        }
+        let windows = SourcePicker.candidates(.window).map { c in
+            SourceEntry(id: c.source, kind: "window", name: c.title.isEmpty || c.title == c.app ? c.app : "\(c.app) — \(c.title)",
+                        app: c.app, title: c.title, width: Int(c.frame.width), height: Int(c.frame.height))
+        }
+        let devices = SourcePicker.candidates(.simulator).map { c in
+            SourceEntry(id: c.source, kind: c.sourceKind.rawValue, name: c.name, app: c.sourceKind == .emulator ? "Android Emulator" : c.app,
+                        title: c.title, width: Int(c.frame.width), height: Int(c.frame.height))
+        }
+        return SourceEntry.named(displays + devices + windows)
     }
 
     // MARK: Menu bar
@@ -499,7 +655,7 @@ final class Studio: ExactModule {
     }
 
     @objc private func stopFromMenuBar() {
-        stop(reply: nil)
+        stop(reply: nil, stoppedBy: "menu")
         NSApp.activate(ignoringOtherApps: true)
     }
 

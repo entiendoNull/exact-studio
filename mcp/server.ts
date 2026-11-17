@@ -55,7 +55,78 @@ async function writeChecked(id: string, file: string, value: unknown): Promise<R
 
 const id = { type: 'string', description: 'A recording id, a unique start of one, or "latest".' };
 
+/** A record verb's answer: what it printed, its warnings, and what to do about a refusal by its exit code. */
+// @ref LLP 0007#exit-codes
+// The CLI's own hints name its verbs; here they are replaced by `then`, which names the tools.
+const recordOut = (r: { code: number; out: string; err: string }, then = ''): Result => {
+  const out = r.out.split('\n').filter((l) => !/^(next: |Everything on that source is recorded\.)/.test(l)).join('\n');
+  const said = [out.trim(), r.err.trim()].filter(Boolean).join('\n');
+  const next: Record<number, string> = {
+    3: 'A person must act before anything can be recorded. Tell them; do not retry until they have.',
+    4: 'Exact Studio could not be reached. After a timeout, call recording_status before you try again, so you never start a second recording.',
+  };
+  return text([said || (r.code ? `failed (exit ${r.code})` : 'ok'), r.code ? next[r.code] : then].filter(Boolean).join('\n\n'), r.code !== 0);
+};
+
 const tools: { name: string; description: string; inputSchema: object; call: (a: any) => Promise<Result> }[] = [
+  {
+    name: 'list_sources',
+    description:
+      'Step 1 of recording. What can be recorded now, one per line: displays (display:1, display:2), Simulators and Android emulators (simulator:<device name>, as the app\'s sidebar lists them) and other apps\' windows (window:<App — Title>, or window:#<number> when two share a name). The first word of each line is the name start_recording takes. Opens Exact Studio when it is not running. Prefer a Simulator or one window over a display: everything on the source is recorded, notifications and secrets included.',
+    inputSchema: { type: 'object', properties: {} },
+    call: async () => recordOut(await run(['sources'])),
+  },
+  {
+    name: 'start_recording',
+    description:
+      'Step 2 of recording. Starts recording one source at once, with no picker, in the Exact Studio app: the app shows its red mark with the time in the menu bar, as when a person records. Then drive the app or page you are recording with your other tools, and call stop_recording when done. Refused (nothing starts) when a recording is already running (it is never stopped or replaced), when the source matches nothing or more than one source (the candidates are listed: pick one and call again), or when Exact Studio lacks the Screen Recording permission (a person must allow it). Set max_seconds in case you cannot call stop_recording.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: {
+          type: 'string',
+          description:
+            'A name from list_sources, such as "simulator:iPhone 17 Pro", "window:Safari — GitHub" or "display:1"; or a unique part of one, such as "iPhone 17 Pro" or "github". Or an area of a display: "area:x,y,w,h" in points from the display\'s top-left corner, optionally "@2" for display 2 (default display 1).',
+        },
+        sound: { type: 'boolean', description: 'Record the system\'s sound (a window\'s: its app\'s). Default: the app\'s System Sound setting.' },
+        max_seconds: { type: 'number', description: 'Stops by itself after this many seconds. Recommended, so a recording never runs on when you stop early.' },
+      },
+      required: ['source'],
+    },
+    call: async (a) => {
+      if (typeof a.source !== 'string' || !a.source.trim()) return text('source is required: a name from list_sources.', true);
+      if (a.max_seconds !== undefined && !(typeof a.max_seconds === 'number' && a.max_seconds > 0)) return text('max_seconds is a number of seconds above 0.', true);
+      return recordOut(
+        await run([
+          'record', 'start', a.source,
+          ...(a.sound !== undefined ? ['--sound', a.sound ? 'on' : 'off'] : []),
+          ...(a.max_seconds !== undefined ? ['--max', String(a.max_seconds)] : []),
+        ]),
+        'Everything on that source is recorded. Drive it with your other tools now, then call stop_recording.',
+      );
+    },
+  },
+  {
+    name: 'recording_status',
+    description:
+      'Whether Exact Studio is recording now: the source, the seconds so far, who started it (an agent or the app), the id and folder; and the last recording that ended, with its id. Never opens the app.',
+    inputSchema: { type: 'object', properties: {} },
+    call: async () => recordOut(await run(['record', 'status'])),
+  },
+  {
+    name: 'stop_recording',
+    description:
+      'Step 3 of recording. Stops the recording that start_recording began, and returns the new recording\'s id and folder. Next: show_recording with that id, validate_recording, render_frame to look at it, then edit (write_edits, add_mask to hide a secret, apply_template) and export_video. Refused when nothing is recording. A recording a person started in the app is left running unless any is true.',
+    inputSchema: {
+      type: 'object',
+      properties: { any: { type: 'boolean', description: 'Also stop a recording a person started in the app. Only when the person asked you to.' } },
+    },
+    call: async (a) => {
+      const r = await run(['record', 'stop', ...(a.any ? ['--any'] : [])]);
+      const id = /^stopped (\S+)/m.exec(r.out)?.[1] ?? 'latest';
+      return recordOut(r, `Next: show_recording with id "${id}", validate_recording, render_frame to look at it; then edit it and export_video.`);
+    },
+  },
   {
     name: 'list_recordings',
     description: 'The recordings in the library, newest first: id, kind, length and name.',
@@ -227,7 +298,7 @@ async function handle(msg: any): Promise<unknown> {
         capabilities: { tools: {} },
         serverInfo: { name: 'exact-studio', version: '0.1.0' },
         instructions:
-          'Edit Exact Studio screen recordings. Loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end.',
+          'Record and edit Exact Studio screen recordings. To record without a person: list_sources → start_recording (with max_seconds) → drive the app you record with your other tools → stop_recording, which returns the new id → edit it as below. Everything on the source is recorded, so prefer a Simulator or one window, and hide any secret with add_mask. Never stop a recording you did not start. To edit, loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end.',
       };
     case 'ping':
       return {};

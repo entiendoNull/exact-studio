@@ -44,6 +44,23 @@ exact-studio — edit Exact Studio recordings from the command line
                                             on the first effect lane free then (else a new one); prints the new segment
   exact-studio schema                       prints where the docs and JSON Schemas are
 
+Recording, through the Exact Studio app (opened when it is not running):
+  exact-studio sources [--no-launch]        what can be recorded now, one per line, each with the name record start takes
+  exact-studio record start <source> [--sound on|off] [--max <seconds>] [--no-launch]
+                                            starts recording at once, with no picker. <source> is a name from sources:
+                                            display:1, window:Safari, simulator:iPhone 17 Pro, a part of a name, or
+                                            area:x,y,w,h[@<display>] in points from the display's top-left. Refused when a
+                                            recording is running, when nothing or more than one thing matches (the
+                                            candidates are listed) or without the Screen Recording permission.
+                                            --sound: the system's sound (default: the app's System Sound setting);
+                                            --max: stops by itself after that many seconds
+  exact-studio record status                recording or not; the source, how long, the id; the last recording that ended
+  exact-studio record stop [--any]          stops the recording an agent started and prints its id and folder, ready
+                                            to show, edit and export; --any also stops one a person started in the app
+  Exit codes: 1 refused, 2 usage, 3 needs a person (the permission), 4 the app did not answer.
+  EXACT_STUDIO_CONTROL names another control folder (then the app is never opened); EXACT_STUDIO_NO_LAUNCH=1
+  (or --no-launch) never opens the app; EXACT_STUDIO_APP names the Exact Studio.app to open.
+
   <id> is a recording folder's name, a unique start of one, or "latest".
   --library <dir> (or EXACT_STUDIO_LIBRARY) names the Recordings folder;
   the default is ~/Movies/Exact Studio/Recordings.
@@ -213,6 +230,92 @@ func problems(_ r: Recording) -> [String] {
     for k in e.transitions.keys where !ends.contains(k) { out.append("transition at \(k) ms: not the end of a clip part") }
     if e.pieces(d).allSatisfy(\.removed) { out.append("every clip part is removed") }
     return out
+}
+
+
+// MARK: Recording, through the app
+
+// @ref LLP 0007#the-channel — the CLI asks the running app, which records; it never records by itself
+let appID = "com.entiendonull.exactstudio"
+
+/// Asks the app and returns its reply. Opens the app first when `launch` and it is not running.
+func ask(_ request: [String: Any], timeout: Double, launch: Bool) -> [String: Any] {
+    let root = Control.folder
+    do { try Control.prepare(root) } catch { fail("The control folder is not safe to use: \(error)", code: 4) }
+    if Control.runningApp(root) == nil {
+        let env = ProcessInfo.processInfo.environment
+        // An app opened by Launch Services serves the default folder, never an EXACT_STUDIO_CONTROL one.
+        guard launch, env["EXACT_STUDIO_NO_LAUNCH"] != "1", (env["EXACT_STUDIO_CONTROL"] ?? "").isEmpty else {
+            fail(launch ? "Exact Studio is not running (nothing answers in \(root.path)), and it is not opened here. Open it first."
+                        : "Exact Studio is not running, so nothing is recording.", code: launch ? 4 : 1)
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        // EXACT_STUDIO_APP names one build; else Launch Services picks the app by its id.
+        let app = ProcessInfo.processInfo.environment["EXACT_STUDIO_APP"] ?? ""
+        p.arguments = app.isEmpty ? ["-g", "-b", appID] : ["-g", "-a", app]
+        p.standardError = FileHandle.nullDevice
+        do { try p.run(); p.waitUntilExit() } catch {}
+        guard p.terminationStatus == 0 else { fail("Exact Studio is not installed. Build and open it once with `bun exact.mjs mac --run`.", code: 4) }
+        FileHandle.standardError.write("opening Exact Studio…\n".data(using: .utf8)!)
+        let until = Date().addingTimeInterval(30)
+        while Control.runningApp(root) == nil {
+            guard Date() < until else {
+                fail("Exact Studio was opened but did not answer within 30 s. A build from before agent recording may be running: quit it and open a new build.", code: 4)
+            }
+            usleep(100_000)
+        }
+    }
+    let id = UUID().uuidString
+    let file = Control.requests(root).appendingPathComponent("\(id).json")
+    let answer = Control.replies(root).appendingPathComponent("\(id).json")
+    var body = request
+    body["expires"] = Date().timeIntervalSince1970 + timeout
+    do { try Control.put(body, file) } catch { fail("\(error)", code: 4) }
+    let until = Date().addingTimeInterval(timeout)
+    while Date() < until {
+        if let reply = Control.read(answer) {
+            unlink(answer.path)
+            return reply
+        }
+        usleep(50_000)
+    }
+    // Taken back, so a late app never acts on it; the request also carries its expiry.
+    let untouched = unlink(file.path) == 0
+    fail(untouched ? "Exact Studio did not take the request within \(Int(timeout)) s. Is it busy or stuck?"
+                   : "Exact Studio took the request but did not answer within \(Int(timeout)) s. Run `exact-studio record status`.", code: 4)
+}
+
+/// Fails with the app's refusal: exit 3 when a person must act, else 1.
+func refused(_ reply: [String: Any]) -> Never {
+    fail(reply["error"] as? String ?? "Exact Studio refused.", code: reply["code"] as? String == "permission" ? 3 : 1)
+}
+
+let permissionText = "Screen Recording is not allowed for Exact Studio. A person must allow it in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen Exact Studio."
+
+/// The app's list of sources. `forStart`: no permission is a refusal (exit 3), not a warning,
+/// since without it window names are missing and nothing can be recorded anyway.
+func sourceList(launch: Bool, forStart: Bool = false) -> [SourceEntry] {
+    let reply = ask(["op": "sources"], timeout: 15, launch: launch)
+    guard reply["ok"] as? Bool == true else { refused(reply) }
+    if reply["allowed"] as? Bool == false {
+        if forStart { fail(permissionText, code: 3) }
+        FileHandle.standardError.write("\(permissionText) Until then, window names may be missing.\n".data(using: .utf8)!)
+    }
+    return SourceEntry.named(((reply["items"] as? [[String: Any]]) ?? []).compactMap(SourceEntry.init))
+}
+
+/// The last recording that ended, as one or two lines; "" when none has this session.
+func lastLines(_ reply: [String: Any]) -> String {
+    guard let l = reply["last"] as? [String: Any], let id = l["id"] as? String, !id.isEmpty else { return "" }
+    let by = ["menu": "from the menu bar", "app": "in the app", "agent": "by an agent", "max": "by itself at its --max limit"][l["stoppedBy"] as? String ?? ""] ?? ""
+    return "last recording: \(id)  \((l["name"] as? String) ?? "") (\((l["kind"] as? String) ?? "")), \(String(format: "%.1f", (l["duration"] as? NSNumber)?.doubleValue ?? 0)) s, stopped \(by)\nfolder \((l["folder"] as? String) ?? "")"
+}
+
+func recordingLines(_ s: [String: Any]) -> String {
+    let max = (s["max"] as? NSNumber)?.doubleValue ?? 0
+    return "recording \((s["name"] as? String) ?? "") (\((s["kind"] as? String) ?? "")) for \(String(format: "%.1f", (s["elapsed"] as? NSNumber)?.doubleValue ?? 0)) s, started \(s["by"] as? String == "agent" ? "by an agent" : "in the app")"
+        + (max > 0 ? ", stops by itself at \(Int(max)) s" : "") + "\nid \((s["id"] as? String) ?? "")  folder \((s["folder"] as? String) ?? "")"
 }
 
 guard let command = args.first else { print(usage); exit(0) }
@@ -440,6 +543,59 @@ case "mask":
     e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
     print("added to \(r.id) (edits.json):")
     print(String(data: try! e.encode(s), encoding: .utf8)!)
+
+case "sources":
+    let list = sourceList(launch: !flag("--no-launch"))
+    if list.isEmpty { print("nothing to record now") }
+    for e in list { print(e.line) }
+
+case "record":
+    let verb = args.first ?? ""
+    args = Array(args.dropFirst())
+    switch verb {
+    case "start":
+        let soundText = option("--sound"), maxText = option("--max")
+        guard soundText == nil || ["on", "off"].contains(soundText!) else { fail("--sound is on or off") }
+        let limit = maxText.flatMap(Double.init)
+        guard maxText == nil || (limit != nil && limit! > 0) else { fail("--max is a number of seconds above 0") }
+        let launch = !flag("--no-launch")
+        let query = args.joined(separator: " ")
+        guard !query.isEmpty else { fail("record start needs a source. `exact-studio sources` lists them; `exact-studio` alone prints the help.") }
+        var request: [String: Any] = ["op": "start"]
+        if let soundText { request["sound"] = soundText }
+        if let limit { request["max"] = limit }
+        let ref: String
+        switch SourceMatch.pick(query, in: sourceList(launch: launch, forStart: true)) {
+        case let .problem(why): fail(why, code: 1)
+        case let .source(e): request["source"] = e.id; ref = e.ref
+        case let .area(d, x, y, w, h): request["source"] = d.id; request["area"] = [x, y, w, h]; ref = "area:\(Int(x)),\(Int(y)),\(Int(w)),\(Int(h)) of \(d.ref)"
+        }
+        let reply = ask(request, timeout: 30, launch: false)
+        guard reply["ok"] as? Bool == true else { refused(reply) }
+        print("started \(ref)")
+        print(recordingLines(reply))
+        print("Everything on that source is recorded. Stop with: exact-studio record stop")
+    case "status":
+        guard Control.runningApp(Control.folder) != nil else { print("not recording (Exact Studio is not running)"); break }
+        let reply = ask(["op": "status"], timeout: 10, launch: false)
+        guard reply["ok"] as? Bool == true else { refused(reply) }
+        if reply["recording"] as? Bool == true { print(recordingLines(reply)) }
+        else { print(reply["starting"] as? Bool == true ? "starting a recording" : "not recording") }
+        if case let l = lastLines(reply), !l.isEmpty { print(l) }
+    case "stop":
+        let any = flag("--any")
+        let reply = ask(["op": "stop", "any": any], timeout: 60, launch: false)
+        guard reply["ok"] as? Bool == true, let l = reply["last"] as? [String: Any], let id = l["id"] as? String, !id.isEmpty else { refused(reply) }
+        print("stopped \(id)  \((l["name"] as? String) ?? "") (\((l["kind"] as? String) ?? "")), \(String(format: "%.1f", (l["duration"] as? NSNumber)?.doubleValue ?? 0)) s")
+        print("folder \((l["folder"] as? String) ?? "")")
+        let folder = URL(fileURLWithPath: (l["folder"] as? String) ?? "")
+        if folder.deletingLastPathComponent().standardizedFileURL.path != library.standardizedFileURL.path {
+            print("note: it is in \(folder.deletingLastPathComponent().path), not in \(library.path); pass --library \(folder.deletingLastPathComponent().path)")
+        }
+        print("next: exact-studio show \(id), then validate, frame, edit and export it as usual")
+    default:
+        fail("record takes start, status or stop. `exact-studio` alone prints the help.")
+    }
 
 case "schema":
     let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

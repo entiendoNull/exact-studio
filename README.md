@@ -2,7 +2,7 @@
 
 A macOS screen recorder and video editor built with [Exact](https://github.com/expo/exact), made so that **agents can edit your videos as well as you can**.
 
-Every edit you can make in the app, an agent can make too: through a command-line tool, through an MCP server, or by changing two plain JSON files. Nothing about an edit lives only in the app. Cut, add texts, images and sounds, zoom, move, turn it in 3D, change the look, render a frame to check it, export: all of it works without the window. The app shows an agent's change within a second, so you can work on the same video together.
+Every edit you can make in the app, an agent can make too: through a command-line tool, through an MCP server, or by changing two plain JSON files. An agent can also record on its own: it lists what can be recorded, starts, drives the app it records, and stops. Nothing about an edit lives only in the app. Cut, add texts, images and sounds, zoom, move, turn it in 3D, change the look, render a frame to check it, export: all of it works without the window. The app shows an agent's change within a second, so you can work on the same video together.
 
 See [For agents](#for-agents) for the tools.
 
@@ -41,6 +41,7 @@ To update, run `git pull` in both folders and run the last command again.
 - **Windows:** keep their own shape, rounded corners included.
 - **System sound:** on by default, with one switch to turn it off.
 - **Menu bar:** an Exact Studio mark is always there. Its menu starts each picker. While recording, it turns red with the time, and one click stops.
+- **Agents record too:** an agent names a display, a window, an area or a Simulator, and the recording starts at once, with no picker. It shows in the menu bar like any other, and it never stops or replaces a recording that is running. See [Recording](#recording).
 
 ### Look
 
@@ -113,9 +114,28 @@ Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions,
 
 [`docs/edits.md`](docs/edits.md) documents every field; [`schema/`](schema) has the JSON Schemas; the `edit-recording` skill (`.claude/skills/`) is the workflow.
 
+### Recording
+
+An agent records through the app, so the app's Screen Recording permission and its red menu bar mark apply. If the app is not running, `sources` and `record start` open it.
+
+```sh
+./exact-studio sources                                   # what can be recorded, with the names start takes
+./exact-studio record start "simulator:iPhone 17 Pro" --max 120
+./exact-studio record status
+./exact-studio record stop                               # prints the new recording's id and folder
+./exact-studio show latest
+```
+
+- A source is a name from `sources` (`display:1`, `window:Safari — GitHub`, `simulator:iPhone 17 Pro`), a unique part of one, or `area:x,y,w,h@<display>` in points.
+- `--sound on|off` overrides the System Sound setting for this recording. `--max <seconds>` stops it by itself.
+- A start is refused when a recording is running, when the name matches nothing or more than one source (the candidates are listed), or without the permission.
+- `record stop` stops only a recording an agent started. `--any` also stops one a person started.
+- Exit codes: 1 refused, 2 usage, 3 a person must act (the permission), 4 the app did not answer.
+- Everything on the source is recorded. Prefer a Simulator or one window over a display, and hide secrets with a mask.
+
 ### MCP
 
-`mcp/server.ts` gives the same verbs to any MCP client: `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `add_image`, `add_sound`, `add_mask`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template` and `edit_format`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
+`mcp/server.ts` gives the same verbs to any MCP client: `list_sources`, `start_recording`, `recording_status`, `stop_recording`, `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `add_image`, `add_sound`, `add_mask`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template` and `edit_format`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
 
 ```sh
 claude mcp add exact-studio -- bun /path/to/exact-studio/mcp/server.ts
@@ -143,7 +163,8 @@ The app uses the Exact checkout at `../exact`. [Install](#install) has the full 
 - `modules/apple/Scene3D.swift`: the 3D stage: the slab, its materials, lights and camera.
 - `cli/main.swift`, `exact-studio`: the command-line tool.
 - `mcp/server.ts`, `.mcp.json`: the MCP server around it.
-- `modules/apple/Studio.swift`: the module's ops, the menu bar item, the preview view, export.
+- `modules/apple/Studio.swift`: the module's ops, the menu bar item, the preview view, export, and the answers to agents' recording requests.
+- `modules/apple/Control.swift`: the private folder through which the CLI asks the app to record, and source names for agents.
 - `llp/`: the decisions behind the design, as short notes. Start at `llp/0000-exact-studio.explainer.md`. `./ref-check` checks them.
 
 Recordings are kept in `~/Movies/Exact Studio/Recordings/<id>/` as `capture.mov` (HEVC with alpha, and AAC sound when recorded), `meta.json`, `cursor.json`, `edits.json`, `look.json` and, for a device, `mask-*.png`.

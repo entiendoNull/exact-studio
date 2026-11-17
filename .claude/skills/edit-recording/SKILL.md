@@ -1,13 +1,37 @@
 ---
 name: edit-recording
-description: Edit an Exact Studio screen recording as files — cut it, add texts, images (logos, badges, pictures), music and sounds, zooms, effects, moves, 3D, masks that hide secrets (API keys, emails, names), change its look — then check it, look at frames and export, without the app's UI. Use when asked to edit, cut, title, brand, polish, redact, blur out or export an Exact Studio recording or video.
+description: Record the screen with Exact Studio without a person (a Simulator, a window, a display or an area), and edit an Exact Studio screen recording as files — cut it, add texts, images (logos, badges, pictures), music and sounds, zooms, effects, moves, 3D, masks that hide secrets (API keys, emails, names), change its look — then check it, look at frames and export, without the app's UI. Use when asked to record a demo, a flow or a screen with Exact Studio, or to edit, cut, title, brand, polish, redact, blur out or export an Exact Studio recording or video.
 ---
 
-# Editing an Exact Studio recording
+# Recording and editing with Exact Studio
 
 A recording is a folder under `~/Movies/Exact Studio/Recordings/<id>/`. Its edit is two JSON files:
 `edits.json` (the timeline) and `look.json` (the frame). Read `docs/edits.md` first: it has every
 field, its units and the overlap rules; `schema/*.schema.json` are the JSON Schemas.
+
+## Recording
+
+An agent can make the recording too. The app records, so it must be built; `sources` and `record start`
+open it when it is not running. With the MCP server, the tools are `list_sources`, `start_recording`,
+`recording_status` and `stop_recording`.
+
+1. `./exact-studio sources`: what can be recorded now. The first word of each line is the name to use.
+2. `./exact-studio record start "simulator:iPhone 17 Pro" --max 120`. A unique part of a name works too.
+   It starts at once, with no picker. Always give `--max`, so it stops even if you never get to step 4.
+3. Drive the app you record with your other tools: tap, type, scroll. `record status` says how long so far.
+4. `./exact-studio record stop`: it prints the new recording's id and folder.
+5. Go on with that id: `show`, `validate`, `frame`, then edit and export as below.
+
+- Everything on the source is recorded, notifications and secrets included. Prefer a Simulator or one
+  window over a display. If a secret still shows, hide it with a mask (below).
+- A start is refused when a recording is already running. Never stop a recording you did not start;
+  `record stop` leaves a person's recording running unless you pass `--any` because they asked.
+- When nothing or more than one source matches, the candidates are listed. Pick one and start again.
+- Exit 3 means a person must allow Screen Recording for Exact Studio. Tell them and wait.
+- Exit 4 means the app did not answer. Run `record status` before you try again.
+- `--sound on|off` overrides the app's System Sound setting for this recording.
+
+## Editing
 
 The loop, from this repository's root:
 
