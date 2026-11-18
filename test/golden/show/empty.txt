@@ -3,4 +3,4 @@ recorded 0:10.00, plays as 0:10.00; 2 clicks; folder <library>/empty
 look: ocean background, 16:9, padding 8%, 3D off
 clip parts:
   0:00.00–0:10.00
-segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front)):
+segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane; t0 and i0 the front ones):

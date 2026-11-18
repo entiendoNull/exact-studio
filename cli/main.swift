@@ -314,7 +314,13 @@ func laneNotes(_ r: Recording) -> [String] {
     let raw = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: r.folder.appendingPathComponent("edits.json")))) as? [String: Any]) ?? [:]
     let e = r.edits
     let used = ["lanes": e.lanes, "textLanes": e.textLanes, "imageLanes": e.imageLanes, "soundLanes": e.soundLanes]
-    return used.keys.sorted().compactMap { key in
+    // @ref LLP 0005#layers — a row the file names that is not one, or names twice, is left out when it is read
+    var seen = Set<String>()
+    let bad = ((raw["layers"] as? [Any]) ?? []).compactMap { entry -> String? in
+        guard let key = entry as? String, LayerRow(key: key) != nil else { return "layers: \(entry) is not a row; a row is \"video\", \"text:<lane>\" or \"image:<lane>\"" }
+        return seen.insert(key).inserted ? nil : "layers: \(key) is named twice; the first is kept"
+    }
+    return bad + used.keys.sorted().compactMap { key in
         guard let declared = raw[key] as? Int, declared != used[key], key != "lanes" || raw["textLanes"] != nil else { return nil }
         return "\(key) is \(declared); \(used[key]!) \(used[key] == 1 ? "is" : "are") in use. Leave the counts out: lanes come from use."
     }
@@ -439,7 +445,11 @@ case "show":
         let t = r.edits.transitions[Edits.key(p.end)].map { " → \($0)" } ?? ""
         print("  \(stamp(p.start))–\(stamp(p.end))\(p.removed ? "  removed" : "")\(t)")
     }
-    print("segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front)):")
+    // @ref LLP 0005#layers
+    if r.edits.segments.contains(where: \.isOverlay) {
+        print("layers, front to back: \(r.edits.stack().map { $0.isVideo ? "video" : "\($0.kind == "text" ? "t" : "i")\($0.lane)" }.joined(separator: ", "))")
+    }
+    print("segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane; t0 and i0 the front ones):")
     for s in r.edits.segments.sorted(by: { ($0.space, $0.lane, $0.start) < ($1.space, $1.lane, $1.start) }) {
         var what = s.kind
         switch s.kind {

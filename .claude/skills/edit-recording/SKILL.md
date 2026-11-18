@@ -86,15 +86,17 @@ Rules that keep an edit looking good:
   everything. To blur one image or one text alone, use its own `effects`. `docs/edits.md` has the table of which lanes each kind uses.
 - A text or an image can sit behind the video: `"layer": "behind"`. It is drawn on the background and
   shows only where the video is not, so it needs a move (`moves`, or a smaller `base`) that uncovers it;
-  check `frame` before and after that move. `order` (higher in front) stacks items of one kind in one
-  layer. A `background` reach stays under it; `scene` and above cover it. `docs/edits.md` ("Depth").
+  check `frame` before and after that move. The text and image rows are one stack, front to back in
+  `layers` (`"text:0"`, `"image:0"`, `"video"`): move a row there to change what is in front. A `background`
+  reach stays under it; `scene` and above cover it. `docs/edits.md` ("Depth").
 - For music or a sound effect, run `./exact-studio sound <id> <audio file> --at <t> [--for <seconds>]`:
   it copies the file into `sounds/` and prints the new entry in `sounds`. An added sound is not cut
   by the video's cuts or speed changes: it starts at recording time `start` and plays straight
   through. So add music after the cuts are set and check `show` for when it plays. Keep music
   under the recorded sound (`volume` 0.3–0.5) and give it a `fadeOut`; `volume` 0 mutes the recording.
-- Images shown one after another share an image lane. Put images that show at the same time on
-  separate lanes: the lower `lane` is in front. Raise `imageLanes` when you add a lane.
+- Do not add a lane unless two items of its kind overlap in time. Leave the lane counts out. Images shown
+  one after another share an image lane; images at the same time go on lanes 0 and 1. When validate names
+  a rule, do what its second line says.
 - Keep an image small and near a corner unless it is the subject: a logo at `size` 0.08–0.15, a
   picture that carries a moment at 0.3–0.5. Look at a frame after placing it.
 - An id must be unique within its list and hold no colon; any other string works.

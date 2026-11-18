@@ -855,6 +855,7 @@ final class PlayerHost: NSView {
         still.contentsGravity = .resizeAspect
         still.isHidden = true
         layer?.addSublayer(still)
+        motion.masksToBounds = true
         layer?.addSublayer(motion)
         for l in [outline, guides] {
             l.fillColor = nil

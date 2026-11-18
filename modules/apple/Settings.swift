@@ -4,6 +4,7 @@ import Foundation
 enum Settings {
     private(set) static var store = UserDefaults.standard
     static let emptyLanesKey = "ExactStudio.showEmptyLanes"
+    static let clipFoldedKey = "ExactStudio.clipFolded"
 
     static var showEmptyLanes: Bool {
         get { store.bool(forKey: emptyLanesKey) }

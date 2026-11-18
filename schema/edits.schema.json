@@ -31,23 +31,31 @@
     },
     "lanes": {
       "type": "integer",
-      "minimum": 1,
-      "description": "How many effect lanes the video has: they hold zoom, speed, spotlight, highlight, 3d, mask, and a blur or mono with no scope"
+      "minimum": 0,
+      "description": "Written by the app: how many effect lanes are in use. Leave it out: lanes come from use. They hold zoom, speed, spotlight, highlight, 3d, mask, and a blur or mono of any scope"
     },
     "textLanes": {
       "type": "integer",
       "minimum": 0,
-      "description": "How many text lanes there are; a text's lane counts these. A file without it is an old one, and the app sorts its texts into text lanes"
+      "description": "Written by the app: how many text lanes are in use. Leave it out. A file without it is an old one or one whose counts are left out; each kind's lanes close up"
     },
     "imageLanes": {
       "type": "integer",
       "minimum": 0,
-      "description": "How many image lanes there are; an image's lane counts these, and a lower lane is in front. Images on one lane never overlap in time. A file without it is an old one, where each image had a lane of its own; each keeps it"
+      "description": "Written by the app: how many image lanes are in use. Leave it out. Images on one lane never overlap in time"
+    },
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(video|text:[0-9]+|image:[0-9]+)$"
+      },
+      "description": "The text and image rows and the video, front to back: \"text:0\", \"image:1\", \"video\". The rows are the draw order; a row above \"video\" is in front of it. Written by the app; leave it out and new rows go where the app puts them (texts in front, images behind the images in front)"
     },
     "frameLanes": {
       "type": "integer",
       "minimum": 0,
-      "description": "How many whole-frame lanes there are: they hold a blur or mono with a scope past the video: background, scene, frame or all"
+      "description": "Read from old files only, never written: their whole-frame lanes. Each of their items moves to the first effect lane with room"
     },
     "base": {
       "type": "object",
@@ -152,7 +160,7 @@
     "soundLanes": {
       "type": "integer",
       "minimum": 0,
-      "description": "How many sound lanes there are; a sound's lane counts these"
+      "description": "Written by the app: how many sound lanes are in use. Leave it out"
     },
     "sounds": {
       "type": "array",
@@ -288,7 +296,7 @@
           "lane": {
             "type": "integer",
             "minimum": 0,
-            "description": "Its lane among its own kind: an effect lane, a text lane, an image lane (0 in front) or a whole-frame lane. Two segments on one lane never overlap in time. Default 0"
+            "description": "Its lane among its own kind: an effect lane, a text lane or an image lane (0 the front one). Put it on lane 0; use lane 1 only when it overlaps another of its kind. Two segments on one lane never overlap in time. Default 0"
           },
           "level": {
             "type": "number",
@@ -428,7 +436,7 @@
           },
           "moves": {
             "type": "array",
-            "description": "image: its own moves, inside its time; each starts travelling only after the one before it lands (rules image-inside, move-after-move)",
+            "description": "image: its own moves. Each lands inside the image's span",
             "items": {
               "type": "object",
               "properties": {
@@ -483,8 +491,7 @@
                 "t",
                 "to"
               ]
-            },
-            "description": "image: its own moves. Each lands inside the image's span"
+            }
           },
           "effects": {
             "type": "array",
@@ -594,11 +601,11 @@
               "front",
               "behind"
             ],
-            "description": "text, image: where it sits in the stack (texts, images, video, behind the video, background, front to back). front: over the video (the default); behind: between the background and the video, so it shows around the video and where the video moves, shrinks, turns or is cropped away. Its lane, its row, stays"
+            "description": "text, image: the side of the video its row is on. front: over the video (the default); behind: between the background and the video, so it shows around the video and where the video moves, shrinks, turns or is cropped away. An item that names the other side from its row moves to a row there"
           },
           "order": {
             "type": "integer",
-            "description": "text, image: its place among the items of its kind in its layer; a higher one is in front. Default 0; a tie keeps the order without one: images by lane (0 in front), texts by their place in segments (a later one in front). Texts are always over images in the same layer"
+            "description": "text, image: read from old files only, never written: its place among its kind in its layer, a higher one in front. The rows in layers say the order now"
           }
         },
         "additionalProperties": false,

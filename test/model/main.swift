@@ -234,7 +234,8 @@ test("one lane holds one thing at a time; texts, images and masks overlap on sep
     for kind in ["text", "mask"] {
         let two = Edits(segments: [seg("a", kind, 1, 3, lane: 0), seg("b", kind, 2, 4, lane: 1)])
         eq(two.conflict(two.segments[1]), nil, kind)
-        let one = Edits(segments: [seg("a", kind, 1, 3), seg("b", kind, 2, 4)])
+        var one = Edits()
+        one.segments = [seg("a", kind, 1, 3), seg("b", kind, 2, 4)]
         eq(one.conflict(one.segments[1])?.rule, "lane-taken", kind)
     }
     let spaces = Edits(segments: [seg("a", "zoom", 1, 3), seg("b", "text", 1, 3)])
@@ -283,7 +284,7 @@ test("pack lays segments on the fewest lanes and keeps the images' order") {
     var e = Edits()
     e.lanes = 4; e.textLanes = 3
     e.pack([seg("t1", "text", 0, 2, lane: 2), seg("t2", "text", 1, 3, lane: 2), seg("z", "zoom", 0, 2, lane: 3), seg("i", "image", 0, 2, lane: 1)])
-    eq(e.segments.first { $0.id == "t1" }?.lane, 0); eq(e.segments.first { $0.id == "t2" }?.lane, 1)
+    eq(e.segments.first { $0.id == "t1" }?.lane, 1); eq(e.segments.first { $0.id == "t2" }?.lane, 0, "the later text is in front: row 0")
     eq(e.segments.first { $0.id == "z" }?.lane, 0); eq(e.segments.first { $0.id == "i" }?.lane, 0)
     eq(e.lanes, 1); eq(e.textLanes, 2); eq(e.imageLanes, 1)
 }
@@ -301,7 +302,7 @@ test("the lane counts are derived: an empty lane in a file goes, the rest close 
       "sounds": [{ "id": "s", "file": "sounds/beep.wav", "start": 0, "length": 1, "lane": 2 }] }
     """)
     eq(e.lanes, 1); eq(e.textLanes, 2); eq(e.imageLanes, 2); eq(e.soundLanes, 1)
-    eq(e.segments.map(\.lane), [0, 0, 1, 1, 0])
+    eq(e.segments.map(\.lane), [0, 1, 0, 1, 0], "each kind numbered from its front row")
     eq(e.sounds.map(\.lane), [0])
     eq(e.overlays(at: 1).map(\.id), ["i1", "i2", "t1"], "lane 1 still in front of lane 3, now lanes 0 and 1")
     let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(e)) as! [String: Any]
@@ -772,7 +773,7 @@ test("add a zoom at the playhead; a second zoom there is refused; one before it 
 test("texts stack on new text lanes; a whole-frame blur sits on the Effects lanes, and never over a video blur (P2)") {
     let e = open("empty")
     at(e, 2); e.add("text"); e.add("text")
-    eq(e.edits.texts.map(\.lane), [0, 1]); eq(e.edits.textLanes, 2)
+    eq(e.edits.texts.map(\.lane), [1, 0], "the newer text on a new row in front"); eq(e.edits.textLanes, 2)
     eq(e.selectedSegment?.text, "Your text here")
     e.add("blur"); e.add("blur-frame")
     eq(e.edits.segments.filter { $0.kind == "blur" }.map(\.space), [0], "refused: one blur at a time")
@@ -957,19 +958,18 @@ test("lanes come from use: an overlap of one kind opens a lane, and it goes when
     at(e, 2); e.add("text")
     eq(e.edits.textLanes, 1)
     e.add("text")
-    let second = e.selected
-    eq(e.edits.texts.map(\.lane), [0, 1]); eq(e.edits.textLanes, 2, "Text 2 opens for the overlap")
-    e.drag(second, start: 6, end: 9, lane: 1)
-    e.endDrag()
-    eq(e.problem, ""); eq(e.edits.texts.map(\.lane), [0, 0], "dropped clear of the other, it takes the first free lane")
-    eq(e.edits.textLanes, 1, "Text 2 goes")
-    at(e, 7); e.add("text")
-    eq(e.edits.textLanes, 2)
+    eq(e.edits.textLanes, 2, "Text 2 opens for the overlap")
     e.deleteSelected()
     eq(e.edits.textLanes, 1, "deleting the overlap closes its lane"); eq(onDisk(e).textLanes, 1)
     at(e, 1); e.add("zoom-in")
-    eq(e.edits.lanes, 1)
+    at(e, 1.5); e.add("spotlight")
+    eq(e.edits.lanes, 2, "Effects 2 opens for the spotlight under the zoom")
+    let spot = e.selected
+    e.drag(spot, start: 6, end: 8, lane: 1)
+    e.endDrag()
+    eq(e.problem, ""); eq(e.edits.lanes, 1, "dropped clear of the zoom, it goes up to Effects, and Effects 2 goes")
     e.deleteSelected()
+    at(e, 1); e.select(e.edits.zooms[0].id); e.deleteSelected()
     eq(e.edits.lanes, 0, "no lane has to stay"); eq(onDisk(e).lanes, 0)
 }
 
@@ -994,7 +994,7 @@ test("Show Empty Lanes shows one empty row of each kind as a target; it is a vie
     at(e, 1)
     guard case let .direct(add)? = TimelineMenus.plus(.lane(1, 0), e) else { return problems.append("an empty text row's + adds a text") }
     add()
-    eq(e.edits.textLanes, 1); eq(lanes(1), [0, 1], "the text took the row, and one more empty one shows")
+    eq(e.edits.textLanes, 1); eq(lanes(1), [1, 0], "the text took the row, and one more empty one shows at the top, in front")
     let saved = try String(contentsOf: e.folder.appendingPathComponent("edits.json"), encoding: .utf8)
     expect(!saved.contains("mpty"), "the setting is not in edits.json")
     e.setShowEmptyLanes(false)
@@ -1052,13 +1052,16 @@ test("a lane's ⋯ moves it up and down and deletes it; it makes no empty lane; 
     eq(lanes(0).titles, ["Text · Sits on top of the video"])
     eq(lanes(1).titles, ["Text 2 · Sits on top of the video"])
     eq(lanes(0).choices, ["Move Lane Up", "Move Lane Down", "Delete Lane and Its 1 Text…", "Show Empty Lanes"])
+    eq(lanes(1).reason("Move Lane Down"), nil, "the last row in front can move down, behind the video")
     expect(!lanes(0).choices.contains { $0.hasPrefix("New") }, "a lane is never made empty")
     expect(!lanes(0).run("Move Lane Up"), "the top lane can't move up")
+    eq(e.edits.texts.first { $0.id == first }?.lane, 1, "the first text is behind the second")
     lanes(1).run("Move Lane Up")
-    eq(e.edits.texts.first { $0.id == first }?.lane, 1, "lane order is draw order, so the text moves with its lane")
+    eq(e.edits.texts.first { $0.id == first }?.lane, 0, "its row moved up the stack, in front")
+    eq(e.edits.overlays(at: 1.5).last?.id, first, "drawn in front")
     eq(e.undoName, "Move Lane Up")
     e.undo()
-    eq(e.edits.texts.first { $0.id == first }?.lane, 0)
+    eq(e.edits.texts.first { $0.id == first }?.lane, 1)
     lanes(0).run("Show Empty Lanes")
     eq(e.showEmptyLanes, true)
     lanes(0).run("Show Empty Lanes")
@@ -1516,7 +1519,7 @@ func item(_ id: String, _ kind: String, _ start: Double, _ end: Double, lane: In
     return s
 }
 
-test("depth: an old file keeps its stack; layer and order are read, written back, and left out when unset") {
+test("depth: an old file keeps its picture; its layer and order become rows, and no order is written again") {
     let old = try decode("""
     {"textLanes":1,"imageLanes":2,"segments":[
       {"id":"a","kind":"image","start":0,"end":5,"lane":1,"file":"x.png"},{"id":"b","kind":"image","start":0,"end":5,"lane":0,"file":"x.png"},
@@ -1524,43 +1527,46 @@ test("depth: an old file keeps its stack; layer and order are read, written back
     """)
     eq(old.overlays(at: 1).map(\.id), ["a", "b", "t1", "t2"], "lane 0 in front, texts over images in list order")
     eq(old.overlays(at: 1, behind: true).map(\.id), [])
-    expect(!String(decoding: try JSONEncoder().encode(old), as: UTF8.self).contains("layer"), "no layer is written for an old file")
-    expect(!String(decoding: try JSONEncoder().encode(old), as: UTF8.self).contains("order"), "no order is written for an old file")
-    var e = old
-    e.segments[0].layer = "behind"; e.segments[3].order = -1; e.segments[1].layer = "front"
-    let back = try JSONDecoder().decode(Edits.self, from: JSONEncoder().encode(e))
-    eq(back, e)
-    eq(back.overlays(at: 1).map(\.id), ["b", "t2", "t1"], "a lower order is further back")
-    eq(back.overlays(at: 1, behind: true).map(\.id), ["a"])
+    eq(old.layers, ["text:0", "text:1", "image:0", "image:1", "video"], "the rows, front to back, as it drew")
+    let written = String(decoding: try JSONEncoder().encode(old), as: UTF8.self)
+    expect(!written.contains("\"layer\""), "no layer is written for an item in front")
+    expect(!written.contains("order"), "no order is written")
+    let ordered = try decode("""
+    {"textLanes":1,"imageLanes":2,"segments":[
+      {"id":"a","kind":"image","start":0,"end":5,"lane":1,"file":"x.png","layer":"behind"},{"id":"b","kind":"image","start":0,"end":5,"lane":0,"file":"x.png"},
+      {"id":"t1","kind":"text","start":0,"end":5,"text":"one"},{"id":"t2","kind":"text","start":0,"end":5,"text":"two","order":-1}]}
+    """)
+    eq(ordered.overlays(at: 1).map(\.id), ["b", "t2", "t1"], "a lower order is further back")
+    eq(ordered.overlays(at: 1, behind: true).map(\.id), ["a"])
+    expect(!String(decoding: try JSONEncoder().encode(ordered), as: UTF8.self).contains("order"), "the order became rows")
+    eq(try JSONDecoder().decode(Edits.self, from: JSONEncoder().encode(ordered)), ordered)
 }
 
-test("arrange: forward and backward step past the next item of its kind that overlaps it; front and back go to the end") {
-    var e = Edits(segments: [item("i0", "image", 0, 5, lane: 0), item("i1", "image", 0, 5, lane: 1), item("i2", "image", 6, 9, lane: 1),
+test("arrange: forward and backward step past the next row that shows with it; front and back go to the end of its side") {
+    let e = Edits(segments: [item("i0", "image", 0, 5, lane: 0), item("i1", "image", 0, 5, lane: 1), item("i2", "image", 6, 9, lane: 1),
                              item("i3", "image", 2, 4, lane: 2)])
-    e.imageLanes = 3
-    eq(e.depthStack(kind: "image", behind: false).map(\.id), ["i3", "i1", "i2", "i0"])
+    func at3(_ x: Edits) -> [String] { x.overlays(at: 3).map(\.id) }
+    eq(at3(e), ["i3", "i1", "i0"])
     let forward = e.arranged("i1", "forward")!
-    eq(forward.depthStack(kind: "image", behind: false).map(\.id), ["i3", "i2", "i0", "i1"], "past i2, which it never meets, to in front of i0")
-    eq(forward.segments.map(\.order), [2, 3, 1, 0])
+    eq(at3(forward), ["i3", "i0", "i1"])
+    expect(!String(decoding: try JSONEncoder().encode(forward), as: UTF8.self).contains("order"), "the rows say it; no order")
     eq(e.arranged("i0", "forward"), nil, "already in front")
-    eq(e.arrangeProblem("i0", "front"), "It is already in front of the other images in front of the video.")
-    eq(e.arrangeProblem("i2", "forward"), "No other image in front of the video shows at the same time.")
-    eq(e.arranged("i0", "back")!.depthStack(kind: "image", behind: false).map(\.id), ["i0", "i3", "i1", "i2"])
-    eq(e.arranged("i3", "front")!.depthStack(kind: "image", behind: false).map(\.id), ["i1", "i2", "i0", "i3"])
-    let backward = forward.arranged("i1", "backward")!
-    eq(backward.segments.map(\.order), [nil, nil, nil, nil], "back where it was against everything it meets: the orders go")
-    var texts = Edits(segments: [item("t1", "text", 0, 5), item("t2", "text", 1, 4), item("i", "image", 0, 5)])
-    texts.textLanes = 2; texts.segments[1].lane = 1; texts.imageLanes = 1
-    eq(texts.arranged("t1", "front")!.overlays(at: 2).map(\.id), ["i", "t2", "t1"], "a text moves among the texts; images stay under them")
+    eq(e.arrangeProblem("i0", "front"), "It is already in front of the others in front of the video.")
+    eq(e.arrangeProblem("i2", "forward"), "No other text or image in front of the video shows at the same time.")
+    eq(at3(e.arranged("i0", "back")!), ["i0", "i3", "i1"])
+    eq(at3(e.arranged("i3", "front")!), ["i1", "i0", "i3"])
+    eq(at3(forward.arranged("i1", "backward")!), ["i3", "i1", "i0"], "back where it was")
+    let texts = Edits(segments: [item("t1", "text", 0, 5), item("t2", "text", 1, 4, lane: 1), item("i", "image", 0, 5)])
+    eq(texts.arranged("t1", "front")!.overlays(at: 2).map(\.id), ["i", "t2", "t1"])
+    eq(texts.arranged("i", "front")!.overlays(at: 2).map(\.id), ["t1", "t2", "i"], "an image may sit over the texts")
 }
 
 test("arrange: behind the video lands next to it, at the front of the items behind; back in front, at the back of those in front") {
-    var e = Edits(segments: [item("a", "image", 0, 5, lane: 0), item("b", "image", 0, 5, lane: 1, layer: "behind"), item("c", "image", 0, 5, lane: 2)])
-    e.imageLanes = 3
+    let e = Edits(segments: [item("a", "image", 0, 5, lane: 0), item("b", "image", 0, 5, lane: 1, layer: "behind"), item("c", "image", 0, 5, lane: 2)])
     let behind = e.arranged("a", "behind")!
     eq(behind.overlays(at: 1, behind: true).map(\.id), ["b", "a"])
     eq(behind.overlays(at: 1).map(\.id), ["c"])
-    eq(behind.segments.map(\.lane), [0, 1, 2], "its row stays")
+    eq(behind.layers, ["image:0", "video", "image:1", "image:2"], "a row of its own, just under the video")
     eq(behind.arrangeProblem("a", "behind"), "It is already behind the video.")
     let front = behind.arranged("b", "in-front")!
     eq(front.overlays(at: 1).map(\.id), ["b", "c"], "just over the video")
@@ -1571,6 +1577,23 @@ test("arrange: behind the video lands next to it, at the front of the items behi
     halves.joinEnd = true; second.joinStart = true
     let joined = Edits(segments: [halves, second]).arranged("t", "behind")!
     eq(joined.segments.map(\.layer), ["behind", "behind"], "a split text goes behind whole")
+    eq(joined.segments.map(\.lane), [0, 0], "on one row")
+}
+
+test("rows are the stack: a row moved up or down changes the draw order, and past the video it goes behind it") {
+    let e = Edits(segments: [item("t", "text", 0, 5), item("i", "image", 0, 5)])
+    eq(e.layers, ["text:0", "image:0", "video"])
+    let up = e.movingRow(LayerRow(kind: "image", lane: 0), to: 0)!
+    eq(up.layers, ["image:0", "text:0", "video"]); eq(up.overlays(at: 1).map(\.id), ["t", "i"])
+    let under = e.movingRow(LayerRow(kind: "text", lane: 0), to: 3)!
+    eq(under.layers, ["image:0", "video", "text:0"]); eq(under.segments.first { $0.id == "t" }?.layer, "behind")
+    eq(under.overlays(at: 1, behind: true).map(\.id), ["t"])
+    eq(e.steppingRow(LayerRow(kind: "image", lane: 0), by: 1)!.layers, ["text:0", "video", "image:0"], "one step down passes the video")
+    eq(e.movingRow(LayerRow(kind: "text", lane: 0), to: 1), nil, "a drop where it is changes nothing")
+    let fromFile = try decode(#"{"layers":["video","text:0"],"segments":[{"id":"t","kind":"text","start":0,"end":2,"text":"x"}]}"#)
+    eq(fromFile.segments[0].layer, "behind", "a file's row behind the video puts its items behind")
+    let itemSays = try decode(#"{"layers":["text:0","video"],"segments":[{"id":"t","kind":"text","start":0,"end":2,"text":"x","layer":"behind"}]}"#)
+    eq(itemSays.layers, ["video", "text:0"], "an item a file says is behind moves to a row behind")
 }
 
 struct Depth {
@@ -1644,11 +1667,12 @@ test("arrange from the Editor: each step is one named undo step; a refused one s
       {"id":"b","kind":"image","start":2,"end":5,"lane":1,"file":"images/logo.png"},
       {"id":"t","kind":"text","start":1,"end":4,"lane":0,"text":"Hi"}]}
     """)
+    eq(e.edits.overlays(at: 3).map(\.id), ["b", "a", "t"])
     e.select("b")
     eq(e.selection["layer"] as? String, "front"); eq(e.selection["canForward"] as? Bool, true); eq(e.selection["canBack"] as? Bool, false)
     e.arrange("forward")
     eq(e.undoName, "Bring Forward"); eq(e.edits.overlays(at: 3).map(\.id), ["a", "b", "t"])
-    eq(onDisk(e).segments.map(\.order), [0, 1, nil], "saved")
+    eq(onDisk(e).overlays(at: 3).map(\.id), ["a", "b", "t"], "saved")
     e.arrange("behind")
     eq(e.undoName, "Send Behind Video"); eq(e.edits.overlays(at: 3, behind: true).map(\.id), ["b"])
     eq(e.selection["layer"] as? String, "behind"); eq(e.selection["canForward"] as? Bool, false)
@@ -1660,7 +1684,7 @@ test("arrange from the Editor: each step is one named undo step; a refused one s
     e.select("t"); e.arrange("behind"); e.select("t")
     eq(e.undoName, "Send Behind Video")
     e.undo(); e.undo(); e.undo(); e.undo()
-    eq(e.edits.overlays(at: 3).map(\.id), ["b", "a", "t"]); eq(e.edits.segments.map(\.order), [nil, nil, nil])
+    eq(e.edits.overlays(at: 3).map(\.id), ["b", "a", "t"])
     eq(onDisk(e).segments.map(\.layer), [nil, nil, nil])
     e.select("a"); e.arrange("back")
     eq(e.undoName, "Send to Back"); eq(e.edits.overlays(at: 3).map(\.id), ["a", "b", "t"])
@@ -1738,7 +1762,23 @@ func timeline(_ e: Editor, height: CGFloat) -> TimelineView {
     return view
 }
 
-test("the rows keep a fixed kind order under the Clip, with plain names; a second row of a kind adds a number") {
+/// A pointer event on a timeline in a window of its own, at (x, y) of the content as drawn (scrolled).
+func mouse(_ view: TimelineView, _ type: NSEvent.EventType, _ x: CGFloat, _ y: CGFloat) {
+    if view.window == nil {
+        let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+        window.contentView = view
+    }
+    let window = view.window!
+    let event = NSEvent.mouseEvent(with: type, location: CGPoint(x: x, y: window.frame.height - (y - view.scrollY)), modifierFlags: [], timestamp: 0,
+                                   windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+    switch type {
+    case .leftMouseDown: view.mouseDown(with: event)
+    case .leftMouseDragged: view.mouseDragged(with: event)
+    default: view.mouseUp(with: event)
+    }
+}
+
+test("the rows are the stack: texts and images in front over the Video, its Moves and Effects under it, then Background, a line and the sounds") {
     let e = open("full")
     let view = timeline(e, height: 2000)
     let order = view.rows.map { r -> String in
@@ -1747,10 +1787,17 @@ test("the rows keep a fixed kind order under the Clip, with plain names; a secon
         case let .lane(space, lane): return TimelineMenus.laneName(space, lane)
         case .imagePosition: return "image Moves"
         case .imageEffects: return "image Effects"
+        case .clip: return "Video"
+        case .background: return "Background"
+        case .divider: return "—"
         }
     }
-    eq(order, ["Moves", "Effects", "Effects 2", "Effects 3", "Text", "Images", "Music & Sound"])
-    expect(view.rows[0].y > 48 + 58, "the first row sits under the Clip")
+    eq(order, ["Text", "Images", "Video", "Moves", "Effects", "Effects 2", "Effects 3", "Background", "—", "Music & Sound"])
+    e.toggleClip()
+    defer { if !e.clipOpen { e.toggleClip() } }
+    eq(view.rows.map(\.kind).filter { $0 == .position || $0 == .lane(0, 0) }, [], "the Clip folds its Moves and Effects away")
+    e.select(e.edits.zooms[0].id)
+    expect(e.clipOpen, "selecting a zoom opens the Clip")
     e.select(e.edits.images[0].id)
     expect(view.rows.contains { $0.kind == .imagePosition(e.edits.images[0].id) }, "selecting an image opens its own rows under its lane")
     view.detach()
@@ -1770,12 +1817,41 @@ test("the recorded sound is a band inside the Clip: a click on it selects the so
             type == .leftMouseDown ? view.mouseDown(with: event) : view.mouseUp(with: event)
         }
     }
-    eq(view.rows.first?.y, 48 + 58 + 8, "no Sound row: the first row sits right under the Clip")
-    click(300, 48 + 58 - 6)
+    let clip = view.rows.first { $0.kind == .clip }!
+    eq(view.rows.first { $0.y > clip.y }?.kind, .position, "no Sound row: the Moves row sits right under the Clip")
+    click(300, clip.maxY - 6 - view.scrollY)
     eq(e.selected, Editor.recordedSound, "the band selects the recorded sound")
     eq(e.selection["kind"] as? String, "recorded")
-    click(300, 48 + 12)
+    click(300, clip.y + 12 - view.scrollY)
     eq(e.selected, e.pieces[0].id, "above the band, the clip part")
+    view.detach()
+}
+
+test("a row dragged by its label moves in the stack, a line showing where; past the Video it goes behind; each is one undo step") {
+    let e = open("full")
+    let view = timeline(e, height: 2000)
+    eq(e.edits.layers, ["text:0", "image:0", "video"])
+    let text = view.rows.first { $0.kind == .lane(1, 0) }!, images = view.rows.first { $0.kind == .lane(2, 0) }!
+    mouse(view, .leftMouseDown, 60, images.y + images.height / 2)
+    mouse(view, .leftMouseDragged, 60, text.y + 2)
+    expect(view.dropLine?.index == 0, "the line shows the top of the stack: \(String(describing: view.dropLine))")
+    mouse(view, .leftMouseUp, 60, text.y + 2)
+    eq(e.edits.layers, ["image:0", "text:0", "video"]); eq(e.undoName, "Move Image Layer")
+    eq(e.edits.overlays(at: 2.2).map(\.id), ["txt", "img"], "the image draws over the text")
+    let label = view.rows.first { $0.kind == .lane(1, 0) }!, background = view.rows.first { $0.kind == .background }!
+    mouse(view, .leftMouseDown, 60, label.y + label.height / 2)
+    mouse(view, .leftMouseDragged, 60, background.y)
+    mouse(view, .leftMouseUp, 60, background.y)
+    eq(e.edits.layers, ["image:0", "video", "text:0"], "dragged under the Video")
+    eq(e.edits.texts.first?.layer, "behind")
+    eq(e.undoName, "Move Text Layer")
+    let rows = view.rows.map(\.kind)
+    expect(rows.firstIndex(of: .lane(1, 0))! > rows.firstIndex(of: .clip)!, "its row sits under the Video")
+    mouse(view, .leftMouseDown, 60, view.rows.first { $0.kind == .lane(2, 0) }!.y + 4)
+    mouse(view, .leftMouseUp, 60, view.rows.first { $0.kind == .lane(2, 0) }!.y + 4)
+    eq(e.undoName, "Move Text Layer", "a click on a label is no step")
+    e.undo(); e.undo()
+    eq(e.edits.layers, ["text:0", "image:0", "video"])
     view.detach()
 }
 
@@ -1876,7 +1952,8 @@ test("a refused drag: checked on every step, the clash named, nothing saved and 
     e.drag("t2", start: 2, end: 4, lane: 0)
     eq(e.dragCheck?.conflict, nil, "a text over a text is no refusal"); eq(e.dragCheck?.landing, 1, "it shows where it will land")
     expect(e.endDrag(), "dropped")
-    eq(e.selectedSegment?.lane, 1); near(e.selectedSegment?.start ?? -1, 2)
+    eq(e.selectedSegment?.lane, 0, "on a new row, in front"); near(e.selectedSegment?.start ?? -1, 2)
+    eq(e.edits.overlays(at: 2.5).map(\.id), ["t1", "t2"])
 }
 
 test("a + menu item that would be refused is off, its reason the rule's two lines; asking changes nothing") {

@@ -3,13 +3,14 @@ recorded 0:30.00, plays as 0:30.00; 7 clicks; folder <library>/len30-16x9
 look: graphite background, 16:9, padding 8%, 3D off
 clip parts:
   0:00.00–0:30.00
-segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front)):
+layers, front to back: t0, t1, video
+segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane; t0 and i0 the front ones):
   e0: 0:00.00–0:04.55  blur (whole frame)  [launch-e1]
   e0: 0:05.00–0:07.80  zoom 1.6×  [launch-z6]
   e0: 0:09.00–0:11.80  zoom 1.6×  [launch-z7]
   e0: 0:13.00–0:15.80  zoom 1.6×  [launch-z8]
-  t0: 0:00.20–0:04.40  text “Line” pill in:blur out:fade  [launch-t2]
-  t0: 0:26.00–0:30.00  text “Line” shadow in:rise out:none  [launch-t4]
-  t1: 0:00.60–0:04.40  text “Line” pill in:rise out:fade  [launch-t3]
+  t0: 0:00.60–0:04.40  text “Line” pill in:rise out:fade  [launch-t3]
+  t1: 0:00.20–0:04.40  text “Line” pill in:blur out:fade  [launch-t2]
+  t1: 0:26.00–0:30.00  text “Line” shadow in:rise out:none  [launch-t4]
 moves:
   lands 0:25.90 after 0.9s smooth: x 0.5 y 0.5575 scale 0.9107142857142857  [launch-m5]

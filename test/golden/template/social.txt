@@ -3,7 +3,8 @@ recorded 0:30.00, plays as 0:30.00; 7 clicks; folder <library>/len30-16x9
 look: graphite background, 16:9, padding 8%, 3D off
 clip parts:
   0:00.00–0:30.00
-segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front)):
+layers, front to back: t0, video
+segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane; t0 and i0 the front ones):
   e0: 0:05.00–0:07.80  zoom 1.6×  [social-z2]
   e0: 0:09.00–0:11.80  zoom 1.6×  [social-z3]
   e0: 0:13.00–0:15.80  zoom 1.6×  [social-z4]

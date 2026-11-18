@@ -57,15 +57,10 @@ plays. Cuts and speed changes make the two differ: `show` prints both lengths, a
   "splits": [4.2, 7.0],
   "removed": [0, 7.0],
   "transitions": { "4200": "crossfade" },
-  "lanes": 1,
-  "textLanes": 1,
-  "imageLanes": 0,
-  "frameLanes": 0,
   "base": { "x": 0.5, "y": 0.5, "scale": 1 },
   "moves": [],
   "three": { "on": false, "tilt": 0, "turn": 0, "roll": 0, "thickness": 0.06, "edge": "metal" },
   "volume": 1,
-  "soundLanes": 1,
   "sounds": [
     { "id": "sound1", "file": "sounds/music.m4a", "lane": 0, "start": 0, "length": 18,
       "offset": 0, "volume": 0.4, "fadeIn": 0, "fadeOut": 1.5 }
@@ -107,26 +102,31 @@ The recorded sound, if any, follows the picture: it is cut, sped up and faded at
 Each has an `id` (any unique string without a colon), `kind`, `start`, `end` (at least 0.1 s apart),
 all required, and `lane` (0 up, default 0). A segment's kind decides which rows its `lane` counts:
 
-| what | kinds | its `lane` counts | how many there are |
-|---|---|---|---|
-| an effect on the video | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, `mask`, and `blur` or `mono` with no `scope` | the video's effect lanes | `lanes` (at least 1) |
-| a text | `text` | the text lanes | `textLanes` |
-| an image | `image` | the image lanes, 0 in front | `imageLanes` |
-| an effect past the video | `blur` or `mono` with `scope` `"background"`, `"scene"`, `"frame"` or `"all"` | the whole-frame lanes | `frameLanes` |
+| what | kinds | its `lane` counts |
+|---|---|---|
+| an effect | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, `mask`, `blur`, `mono` (a blur or black and white of any `scope`) | the effect lanes, the Video's Effects rows |
+| a text | `text` | the text lanes, 0 the front one |
+| an image | `image` | the image lanes, 0 the front one |
 
 An effect on the video never touches a text or an image, and an image's or a text's own effects
 (below) never touch anything else. What may overlap is in [the rules](#what-may-overlap-the-rules).
-Images are drawn over the video with the lowest `lane` in front, and texts over the images; a text or
-an image can go behind the video instead (see [Depth](#depth-layer-and-order)).
+**For texts and images, lane order is draw order:** their rows are one stack with the video among them
+(see [Depth](#depth-layers-and-layer)).
 
-A file with no `textLanes` is an old one, where texts and whole-frame effects shared the effect
-lanes: the app sorts them into lanes of their own kind when it reads it.
-A file with no `imageLanes` is an old one, where each image had a lane of its own: each image keeps
-its lane, so the picture stacks as before, and `imageLanes` becomes the number of images.
+**Lanes come from use.** Put each item on lane 0 of its kind; use lane 1 only when it overlaps another of
+its kind in time, and so on. Leave the counts (`lanes`, `textLanes`, `imageLanes`, `soundLanes`) out:
+the app writes them as the number of lanes in use, and drops a lane that is empty, the others closing up
+in order. A count may be 0. `validate` notes a count that differs from the lanes in use, and never fails on it.
 
-Each `lane` must be below the count the file declares (`lanes`, `textLanes`, `frameLanes`,
-`soundLanes`). The app raises a count that is too low when it opens the file, but `validate` reports
-it. A count the file leaves out is derived from the lanes in use.
+Files from before:
+
+- `frameLanes` is read from old files only, never written. Their whole-frame blurs and black-and-whites
+  (a `scope` past the video) had lanes of their own; each moves to the first effect lane with room, and
+  the picture does not change.
+- A file with no `textLanes` is an old one, where texts shared the effect lanes: each kind's lanes close
+  up on their own when it is read.
+- A file with two images at once on one lane and no `imageLanes` is an old one, where each image had a
+  row of its own: each image gets a lane of its own, so the picture stacks as before.
 
 | kind | fields | |
 |---|---|---|
@@ -146,8 +146,8 @@ it. A count the file leaves out is derived from the lanes in use.
 `pink`, `blue`, `mint`); `weight` (`regular`, `bold`, the default, `heavy`, `rounded`); `style` (`plain`, the default, `pill`, `box`,
 `outline`, `shadow`); `animIn` (default `pop`; `letters`, `letters-pop`, `drop`, `typewriter`, `pop`, `spin`, `slide`, `rise`,
 `blur`, `fade`, `none`); `animOut` (`fade`, the default, `fall`, `letters`, `pop`, `sink`, `blur`, `none`); `loop` while
-shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees); `effects`, its own (below); `layer` and
-`order`, its depth (see [Depth](#depth-layer-and-order)).
+shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees); `effects`, its own (below); `layer`,
+the side of the video its row is on (see [Depth](#depth-layers-and-layer)).
 
 Keep a text clear of the video: put it beside the video when the frame is wide, above or below it
 when tall, and not where a zoom pulls the video under it.
@@ -164,49 +164,59 @@ when tall, and not where a zoom pulls the video under it.
 
 ### Where an effect applies
 
-A frame is a fixed stack, back to front: the **background**, the items **behind the video**, the
-**video**, the **images**, the **texts**. A `blur` or `mono` segment's `scope` is a cut in that stack: it
-covers every layer under the cut.
+A frame is a stack, back to front: the **background**, the rows **behind the video**, the **video**, the
+rows in front (see [Depth](#depth-layers-and-layer)). A `blur` or `mono` segment's `scope` is a cut in
+that stack: it covers every layer under the cut. It sits on the effect lanes, whatever its reach.
 
 | `scope` | covers | stays as it is |
 |---|---|---|
 | none (or `"video"`) | the video only, on its own pixels, with its other effects | the background, images, texts |
 | `"background"` | the background | the items behind the video, the video, images, texts |
 | `"scene"` | the background, the items behind the video and the video | images, texts |
-| `"frame"` | the background, the video and the images | texts |
+| `"frame"` | the background, the video, and the rows in front up to the front-most image row | the rows in front of that |
 | `"all"` | everything | nothing |
 
 One image or one text alone: give that item its own `blur` or `mono` in its `effects`. Spotlight and
 cursor highlight have no `scope`: they follow the cursor on the video. Files from before have none
 of the new values, so they draw as they did.
 
-### Depth: `layer` and `order`
+### Depth: `layers` and `layer`
 
-A frame is one stack, front to back: **texts**, **images**, the **video**, **behind the video**, the
-**background**. A text or an image sits in front of the video unless its `layer` is `"behind"`. Its
-`lane`, its row on the timeline, stays the same either way.
+A frame is one stack, front to back: the text and image rows in front of the video, the **video**, the
+rows **behind the video**, the **background**. Each text lane and each image lane is one row, and **the
+rows are the draw order**: an image row may sit over a text row. On the timeline they are the rows above
+the Video and under it, as in a layers panel.
 
 | field | values | |
 |---|---|---|
-| `layer` | `"front"` (the default), `"behind"` | behind: drawn on the background, under the video and its shadow |
-| `order` | an integer, default 0 | among the items of its kind in its layer, a higher one is in front |
+| `layers` (top level) | the rows front to back: `"text:0"`, `"image:0"`, …, and `"video"` once | where each row sits; a row above `"video"` is in front of it |
+| `layer` (a text's or an image's) | `"front"` (the default), `"behind"` | the side of the video its row is on |
 
-- A tie in `order` (as in every file from before) keeps the old order: images by lane, 0 in front; texts by
-  their place in `segments`, a later one in front. Texts are always over images in the same layer.
+```json
+{ "layers": ["text:0", "image:0", "video", "image:1"],
+  "segments": [
+    { "id": "t1", "kind": "text", "start": 1, "end": 4, "lane": 0, "text": "Meet Exact" },
+    { "id": "logo", "kind": "image", "start": 1, "end": 8, "lane": 0, "file": "images/logo.png" },
+    { "id": "back", "kind": "image", "start": 1, "end": 8, "lane": 1, "file": "images/glow.png", "layer": "behind" }
+  ] }
+```
+
+- The app writes `layers`, each kind's lanes numbered from its front row, and every item's `layer` to
+  match its row. You may leave `layers` out: a new row of texts goes in front of everything, a new row
+  of images behind the images in front, anything behind the video just under it.
+- An item whose `layer` names the other side of the video from its row moves to a row on that side.
+- A file without `layers` draws as it did before rows were the stack: images by `order`, then lane,
+  0 in front; texts over them by `order`, then their place in `segments`, a later one in front. The app
+  turns that into rows when it reads the file; `order` is read, never written again.
 - An item behind the video is hidden where the video covers it, and shows where the video moves, shrinks,
   turns in 3D or is cropped away. It does not zoom with the video.
 - A `background` reach stays under it; `scene`, `frame` and `all` cover it (see [Where an effect applies](#where-an-effect-applies)).
 - Its own animations, moves and effects play as in front.
 - Use it for a logo or a title that a move of the video reveals. Never put a key point behind the video.
 
-```json
-{ "id": "logo", "kind": "image", "start": 1, "end": 8, "lane": 0, "file": "images/logo.png",
-  "x": 0.27, "y": 0.5, "size": 0.3, "layer": "behind" }
-```
-
-In the app, Edit ▸ Bring Forward, Send Backward, Bring to Front, Send to Back, Send Behind Video and
-Bring In Front of Video (also in the item's ⋯) write these fields: forward and backward step past the
-next item of its kind in its layer that shows at the same time.
+In the app, drag a row by its label to move it in the stack, past the Video too. Edit ▸ Bring Forward,
+Send Backward, Bring to Front, Send to Back, Send Behind Video and Bring In Front of Video (also in the
+item's ⋯) move one item: forward and backward to a row just past the next row that shows with it.
 
 ### Splits and joins: `joinStart`, `joinEnd`
 
@@ -268,8 +278,8 @@ BMP; a PNG keeps its transparency); `x`, `y` (its centre, 0–1 of the frame, to
 (its height as a share of the frame's; its width follows the picture's shape); `rotation` (degrees);
 `opacity` (0–1); `radius` (rounded corners, as a share of its shorter side, 0–0.5); `shadow`;
 `animIn` (`pop`, `fade`, `rise`, `slide`, `spin`, `blur`, `none`; default `fade`, while `image` writes `pop`);
-`animOut` (`fade`, the default, `pop`, `sink`, `blur`, `none`); `layer` and `order`, its depth (see
-[Depth](#depth-layer-and-order)).
+`animOut` (`fade`, the default, `pop`, `sink`, `blur`, `none`); `layer`, the side of the video its row
+is on (see [Depth](#depth-layers-and-layer)).
 
 **Its own moves, `moves`:** an image moves the way the video does. Each move has an `id` and lands at
 time `t` (inside the image's span), having travelled for `duration` seconds before it (default 0.8),
@@ -284,8 +294,8 @@ image. Kinds: `blur`; `mono` (black and white); `fade` (to `level`, an opacity o
 `pulse`, `float` and `wiggle` (a gentle motion while they last). Two effects on one `lane` must not
 overlap, nor two of the same kind on any lane (`image-one-each`).
 
-**Lanes:** images that follow one another can share a lane. Images that show at the same time need
-separate lanes; the lower `lane` is in front. A lane is below `imageLanes`.
+**Lanes:** images that follow one another share a lane. Images that show at the same time need
+separate lanes; the rows' order in `layers` says which is in front, lane 0 the front one when it is left out.
 
 To blur or grey more than one image, use a `blur` or `mono` segment with a `scope` (see
 [Where an effect applies](#where-an-effect-applies)): `"frame"` covers the images, texts stay sharp; `"all"` the texts too.
@@ -359,11 +369,11 @@ Music that jumps at every cut sounds wrong; the recorded sound (`volume`) is the
 cuts. `show` prints when each sound plays in video time.
 
 **Sound fields:** `id` (unique among the sounds, no colon); `file` (a path inside the recording's
-folder, in `sounds/`: M4A, MP3, WAV, AIFF, AAC or CAF); `lane` (0 up, below `soundLanes`); `start`
+folder, in `sounds/`: M4A, MP3, WAV, AIFF, AAC or CAF); `lane` (0 up); `start`
 (seconds of the recording); `length` (seconds of the file that play, above 0); `offset` (where in
 the file it starts, default 0; `offset` + `length` must fit in the file); `volume` (0–1, default 1);
 `fadeIn`, `fadeOut` (seconds, default 0); `joinStart`, `joinEnd` (see [Splits and joins](#splits-and-joins-joinstart-joinend)). Two sounds on one lane must not play at the same time; put
-one on another lane (`soundLanes` counts them). Sounds on separate lanes mix with each other and
+one on lane 1. Sounds on separate lanes mix with each other and
 with the recorded sound.
 
 To trim a sound's beginning, add the same amount to `offset` and `start` (when no cut lies between)

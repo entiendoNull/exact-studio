@@ -251,10 +251,8 @@ describe('every rule: validate prints its id and the same two lines as the app',
 });
 
 describe('depth: a text or an image behind the video', () => {
-  test('layer and order validate, follow the schema and show where each item sits', () => {
+  test('layer and order validate, follow the schema, and show the rows front to back', () => {
     const edits = {
-      textLanes: 1,
-      imageLanes: 2,
       segments: [
         { id: 'logo', kind: 'image', start: 1, end: 6, lane: 0, file: 'images/logo.png', layer: 'behind' },
         { id: 'badge', kind: 'image', start: 1, end: 6, lane: 1, file: 'images/logo.png', order: 2 },
@@ -268,10 +266,18 @@ describe('depth: a text or an image behind the video', () => {
       writeFileSync(join(dir, 'empty/edits.json'), JSON.stringify(edits));
       expect(run(dir, 'validate', 'empty').out).toBe('ok\n');
       const shown = run(dir, 'show', 'empty').out;
+      expect(shown).toContain('layers, front to back: t0, i0, video, t1, i1');
       expect(shown).toContain('in:fade out:fade  behind the video  [logo]');
-      expect(shown).toContain('in:fade out:fade  order 2  [badge]');
-      expect(shown).toContain('“Hello” plain in: out:  behind the video  order 1  [title]');
+      expect(shown).toContain('in:fade out:fade  [badge]');
+      expect(shown).toContain('“Hello” plain in: out:  behind the video  [title]');
       expect(shown).toMatch(/“Front” plain in: out:  \[note\]/);
+      const rows = { layers: ['image:0', 'text:0', 'video'], segments: [
+        { id: 'a', kind: 'image', start: 1, end: 6, file: 'images/logo.png' }, { id: 't', kind: 'text', start: 1, end: 6, text: 'Under' }] };
+      expect(check(editsSchema, rows)).toEqual([]);
+      writeFileSync(join(dir, 'empty/edits.json'), JSON.stringify(rows));
+      expect(run(dir, 'show', 'empty').out).toContain('layers, front to back: i0, t0, video');
+      writeFileSync(join(dir, 'empty/edits.json'), JSON.stringify({ ...rows, layers: ['image:0', 'image:0', 'sound:0', 'video'] }));
+      expect(run(dir, 'validate', 'empty').out).toBe('ok\nnote: layers: image:0 is named twice; the first is kept\nnote: layers: sound:0 is not a row; a row is "video", "text:<lane>" or "image:<lane>"\n');
     } finally {
       drop(dir);
     }

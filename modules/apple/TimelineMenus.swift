@@ -119,8 +119,14 @@ extension TimelineMenus {
         guard lane < count else { return [] }
         let name = laneName(space, lane), items = editor.laneItems(lane, space: space)
         var out: [MenuEntry] = [.title("\(name) · \(scope(space))"), .line]
-        out.append(lane > 0 ? .item("Move Lane Up") { editor.moveLane(lane, space: space, by: -1) } : .dim("Move Lane Up"))
-        out.append(lane < count - 1 ? .item("Move Lane Down") { editor.moveLane(lane, space: space, by: 1) } : .dim("Move Lane Down"))
+        var canUp = lane > 0, canDown = lane < count - 1
+        // @ref LLP 0005#layers — a text or image row moves through the whole stack, past the video too
+        if space == 1 || space == 2 {
+            let stack = editor.edits.stack(), at = stack.firstIndex(of: LayerRow(kind: space == 1 ? "text" : "image", lane: lane)) ?? 0
+            canUp = at > 0; canDown = at < stack.count - 1
+        }
+        out.append(canUp ? .item("Move Lane Up") { editor.moveLane(lane, space: space, by: -1) } : .dim("Move Lane Up"))
+        out.append(canDown ? .item("Move Lane Down") { editor.moveLane(lane, space: space, by: 1) } : .dim("Move Lane Down"))
         out.append(.line)
         if items == 0 {
             out.append(.item("Delete Lane") { editor.deleteLane(lane, space: space) })
