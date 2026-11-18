@@ -8,7 +8,11 @@ test "a recording opens with its preview, timeline, inspector and look"
   expect tree has "inspector"
   expect tree missing "empty"
   expect text "length" == "Video 0:09 · recorded 0:10"
-  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 10
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
   expect state background == "custom"
   expect state aspect == "9:16"
 
@@ -16,12 +20,16 @@ test "an empty recording has one clip part and nothing on it"
   tap "recording-empty"
   clock data
   expect text "length" == "Video 0:10 · recorded 0:10"
-  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+  expect state summary.parts == 1
+  expect state summary.removed == 0
+  expect state summary.effects == 0
+  expect state summary.lanes == 1
+  expect state summary.moves == 0
 
 test "a click on a zoom selects it; the inspector sets its level and deletes it"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 257 142 mouse
+  tap "timeline" drag 0 0 from 275 176 mouse
   clock data
   expect text "segment-title" == "Zoom In"
   expect text "start" == "0:01.00"
@@ -32,12 +40,16 @@ test "a click on a zoom selects it; the inspector sets its level and deletes it"
   tap "segment-delete"
   clock data
   expect tree missing "segment"
-  expect text "summary" == "4 clip parts (1 removed) · 9 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 9
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
 
 test "a click on a mask selects it and shows its style"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 200 178 mouse
+  tap "timeline" drag 0 0 from 220 212 mouse
   clock data
   expect text "segment-title" == "Mask"
   expect state sel.style == "solid"
@@ -48,7 +60,7 @@ test "a click on a mask selects it and shows its style"
 test "a clip part is removed and put back from the inspector"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 200 57 mouse
+  tap "timeline" drag 0 0 from 220 91 mouse
   clock data
   expect text "segment-title" == "Clip Part"
   expect state sel.transition == "crossfade"
@@ -66,7 +78,11 @@ test "Split Clip with the playhead at the start says why it can't"
   tap "split-clip"
   clock data
   expect text "problem" == "Move the playhead into the clip to split it."
-  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+  expect state summary.parts == 1
+  expect state summary.removed == 0
+  expect state summary.effects == 0
+  expect state summary.lanes == 1
+  expect state summary.moves == 0
 
 test "a template replaces the edit; Undo and Redo take it back and forth"
   tap "recording-full"
@@ -78,7 +94,11 @@ test "a template replaces the edit; Undo and Redo take it back and forth"
   expect state summary.undoName == "Template"
   tap "undo"
   clock data
-  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 10
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
   expect state summary.redoName == "Template"
   tap "redo"
   clock data
@@ -108,7 +128,7 @@ test "⌘Z undoes and ⇧⌘Z and ⌘Y redo; a slider scrub is one step"
 test "while a text field has the focus, ⌘Z is the field's"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 240 280 mouse
+  tap "timeline" drag 0 0 from 259 314 mouse
   clock data
   tap "text-words"
   expect state typing == true
@@ -120,25 +140,40 @@ test "while a text field has the focus, ⌘Z is the field's"
 test "Clear Edits asks first, names the recording, and can be undone"
   tap "recording-full"
   clock data
+  tap "inspector-more"
   tap "clear"
   clock settle
   tap "clear-cancel"
   clock settle
-  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 10
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
+  tap "inspector-more"
   tap "clear"
   clock settle
   tap "clear-confirm"
   clock settle
   clock data
-  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+  expect state summary.parts == 1
+  expect state summary.removed == 0
+  expect state summary.effects == 0
+  expect state summary.lanes == 1
+  expect state summary.moves == 0
   expect state summary.undoName == "Clear Edits"
   tap "undo"
   clock data
-  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 10
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
 
 test "Delete asks first and names the recording; Cancel keeps it"
   tap "recording-empty"
   clock data
+  tap "inspector-more"
   tap "delete"
   clock settle
   expect state removingName == "Empty window"
@@ -146,6 +181,7 @@ test "Delete asks first and names the recording; Cancel keeps it"
   clock settle
   clock data
   expect tree has "recording-empty"
+  tap "inspector-more"
   tap "delete"
   clock settle
   tap "delete-confirm"
@@ -157,10 +193,11 @@ test "Delete asks first and names the recording; Cancel keeps it"
 test "the floating settings panel stays on the stage"
   tap "recording-full"
   clock settle
+  tap "inspector-more"
   tap "panel-menu-button"
   tap "menu-panel-float"
   clock settle
-  tap "timeline" drag 0 0 from 240 280 mouse
+  tap "timeline" drag 0 0 from 259 314 mouse
   clock data
   expect tree has "float-panel"
   expect text "segment-title" == "Text"
@@ -168,6 +205,7 @@ test "the floating settings panel stays on the stage"
   clock data
   expect state floatX <= 460
   expect state floatY <= 160
+  expect state floatClear == true
 
 test "the inspector's sections fold, and the look's controls change look.json"
   tap "recording-empty"
@@ -189,7 +227,7 @@ test "the inspector's sections fold, and the look's controls change look.json"
 test "a click on a text selects it; its words show in the inspector"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 240 280 mouse
+  tap "timeline" drag 0 0 from 259 314 mouse
   clock data
   expect text "segment-title" == "Text"
   expect state sel.text == "Hello"
@@ -209,3 +247,58 @@ test "Motion Paths is on by default, turns off, and stays off after a relaunch"
   clock data
   tap "motion-paths"
   expect state showMotionPaths == true
+
+test "the inspector is calm: nothing selected shows the Frame, with no help text"
+  tap "recording-full"
+  clock data
+  expect text "inspector-title" == "Frame"
+  expect tree has "inspector-hint"
+  expect tree missing "sec-help"
+  expect tree has "sec-bg"
+
+test "a recording is deleted from its Library row's right-click menu, after asking"
+  tap "recording-empty" contextmenu
+  tap "library-delete"
+  clock settle
+  expect state removingName == "Empty window"
+  tap "delete-confirm"
+  clock settle
+  clock data
+  expect tree missing "recording-empty"
+
+test "each area has its own bar: the toolbar the piece, the viewer bar the video, the timeline bar the timeline"
+  tap "recording-full"
+  clock data
+  expect tree has "templates"
+  expect tree has "export-open"
+  expect text "video-scope" == "VIDEO"
+  expect tree has "crop-open"
+  expect tree has "clock"
+  expect tree has "motion-paths"
+  expect tree has "split-clip"
+  expect disabled "split-all"
+  expect tree has "zoom-controls"
+  expect tree missing "sec-place"
+
+test "Place on the viewer bar places the video"
+  tap "recording-empty"
+  clock data
+  tap "place-open"
+  tap "place-left"
+  clock data
+  expect state summary.undoName == "Placement"
+
+test "the floating settings panel never covers the timeline, however low it is dropped"
+  tap "recording-full"
+  clock settle
+  tap "inspector-more"
+  tap "panel-menu-button"
+  tap "menu-panel-float"
+  clock settle
+  tap "timeline" drag 0 0 from 259 314 mouse
+  clock data
+  expect tree has "float-panel"
+  tap "float-grip" drag 0 840
+  clock data
+  expect state floatClear == true
+  expect state floatH >= 100
