@@ -49,7 +49,7 @@ exact-studio — edit Exact Studio recordings from the command line
                                             full strength throughout; it follows the video through zooms, moves and 3D;
                                             on the first effect lane free then (else a new one); prints the new segment
   exact-studio split <id> <t> [<item>]      cuts at <t> seconds of the recording: the clip, or the segment or sound whose
-                                            id is <item> (an image's effect: <image>:<effect>); its halves join, so the
+                                            id is <item> (an image's or a text's effect: <item>:<effect>); its halves join, so the
                                             video looks and sounds the same; prints what it cut
   exact-studio split <id> <t> --all         Split All Lanes: the clip and every block under <t>; moves are never cut
   exact-studio schema                       prints where the docs and JSON Schemas are
@@ -215,12 +215,21 @@ func problems(_ r: Recording) -> [String] {
             if (s.file ?? "").isEmpty { out.append("\(at): an image needs its file, a path inside the recording's folder") }
             else if Pictures.image(s.file, in: folder) == nil { out.append("\(at): \(s.file!) is not a picture in \(folder.lastPathComponent)/ (\(Pictures.types.joined(separator: ", ")))") }
             if (s.size ?? 0.25) <= 0 { out.append("\(at): an image's size must be above 0") }
+        } else if s.kind == "text", s.moves != nil {
+            out.append("\(at): only an image has moves of its own")
+        } else if !s.isOverlay, s.moves != nil || s.effects != nil {
+            out.append("\(at): only an image has moves and effects of its own")
+        }
+        if s.isOverlay {
             for fx in s.effects ?? [] where fx.end - fx.start < 0.1 { out.append("\(at): its \(fx.kind) effect \(fx.id) is shorter than 0.1 s, or ends before it starts") }
             for m in s.moves ?? [] where m.to.scale <= 0 { out.append("\(at): its move \(m.id) needs a scale above 0 (1 keeps the image's size)") }
             let ids = (s.effects ?? []).map(\.id) + (s.moves ?? []).map(\.id)
             if Set(ids).count != ids.count { out.append("\(at): two of its moves or effects share an id") }
-        } else if s.moves != nil || s.effects != nil {
-            out.append("\(at): only an image has moves and effects of its own")
+        }
+        // @ref LLP 0002#where-an-effect-applies
+        if let scope = s.scope {
+            if s.kind != "blur" && s.kind != "mono" { out.append("\(at): only a blur or a black and white (mono) has a scope") }
+            else if !Segment.scopes.contains(scope) { out.append("\(at): no scope \(scope); one of \(Segment.scopes.joined(separator: ", "))") }
         }
         if s.kind == "mask" {
             out += maskProblems(s).map { "\(at): \($0)" }
@@ -396,10 +405,10 @@ case "show":
                 if ix <= 0 || iy <= 0 { what += " — outside the crop: hides nothing now" }
                 else if ix < u.w - 0.0001 || iy < u.h - 0.0001 { what += " — partly outside the crop" }
             }
-        default: if s.coversFrame { what += s.scope == "all" ? " (whole frame, texts too)" : " (whole frame)" }
+        default: if s.coversFrame { what += " (\(Segment.reach(s.scope)))" }
         }
         print("  \(["e", "t", "i", "f"][s.space])\(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]\(joins(s, r.edits.segments))")
-        // An image's own moves and effects, under it.
+        // An image's own moves and effects, or a text's own effects, under it.
         for m in (s.moves ?? []).sorted(by: { $0.t < $1.t }) {
             print("        move lands \(stamp(m.t)) after \(m.duration)s \(m.style): x \(m.to.x) y \(m.to.y) scale \(m.to.scale)  [\(m.id)]")
         }

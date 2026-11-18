@@ -98,8 +98,9 @@ struct Segment: Codable, Equatable {
     var loop: String?
     /// Degrees, clockwise.
     var rotation: Double?
-    /// A blur's or black and white's reach: "video" (the default); "frame", the whole picture
-    /// with its images, under the texts; or "all", the texts too.
+    /// A blur's or black and white's reach, one of `Segment.scopes`: "video" (the default); "background";
+    /// "scene", the background and the video; "frame", those and the images, under the texts; or "all", the texts too.
+    // @ref LLP 0002#where-an-effect-applies
     var scope: String?
     /// A 3D turn's pose, in degrees.
     var tilt: Double?
@@ -115,7 +116,7 @@ struct Segment: Codable, Equatable {
     /// Its own moves, as the video has: each lands at `t` at `to`, where `scale` multiplies its `size`.
     var moves: [Move]?
     /// Its own effects, each a span inside the image's: `kind` one of `Segment.imageEffects`,
-    /// `lane` its row under the image, `level` a fade's opacity.
+    /// `lane` its row under the image, `level` a fade's opacity. A text has them too, of `Segment.textEffects`.
     var effects: [Segment]?
     // A mask's. It shares a text's `style` ("blur", "pixels" or "solid") and `color`, and an image's `radius`.
     /// What it hides: unit coordinates of the full recorded frame (the capture, before the crop), origin
@@ -132,13 +133,20 @@ struct Segment: Codable, Equatable {
     static let maskStyles = ["blur", "pixels", "solid"]
     /// What an image's own effect can be.
     static let imageEffects = ["blur", "mono", "fade", "pulse", "float", "wiggle"]
+    /// What a text's own effect can be.
+    static let textEffects = ["blur", "mono", "fade"]
+    /// A blur's or black and white's reaches, back to front: each covers the layers under its cut.
+    static let scopes = ["video", "background", "scene", "frame", "all"]
+
+    /// What an item of `kind` may have as its own effects: an image's or a text's; none for the rest.
+    static func ownEffects(_ kind: String) -> [String] { kind == "image" ? imageEffects : kind == "text" ? textEffects : [] }
 
     /// Two segments may overlap in time unless they share a group: one zoom at
     /// a time, one speed at a time, one of each visual effect at a time.
     /// Texts, images and masks never clash.
     var group: String { isOverlay || kind == "mask" ? kind + ":" + id : coversFrame ? kind + ":frame" : kind }
-    /// A blur or black and white over the whole picture, not only the video.
-    var coversFrame: Bool { (kind == "blur" || kind == "mono") && (scope == "frame" || scope == "all") }
+    /// A blur or black and white that reaches past the video: the background, the scene, the frame or all.
+    var coversFrame: Bool { (kind == "blur" || kind == "mono") && Segment.scopes.dropFirst().contains(scope ?? "video") }
     /// Drawn over the finished picture: a text or an image.
     var isOverlay: Bool { kind == "text" || kind == "image" }
     /// Which rows its `lane` counts: 0 the video's effect lanes, 1 the text lanes, 2 the image
@@ -479,7 +487,7 @@ struct Edits: Codable, Equatable {
             if o.group == s.group { return "Two \(Segment.noun(s.kind)) can’t overlap." }
             if o.lane == s.lane, o.space == s.space { return "That lane is taken there; drop it on another lane." }
         }
-        if s.kind == "image" { return Edits.conflict(in: s) }
+        if s.isOverlay { return Edits.conflict(in: s) }
         return nil
     }
 
@@ -501,14 +509,14 @@ struct Edits: Codable, Equatable {
         return probe.lane
     }
 
-    /// Why an image's own moves and effects cannot sit where they are, or nil when they can.
+    /// Why an image's (or a text's) own moves and effects cannot sit where they are, or nil when they can.
     static func conflict(in image: Segment) -> String? {
-        let fx = image.effects ?? []
+        let fx = image.effects ?? [], noun = image.kind == "text" ? "text" : "image"
         for e in fx {
-            if !Segment.imageEffects.contains(e.kind) { return "An image has no \(e.kind) effect." }
-            if e.start < image.start - 0.001 || e.end > image.end + 0.001 { return "An image’s effect must stay inside the image’s time." }
+            if !Segment.ownEffects(image.kind).contains(e.kind) { return "A\(noun == "image" ? "n" : "") \(noun) has no \(e.kind) effect." }
+            if e.start < image.start - 0.001 || e.end > image.end + 0.001 { return "A\(noun == "image" ? "n" : "") \(noun)’s effect must stay inside the \(noun)’s time." }
             for o in fx where o.id != e.id && o.overlaps(e) {
-                if o.kind == e.kind { return "Two of the same effect can’t overlap on one image." }
+                if o.kind == e.kind { return "Two of the same effect can’t overlap on one \(noun)." }
                 if o.lane == e.lane { return "That row is taken there; drop it on another row." }
             }
         }
@@ -542,6 +550,17 @@ extension Segment {
         if let hex = named[c] { return hex }
         guard Backgrounds.hex(c) != nil else { return nil }
         return "#" + c.replacingOccurrences(of: "#", with: "").uppercased()
+    }
+
+    /// What a blur or black and white of reach `scope` covers, in words.
+    static func reach(_ scope: String?) -> String {
+        switch scope {
+        case "background": return "the background only"
+        case "scene": return "the video and the background"
+        case "frame": return "whole frame"
+        case "all": return "whole frame, texts too"
+        default: return "the video only"
+        }
     }
 
     static func noun(_ kind: String) -> String {
@@ -1325,7 +1344,7 @@ struct Framing {
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
                 .concatenating(CGAffineTransform(translationX: mid.x, y: mid.y)))
         }
-        let ground = look.background == "video" ? blurred(source) : background
+        let ground = cover(look.background == "video" ? blurred(source) : background, after: "background", at: t)
         let scene = layer.composited(over: ground).cropped(to: canvasRect)
         return texts ? overlay(scene, at: t) : scene
     }
@@ -1370,36 +1389,48 @@ struct Framing {
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
                 .concatenating(CGAffineTransform(translationX: mid.x, y: mid.y)))
         }
-        let ground = look.background == "video" ? blurred(source) : background
+        let ground = cover(look.background == "video" ? blurred(source) : background, after: "background", at: t)
         let scene = layer.composited(over: ground).cropped(to: canvasRect)
         return texts ? overlay(scene, at: t) : scene
     }
 
-    /// The texts and images showing at `t`, over `scene`.
-    func overlay(_ scene: CIImage, at t: Double) -> CIImage {
-        var out = scene
+    /// The layers a frame is drawn in, back to front. A blur's or black and white's reach is a cut after one of
+    /// them: `Segment.scopes[i + 1]` covers `stack[0...i]` ("video", the first scope, is the video's own effect).
+    /// `render` draws the background and the video, once for each frame a crossfade blends; `overlay` the rest, once.
+    // @ref LLP 0003#the-stack — one list, each reach a cut in it; no reach is a special case
+    static let stack = ["background", "video", "images", "texts"]
+
+    /// `image`, the layers up to `layer` drawn on the canvas, under the blurs and black-and-whites whose reach
+    /// is the cut after that layer, showing at `t`.
+    func cover(_ image: CIImage, after layer: String, at t: Double) -> CIImage {
+        guard let i = Framing.stack.firstIndex(of: layer) else { return image }
+        let scope = Segment.scopes[i + 1]
+        var out = image
         let rect = CGRect(origin: .zero, size: canvas)
-        // Whole-frame effects: over the picture and its images and under the texts, or over the texts too.
-        func cover(_ scope: String) {
-            for fx in edits.effects where fx.scope == scope {
-                let a = eased(fx, at: t, ramp: 0.3)
-                guard a > 0.001 else { continue }
-                if fx.kind == "blur" {
-                    out = out.clampedToExtent().applyingGaussianBlur(sigma: Double(min(canvas.width, canvas.height)) * 0.03 * a).cropped(to: rect)
-                } else if fx.kind == "mono" {
-                    let c = CIFilter.colorControls()
-                    c.inputImage = out
-                    c.saturation = Float(1 - a)
-                    out = c.outputImage!.cropped(to: rect)
-                }
+        for fx in edits.effects where fx.scope == scope {
+            let a = eased(fx, at: t, ramp: 0.3)
+            guard a > 0.001 else { continue }
+            if fx.kind == "blur" {
+                out = out.clampedToExtent().applyingGaussianBlur(sigma: Double(min(canvas.width, canvas.height)) * 0.03 * a).cropped(to: rect)
+            } else if fx.kind == "mono" {
+                let c = CIFilter.colorControls()
+                c.inputImage = out
+                c.saturation = Float(1 - a)
+                out = c.outputImage!.cropped(to: rect)
             }
         }
+        return out
+    }
+
+    /// The texts and images showing at `t`, over `scene`.
+    func overlay(_ scene: CIImage, at t: Double) -> CIImage {
         // @ref LLP 0002#rows — a whole-frame effect covers the images; the words stay readable unless it covers everything
+        var out = cover(scene, after: "video", at: t)
         let over = edits.overlays(at: t)
         for s in over where s.kind == "image" { out = renderImage(s, at: t).composited(over: out) }
-        cover("frame")
+        out = cover(out, after: "images", at: t)
         for s in over where s.kind == "text" { out = renderText(s, at: t).composited(over: out) }
-        cover("all")
+        out = cover(out, after: "texts", at: t)
         return out.cropped(to: CGRect(origin: .zero, size: canvas))
     }
 
@@ -1481,6 +1512,20 @@ struct Framing {
         }
         whole = whole.rotated(by: -(s.rotation ?? 0) * .pi / 180)
 
+        // Its own effects, each easing in and out over its span, as an image's do.
+        var grey = 0.0
+        let effects = s.effects ?? []
+        for fx in effects {
+            let a = Joins.presence(fx, whole: Joins.whole(fx, run: Joins.run(fx, in: effects)), at: t, ramp: 0.3)
+            guard a > 0.001 else { continue }
+            switch fx.kind {
+            case "blur": wholeBlur = max(wholeBlur, fs * 0.22 * a)
+            case "mono": grey = max(grey, a)
+            case "fade": wholeAlpha *= 1 - a * (1 - min(max(fx.level ?? 0.3, 0), 1))
+            default: break
+            }
+        }
+
         // Each letter.
         var line = CIImage.empty()
         // Each letter's image has its baseline `descent` up from its bottom; set the baseline so the
@@ -1558,6 +1603,12 @@ struct Framing {
             sh.aVector = CIVector(x: 0, y: 0, z: 0, w: 0.55)
             group = line.composited(over: sh.outputImage!.applyingGaussianBlur(sigma: fs * 0.08).transformed(by: CGAffineTransform(translationX: 0, y: -fs * 0.05)))
         default: break
+        }
+        if grey > 0.001 {
+            let c = CIFilter.colorControls()
+            c.inputImage = group
+            c.saturation = Float(1 - grey)
+            group = c.outputImage!
         }
         if wholeBlur > 0.5 { group = group.clampedToExtent().applyingGaussianBlur(sigma: wholeBlur).cropped(to: box.insetBy(dx: -wholeBlur * 3, dy: -wholeBlur * 3)) }
         return group

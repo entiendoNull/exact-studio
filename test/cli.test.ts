@@ -156,6 +156,45 @@ describe('invalid recordings fail validate with the expected lines', () => {
   });
 });
 
+describe('where an effect applies', () => {
+  test('every reach and a text\'s own effects validate, follow the schema and show what they cover', () => {
+    const reaches = ['background', 'scene', 'frame', 'all'];
+    const edits = {
+      textLanes: 1,
+      frameLanes: 1,
+      segments: [
+        { id: 'v', kind: 'blur', start: 1, end: 2 },
+        ...reaches.map((scope, i) => ({ id: scope, kind: 'mono', start: 3 + i * 1.5, end: 4 + i * 1.5, lane: 0, scope })),
+        { id: 't', kind: 'text', start: 1, end: 6, text: 'Hi', effects: [{ id: 'tb', kind: 'blur', start: 2, end: 3 }, { id: 'tf', kind: 'fade', start: 4, end: 5, level: 0.5 }] },
+      ],
+    };
+    expect(check(editsSchema, edits)).toEqual([]);
+    const dir = library('valid');
+    try {
+      writeFileSync(join(dir, 'empty/edits.json'), JSON.stringify(edits));
+      expect(run(dir, 'validate', 'empty').out).toBe('ok\n');
+      const shown = run(dir, 'show', 'empty').out;
+      expect(shown).toContain('e0: 0:01.00–0:02.00  blur  [v]');
+      expect(shown).toContain('f0: 0:03.00–0:04.00  mono (the background only)  [background]');
+      expect(shown).toContain('f0: 0:04.50–0:05.50  mono (the video and the background)  [scene]');
+      expect(shown).toContain('f0: 0:06.00–0:07.00  mono (whole frame)  [frame]');
+      expect(shown).toContain('f0: 0:07.50–0:08.50  mono (whole frame, texts too)  [all]');
+      expect(shown).toContain('effect blur 0:02.00–0:03.00  [tb]');
+      expect(shown).toContain('effect fade to 0.5 0:04.00–0:05.00  [tf]');
+    } finally {
+      drop(dir);
+    }
+  });
+
+  test('the schema refuses an unknown reach; validate names the reaches and a text\'s own effects', () => {
+    expect(check(editsSchema, json('invalid', 'reach-problems', 'edits.json')).join('\n')).toContain('/segments/0/scope: "behind" is not one of video, background, scene, frame, all');
+    const out = readFileSync(join(golden, 'validate/reach-problems.txt'), 'utf8');
+    expect(out).toContain('no scope behind; one of video, background, scene, frame, all');
+    expect(out).toContain('only a blur or a black and white (mono) has a scope');
+    expect(out).toContain('A text has no pulse effect.');
+  });
+});
+
 describe('a file that can\'t be read is never written over', () => {
   let dir = '';
   const broken = '{ "segments": [ { "id": "z", "kind": "zoom", "start": 1, "end": 2, "level": 2 }, ] ';

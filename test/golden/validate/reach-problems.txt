@@ -1,0 +1,3 @@
+blur b (0:01.00–0:02.00): no scope behind; one of video, background, scene, frame, all
+zoom z (0:05.00–0:06.00): only a blur or a black and white (mono) has a scope
+text t (0:01.00–0:04.00): A text has no pulse effect.

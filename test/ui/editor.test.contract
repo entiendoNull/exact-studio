@@ -352,3 +352,48 @@ test "VIDEO folds to one line with the Clip in it; ON TOP moves up under it, and
   tap "timeline" drag 0 0 from 259 314 mouse
   clock data
   expect text "segment-title" == "Text"
+
+test "a blur's Applies To stack: a click on a layer, the dragged line and Video Only set its reach"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 40 45 mouse
+  clock data
+  tap "timeline" drag 0 0 from 734 273 mouse
+  clock data
+  expect text "segment-title" == "Blur"
+  expect state sel.scope == "frame"
+  expect text "reach-word-0" == "sharp"
+  expect text "reach-word-1" == "blurred"
+  expect text "reach-line-label" == "Blur"
+  tap "reach-row-2"
+  clock data
+  expect state sel.scope == "scene"
+  expect text "reach-word-1" == "sharp"
+  expect text "reach-word-3" == "blurred"
+  tap "reach-line" drag 0 -40
+  clock data
+  expect state sel.scope == "frame"
+  tap "scope-video"
+  clock data
+  expect state sel.scope == "video"
+  expect tree missing "reach-line"
+  expect text "reach-word-2" == "blurred"
+  expect text "reach-word-3" == "sharp"
+  tap "scope-line"
+  clock data
+  expect state sel.scope == "scene"
+  tap "timeline" drag 0 0 from 40 45 mouse
+  clock data
+
+test "a text gets a blur and a black and white of its own from its inspector"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 259 314 mouse
+  clock data
+  expect text "segment-title" == "Text"
+  tap "text-fx-blur"
+  clock data
+  expect state sel.kind == "ifx"
+  expect state sel.fx == "blur"
+  expect state sel.file == "“Hello”"
+  expect text "segment-title" == "Text Effect"

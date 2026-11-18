@@ -47,7 +47,7 @@
     "frameLanes": {
       "type": "integer",
       "minimum": 0,
-      "description": "How many whole-frame lanes there are: they hold a blur or mono with scope frame or all"
+      "description": "How many whole-frame lanes there are: they hold a blur or mono with a scope past the video: background, scene, frame or all"
     },
     "base": {
       "type": "object",
@@ -301,10 +301,12 @@
           "scope": {
             "enum": [
               "video",
+              "background",
+              "scene",
               "frame",
               "all"
             ],
-            "description": "blur, mono: only the video (the default); the whole frame with its images, under the texts, which stay sharp; or all, the texts too"
+            "description": "blur, mono: where in the stack (background, video, images, texts, back to front) it cuts; it covers every layer under the cut. video: only the video (the default); background: only the background; scene: the background and the video; frame: those and the images, under the texts, which stay sharp; all: the texts too"
           },
           "tilt": {
             "type": "number"
@@ -483,7 +485,7 @@
           },
           "effects": {
             "type": "array",
-            "description": "image: its own effects, each inside the image's span",
+            "description": "image: its own effects, each inside the image's span (blur, mono, fade, pulse, float, wiggle). text: its own blur, mono or fade, each inside the text's span",
             "items": {
               "type": "object",
               "properties": {
@@ -513,7 +515,7 @@
                 "lane": {
                   "type": "integer",
                   "minimum": 0,
-                  "description": "Its row under the image"
+                  "description": "Its row under the image or the text"
                 },
                 "level": {
                   "type": "number",

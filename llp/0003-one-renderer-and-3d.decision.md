@@ -15,6 +15,17 @@ The preview, the export and the CLI all draw with the same code (`Framing.render
 `AVVideoCompositing`). What you see is what you export. Don't add a second, "faster" path for
 one of them.
 
+## The stack
+
+A frame is drawn as one list, back to front: background, video, images, texts (`Framing.stack`).
+Each reach of a blur or black and white is a cut after one layer (`Framing.cover(_:after:at:)`), so
+a new reach or a new layer is one entry, not a special case (LLP 0002#where-an-effect-applies).
+
+- The background and the video are drawn per source frame (`render`), so a crossfade blends them;
+  the images and texts once over the result (`overlay`). A cut lands on the side its layer is drawn.
+- An item placed behind the video (planned) is one more layer between background and video, drawn
+  in `render` over the covered background, so the `background` cut stays under it and `scene` over it.
+
 ## Export
 
 - **Export** is a button in the header. It opens a lightbox in the middle of the window, over

@@ -112,10 +112,10 @@ all required, and `lane` (0 up, default 0). A segment's kind decides which rows 
 | an effect on the video | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, `mask`, and `blur` or `mono` with no `scope` | the video's effect lanes | `lanes` (at least 1) |
 | a text | `text` | the text lanes | `textLanes` |
 | an image | `image` | the image lanes, 0 in front | `imageLanes` |
-| an effect on the whole picture | `blur` or `mono` with `scope` `"frame"` or `"all"` | the whole-frame lanes | `frameLanes` |
+| an effect past the video | `blur` or `mono` with `scope` `"background"`, `"scene"`, `"frame"` or `"all"` | the whole-frame lanes | `frameLanes` |
 
-An effect on the video never touches a text or an image, and an image's own effects (below) never
-touch the video. Two segments on one lane must not overlap in time, and these never overlap
+An effect on the video never touches a text or an image, and an image's or a text's own effects
+(below) never touch anything else. Two segments on one lane must not overlap in time, and these never overlap
 anywhere: two `zoom`s, two `speed`s, two `3d`s, or two of the same visual effect with the same reach.
 Texts, images and masks on separate lanes overlap freely. Images are drawn over the video with the lowest
 `lane` in front, and texts over the images.
@@ -135,7 +135,7 @@ it. A count the file leaves out is derived from the lanes in use.
 | `speed` | `rate` | 0.25–8; 0.5 is half speed |
 | `spotlight` | | darkens all but a circle around the cursor |
 | `highlight` | | a soft glow under the cursor |
-| `blur` | `scope` | none: only the video. `"frame"`: the whole picture, background and images included; texts stay sharp on top. `"all"`: texts too |
+| `blur` | `scope` | how far down the stack it reaches; see [Where an effect applies](#where-an-effect-applies). None: only the video |
 | `mono` | `scope` | black and white, the same reaches |
 | `3d` | `tilt`, `turn`, `roll`, `style` | turns the video in 3D over its span and back, even with 3D off, easing over 0.7 s (a third of a short span); `style` `"hold"` (the default: holds `tilt`, `turn`, `roll`, default 10, −24, 0) or `"orbit"` (one full turn about the vertical across the whole span; `turn` is ignored) |
 | `mask` | `rect`, `style`, `color`, `radius` | hides a part of the recording; see [Masks](#masks) |
@@ -147,21 +147,48 @@ it. A count the file leaves out is derived from the lanes in use.
 `pink`, `blue`, `mint`); `weight` (`regular`, `bold`, the default, `heavy`, `rounded`); `style` (`plain`, the default, `pill`, `box`,
 `outline`, `shadow`); `animIn` (default `pop`; `letters`, `letters-pop`, `drop`, `typewriter`, `pop`, `spin`, `slide`, `rise`,
 `blur`, `fade`, `none`); `animOut` (`fade`, the default, `fall`, `letters`, `pop`, `sink`, `blur`, `none`); `loop` while
-shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees).
+shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees); `effects`, its own (below).
 
 Keep a text clear of the video: put it beside the video when the frame is wide, above or below it
 when tall, and not where a zoom pulls the video under it.
+
+**A text's own effects, `effects`:** as an image's (see [Images](#images)): each has an `id`, `kind`,
+`start`, `end` (inside the text's span) and `lane` (its row under the text). Kinds: `blur`, `mono` and
+`fade` (to `level`, default 0.3). They ease in and out over 0.3 s and touch only this text. Two effects on one
+`lane` must not overlap, nor two of the same kind on any lane.
+
+```json
+{ "id": "t1", "kind": "text", "start": 1, "end": 6, "lane": 0, "text": "Meet Exact",
+  "effects": [ { "id": "tb", "kind": "blur", "start": 4, "end": 5.5 } ] }
+```
+
+### Where an effect applies
+
+A frame is a fixed stack, back to front: the **background**, the **video**, the **images**, the
+**texts**. A `blur` or `mono` segment's `scope` is a cut in that stack: it covers every layer under the cut.
+
+| `scope` | covers | stays as it is |
+|---|---|---|
+| none (or `"video"`) | the video only, on its own pixels, with its other effects | the background, images, texts |
+| `"background"` | the background | the video, images, texts |
+| `"scene"` | the background and the video | images, texts |
+| `"frame"` | the background, the video and the images | texts |
+| `"all"` | everything | nothing |
+
+One image or one text alone: give that item its own `blur` or `mono` in its `effects`. Spotlight and
+cursor highlight have no `scope`: they follow the cursor on the video. Files from before have none
+of the new values, so they draw as they did.
 
 ### Splits and joins: `joinStart`, `joinEnd`
 
 A split cuts a block in two so each half can be changed on its own. **It never changes the video.**
 The halves are marked: the first gets `"joinEnd": true`, the second `"joinStart": true`, and the
-second gets a fresh id (`z1` → `z1-2`). Segments, an image's own effects and sounds take the two
+second gets a fresh id (`z1` → `z1-2`). Segments, an image's or a text's own effects and sounds take the two
 keys; a missing key is not joined.
 
 ```sh
 ./exact-studio split <id> <t>                 # the clip, at <t> seconds of the recording
-./exact-studio split <id> <t> <item>          # a segment or a sound by id; an image's effect as <image>:<effect>
+./exact-studio split <id> <t> <item>          # a segment or a sound by id; an image's or a text's effect as <item>:<effect>
 ./exact-studio split <id> <t> --all           # the clip and every block under <t>; moves are never cut
 ```
 
@@ -230,8 +257,8 @@ overlap, nor two of the same kind on any lane.
 **Lanes:** images that follow one another can share a lane. Images that show at the same time need
 separate lanes; the lower `lane` is in front. A lane is below `imageLanes`.
 
-To blur or grey the whole picture instead, images included, use a `blur` or `mono` segment with
-`scope` `"frame"` (texts stay sharp) or `"all"` (texts too).
+To blur or grey more than one image, use a `blur` or `mono` segment with a `scope` (see
+[Where an effect applies](#where-an-effect-applies)): `"frame"` covers the images, texts stay sharp; `"all"` the texts too.
 
 ### Masks
 

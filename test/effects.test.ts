@@ -77,6 +77,7 @@ describe('docs/effects.md has an entry for every name the code accepts', () => {
     ['image entrances (Editor.imageIns)', list(editor, 'imageIns'), entries('Image entrances')],
     ['image exits (Editor.imageOuts)', list(editor, 'imageOuts'), entries('Image exits')],
     ['image effects (Segment.imageEffects)', [...list(compositor, 'imageEffects'), ...segment.effects.items.properties.kind.enum], entries('Image effects')],
+    ['text effects (Segment.textEffects)', list(compositor, 'textEffects'), entries('Text effects')],
   ];
   for (const [what, names, have] of cases) {
     test(what, () => {
