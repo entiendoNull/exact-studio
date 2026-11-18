@@ -11,47 +11,50 @@ Decided by Jacob while building v1 (2026-11-11).
 
 ## Rows
 
-Decided by Jacob on 2026-11-13, when images came. Before that every lane was a free "Lane N"
-that held effects and texts alike.
+Decided by Jacob on 2026-11-13, when images came; rows from use and the stack of layers on 2026-11-18.
+Before images every lane was a free "Lane N" that held effects and texts alike.
 
-The rows are in four groups, and a row holds one kind of thing:
+A row holds one kind of thing, and **a row exists only while it holds something**:
 
-- **The video.** The **Clip**: cuts are clip splits; a split makes a small gap, and you select a
-  part and remove it; kept parts can crossfade or fade into each other. Its **Sound**, when it has
-  one: the recorded sound's waveform, with the removed parts dimmed (see Sound). Its **Position**: where
-  the video sits and how it moves, one track, because the video can only be in one place at a
-  time. Its **Effects** lanes: zooms, speed, blur, mono, spotlight, highlight, 3D turns and masks
-  (LLP 0006).
-- **On top of the video.** **Text** lanes, then **Image** lanes (below).
-- **Sound.** Lanes for the sounds you add: music on one, short sounds on another (see Sound).
-- **The whole frame.** Lanes for a blur or black and white that reaches past the video: the
-  background only, the background and the video, those and the images, or everything (see
-  Where an effect applies). So a title reads over a blurred picture.
+- **The Video.** The **Clip**: cuts are clip splits; a split makes a small gap, and you select a part and
+  remove it; kept parts can crossfade or fade into each other. Its recorded sound is a band along the
+  Clip's bottom, cut with it (see Sound). Under it, indented: its **Moves** row (where the video sits and
+  how it moves, one track, because the video can only be in one place at a time) and its **Effects**
+  rows: zooms, speed, blur, mono, spotlight, highlight, 3D turns and masks (LLP 0006), and a blur or black
+  and white of any reach (see Where an effect applies).
+- **Text** and **Images** rows, in front of the video or behind it: they are the stack (LLP 0005#layers).
+- **Music & Sound.** Rows for the sounds you add: heard, not drawn, so under the stack (see Sound).
 
-Why: an effect on a lane must say what it changes. A video effect only ever changes the video,
-an image's effect only that image, and a whole-frame effect everything. Nobody has to guess.
-
-- The video's Sound, Position and Effects rows fold away under the Clip. An image's own rows fold
-  away under its lane. So the timeline stays short however much is in it.
+- Names are plain: Effects, Text, Images, Music & Sound. A second row of a kind adds a number: "Text 2".
+- **Lanes come from use.** The app writes each count as the number of lanes in use and drops an empty
+  lane; the others close up in order. A count may be 0. A new recording shows the Clip alone.
+- **A second row of a kind opens for an overlap.** An item that meets another of its kind goes to the
+  first lane with room, else a new one. An effect or sound dropped where a lane above has room goes up to it,
+  so a lane of effects holds what overlaps and no more. A text or an image stays on the row it is dropped on:
+  its row is its place in the stack.
+- View ▸ Show Empty Lanes shows one empty row of each kind as a target. It is a view setting, never in
+  `edits.json`.
+- Why: an empty lane is clutter, for a person and for an agent. Rows that appear with what they hold
+  explain themselves.
 - Each row has a + that adds its own kind of thing (LLP 0005).
-- A lane can be deleted with what it holds, after asking; one Effects lane always stays (LLP 0005).
+- A lane can be deleted with what it holds, after asking; no lane has to stay (LLP 0005).
 
 ## Images
 
 - An image is a picture file kept in the recording's folder (`images/`), so a recording stays
   whole when it is copied (LLP 0004).
-- An image works like the video: a block, a **Position** row with its own moves, and **Effects**
+- An image works like the video: a block, a **Moves** row with its own moves, and **Effects**
   rows with its own effects (blur, black and white, fade, pulse, float, wiggle). You learn it once.
 - Images sit on **image lanes**, as texts sit on text lanes. Images in sequence share a lane;
   images at the same time go on separate lanes. A new image takes the first lane free at its time.
-- An open lane shows one image's Position and Effects rows at a time: the selected image, else the
+- An open lane shows one image's Moves and Effects rows at a time: the selected image, else the
   one on the lane selected last, else the one under the playhead. Those rows are lit only across
   that image's time, and its block has a thin outline. Selecting an image opens its lane.
-- Images are drawn over the video, the top lane in front. Texts are drawn over the images,
-  in the order they are listed, as before images came: old recordings look the same.
+- Images and texts are drawn in the order of their rows (see Depth); a file from before draws as it did.
 - Decided by Jacob on 2026-11-13. At first each image was its own row. That did not scale: ten
   logos in a row made ten rows, and it was not what a lane means anywhere else.
-- A file from before has no `imageLanes`. Each of its images keeps the lane it had, so it stacks as before.
+- A file from before `imageLanes` may have two images at once on one lane: each then gets a lane of its own,
+  so it stacks as before.
 - Dragging an image in the preview places it. When it already has moves, a drag at another time
   adds a move there, as dragging the video does.
 
@@ -102,34 +105,32 @@ or black and white reached the video, the frame under the texts, or everything.
   pixels, as before. Old files do not change.
 - One item alone takes its own effect: a text has `effects` as an image does (blur, black and white,
   fade), on its own Effects row under its lane, with the same per-item rules. Its block shows a chip.
-- The inspector draws "Applies to" as that stack with a line to drag (LLP 0005). The timeline keeps
-  its fixed kind order; a block's caption says its reach ("Blur · video, background").
+- The inspector draws "Applies to" as that stack with a line to drag (LLP 0005). The blur stays a block on
+  an Effects row, whatever it covers; its caption says its reach ("Blur · video, background"). A file's
+  `frameLanes` (whole-frame lanes, before) is read once: their items move to the first effect lane with
+  room, and the picture does not change.
 - Spotlight and cursor highlight have no reach: they follow the cursor on the video.
-- Why the inspector and not the rows: rows from use and the fixed kind order stay, and a reach is
-  one word an agent writes. Covering one image lane but not another is not possible; use the item's own effect.
+- Why the inspector and not the rows: a reach is one word an agent writes, and it covers whole layers. Covering one image lane but not another is not possible; use the item's own effect.
 
 ## Depth
 
 Asked for by Jacob on 2026-11-18: "the same z-index idea is good for pretty much any element", so
-texts and images can appear from behind the video. Approved model: one front-to-back stack.
+texts and images can appear from behind the video. The same day the rows became the stack (LLP 0005#layers).
 
-- The stack, front to back: texts, images, the video, behind the video, the background.
-- Depth is a property of the item, not of its row: a text or an image has `layer` (`"behind"`, or none:
-  in front) and `order`. The timeline rows keep their fixed kind order; a block behind the video shows a
-  calm "Behind video" chip.
-- `order` ranks the items of one kind in one layer, higher in front. A tie keeps the old rule: images by
-  lane, 0 in front; texts by their place in the list, a later one in front. So old files draw as before.
-- Texts stay over images in each layer, as before images could move. Mixing them is not asked for, and
-  it would make `order` count across two kinds.
+- The stack, front to back: the text and image rows in front, the video, the rows behind the video, the
+  background. `layers` in `edits.json` lists the rows front to back (`"text:0"`, `"image:1"`, `"video"`);
+  each kind's lanes are numbered from its front row.
+- An item's `layer` (`"behind"`, or none: in front) says which side of the video its row is on. The app
+  writes both. A file's item whose `layer` names the other side moves to a row there.
+- A file without `layers` is read in the order it drew before: images by `order`, then lane, 0 in front;
+  texts over them by `order`, then their place in the list, a later one in front. Each item gets a row in
+  front of every row it drew over, so old files draw as before. `order` is not written again.
+- A `frame` reach covers up to the front-most image row; `all` covers everything (see Where an effect applies).
 - Arrange is the familiar set: Bring Forward, Send Backward, Bring to Front, Send to Back, Send Behind
-  Video, Bring In Front of Video. Forward and backward step past the next item of its kind in its layer
-  that shows at the same time; one that never meets it does not count.
-- Across the video an item lands next to it: the front of the items behind, the back of those in front.
-- An arrange writes `order` to every item of that kind and layer, or drops it from all of them when the
-  items that meet are in the order they have without one. So a step taken back leaves no trace.
+  Video, Bring In Front of Video. Forward and backward put the item on a row just past the next row that
+  shows with it; front and back to the end of its side. Across the video it lands next to it, on its kind's
+  row there when that has room. The other items of its old row stay.
 - A split item moves with its halves. Each step is one undo step, named for it.
-- Why not lanes: an image's lane is its row; moving it to arrange it would change the timeline, and a
-  text's place in the list is not visible at all.
 
 ## Times
 
@@ -143,8 +144,8 @@ video time and convert back, so nothing lands in a removed part.
   recording gets its app's sound. Exact Studio's own sound is never recorded.
 - The recorded sound is part of the clip. Every cut, speed change, crossfade and fade applies to
   it at exactly the same place. There is no separate sound track to keep in sync.
-- It has its own row under the Clip, so you see that it is cut with the clip. Selecting the row
-  shows Mute and Volume. `volume` (0–1) in `edits.json` sets it; 0 mutes.
+- It is drawn inside the Clip, as a waveform band along its bottom, so you see that it is cut with the
+  clip. A click on the band selects it: Mute and Volume. A recording with no sound has no band. `volume` (0–1) in `edits.json` sets it; 0 mutes.
 
 Decided by Jacob on 2026-11-13, when added sounds came:
 

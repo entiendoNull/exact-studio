@@ -40,11 +40,12 @@ it takes ops (`edit`, `look`, `export`, …) and hosts the native preview and ti
 ## Words we use
 
 - **Clip**: the video track. Split it into **parts**; remove parts.
-- **Lane**: a row for one kind of thing: the video's effects, texts, sounds, or whole-frame effects. As many as you want.
-- **Image**: a picture on top of the video, on an image lane. It has its own Position and Effects rows, shown under its lane.
+- **Lane**: a row for one kind of thing: the video's effects, texts, images or sounds. It appears with its first item and goes when it is empty.
+- **Layers**: the text and image rows, front to back, with the Video among them: the draw order.
+- **Image**: a picture on the video, on an image lane. It has its own Moves and Effects rows, shown under its lane.
 - **Sound**: the recorded sound, which follows the cuts; or a sound you add (music, an effect), which plays straight through.
 - **Mask**: a box on the video that hides a secret with a blur, big pixels or a solid colour. It stays on the content as the video moves.
-- **Position**: where the video sits in the frame and how it moves. Its own track.
+- **Moves**: where the video sits in the frame and how it moves. A slim row under the Clip, with the first move.
 - **Look**: the frame around the video: background, shape, padding, corners, shadow, cursor.
 - **Simulators**: what the sidebar calls devices. Not "Devices".
 

@@ -155,9 +155,10 @@ struct Segment: Codable, Equatable {
     /// Drawn over the finished picture: a text or an image.
     var isOverlay: Bool { kind == "text" || kind == "image" }
     var isBehind: Bool { isOverlay && layer == "behind" }
-    /// Which rows its `lane` counts: 0 the video's effect lanes, 1 the text lanes, 2 the image
-    /// lanes, 3 the whole-frame effect lanes.
-    var space: Int { kind == "text" ? 1 : kind == "image" ? 2 : coversFrame ? 3 : 0 }
+    /// Which rows its `lane` counts: 0 the effect lanes (a blur's reach is its `scope`, not its row), 1 the text
+    /// lanes, 2 the image lanes.
+    // @ref LLP 0002#where-an-effect-applies — every reach sits on the Effects rows
+    var space: Int { kind == "text" ? 1 : kind == "image" ? 2 : 0 }
 
     func overlaps(_ o: Segment) -> Bool { start < o.end - 0.0001 && o.start < end - 0.0001 }
 }
@@ -345,16 +346,15 @@ struct Edits: Codable, Equatable {
     /// How the video passes from a kept part into the next across removed
     /// ones, keyed by the kept part's end in milliseconds: "crossfade" or "fade".
     var transitions: [String: String] = [:]
-    /// Effect lanes, at least one; a lane may stay empty. They hold what changes the video.
-    var lanes: Int = 1
+    /// Effect lanes: they hold what changes the video. Every count is how many lanes of its kind are in use.
+    // @ref LLP 0002#rows — lanes come from use: the app writes the counts and drops an empty lane
+    var lanes: Int = 0
     /// Text lanes: they hold the texts drawn over the video. A text's `lane` counts these.
     // @ref LLP 0002#rows — effects change the video; texts and images sit on top of it
     var textLanes: Int = 0
     /// Image lanes: they hold the images drawn over the video. An image's `lane` counts these;
     /// images on one lane never overlap, and a lower lane is in front.
     var imageLanes: Int = 0
-    /// Whole-frame lanes: they hold the blurs and black-and-whites that cover the whole picture.
-    var frameLanes: Int = 0
     /// Where the subject sits before any move.
     var base = Placement()
     var moves: [Move] = []
@@ -366,23 +366,32 @@ struct Edits: Codable, Equatable {
     var sounds: [Sound] = []
     /// Sound lanes: a sound's `lane` counts these.
     var soundLanes: Int = 0
+    /// The text and image lanes and the video, front to back ("text:0", "image:1", "video"): the rows are the draw order.
+    // @ref LLP 0005#layers
+    var layers: [String]?
 
-    init(segments: [Segment] = []) { self.segments = segments }
+    init(segments: [Segment] = []) {
+        self.segments = segments
+        compactLanes()
+    }
 
-    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, imageLanes, frameLanes, base, moves, three, volume, sounds, soundLanes }
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, imageLanes, base, moves, three, volume, sounds, soundLanes, layers }
+    /// Read from old files only: the whole-frame lanes, whose blurs now sit on the effect lanes.
+    enum Legacy: String, CodingKey { case frameLanes }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
         splits = try c.decodeIfPresent([Double].self, forKey: .splits) ?? []
         removed = try c.decodeIfPresent([Double].self, forKey: .removed) ?? []
         transitions = try c.decodeIfPresent([String: String].self, forKey: .transitions) ?? [:]
-        lanes = try c.decodeIfPresent(Int.self, forKey: .lanes) ?? 1
+        lanes = try c.decodeIfPresent(Int.self, forKey: .lanes) ?? 0
         base = try c.decodeIfPresent(Placement.self, forKey: .base) ?? Placement()
         moves = try c.decodeIfPresent([Move].self, forKey: .moves) ?? []
         volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1
         sounds = try c.decodeIfPresent([Sound].self, forKey: .sounds) ?? []
         soundLanes = try c.decodeIfPresent(Int.self, forKey: .soundLanes) ?? 0
         three = try c.decodeIfPresent(ThreeD.self, forKey: .three) ?? ThreeD()
+        layers = try c.decodeIfPresent([String].self, forKey: .layers)
         // Cuts were once segments: each becomes two splits and a removed part.
         for cut in segments where cut.kind == "cut" {
             splits += [cut.start, cut.end]
@@ -390,46 +399,67 @@ struct Edits: Codable, Equatable {
         }
         segments.removeAll { $0.kind == "cut" }
         splits = Array(Set(splits.filter { $0 > 0.001 })).sorted()
-        frameLanes = try c.decodeIfPresent(Int.self, forKey: .frameLanes) ?? 0
-        if let n = try c.decodeIfPresent(Int.self, forKey: .textLanes) {
-            textLanes = n
-        } else {
-            // Texts and whole-frame effects once shared the effect lanes: each lane that held one
-            // becomes a lane of its own kind, in the same order, and the effect lanes close up.
-            for space in [1, 3, 0] {
-                let used = Array(Set(segments.filter { $0.space == space }.map(\.lane))).sorted()
-                segments = segments.map { s in
-                    guard s.space == space, let i = used.firstIndex(of: s.lane) else { return s }
-                    var m = s; m.lane = i; return m
-                }
-                if space == 0 { lanes = used.count }
+        // @ref LLP 0002#where-an-effect-applies — a file's whole-frame lanes: each of their items takes the first effect lane with room
+        if try decoder.container(keyedBy: Legacy.self).decodeIfPresent(Int.self, forKey: .frameLanes) != nil {
+            let frame = segments.indices.filter { segments[$0].coversFrame }.sorted { (segments[$0].lane, segments[$0].start) < (segments[$1].lane, segments[$1].start) }
+            let video = segments.indices.filter { !segments[$0].coversFrame && segments[$0].space == 0 }.map(\.self)
+            lanes = (video.map { segments[$0].lane }.max() ?? -1) + 1
+            var placed = video
+            for i in frame {
+                var lane = 0
+                while placed.contains(where: { segments[$0].lane == lane && segments[$0].overlaps(segments[i]) }) { lane += 1 }
+                segments[i].lane = lane
+                placed.append(i)
             }
         }
+        textLanes = try c.decodeIfPresent(Int.self, forKey: .textLanes) ?? 0
+        // Texts and whole-frame effects once shared the effect lanes; each kind's lanes now close up on their own,
+        // which is what the counts left out mean too.
         if let n = try c.decodeIfPresent(Int.self, forKey: .imageLanes) {
             imageLanes = n
         } else {
-            // Each image was once a row of its own, the top row in front, read in that order:
-            // each keeps a lane of its own, so the picture stacks as it did.
+            // Each image was once a row of its own, the top row in front, read in that order. Only such a file has two
+            // images on one lane at once: each keeps a lane of its own, so the picture stacks as it did.
             // @ref LLP 0002#images — old files keep one image to a lane
-            let order = segments.enumerated().filter { $0.element.kind == "image" }.sorted { ($0.element.lane, $0.offset) < ($1.element.lane, $1.offset) }
-            for (row, item) in order.enumerated() { segments[item.offset].lane = row }
-            imageLanes = order.count
+            let all = segments.filter { $0.kind == "image" }
+            if all.contains(where: { a in all.contains { $0.id != a.id && $0.lane == a.lane && $0.overlaps(a) } }) {
+                let order = segments.enumerated().filter { $0.element.kind == "image" }.sorted { ($0.element.lane, $0.offset) < ($1.element.lane, $1.offset) }
+                for (row, item) in order.enumerated() { segments[item.offset].lane = row }
+            }
         }
-        fitLanes()
+        compactLanes(itemWins: layers != nil)
     }
 
     /// How many rows there are in a space (`Segment.space`), or of sound lanes (`Edits.soundSpace`).
-    func laneCount(space: Int) -> Int { space == 1 ? textLanes : space == 2 ? imageLanes : space == 3 ? frameLanes : space == Edits.soundSpace ? soundLanes : lanes }
+    func laneCount(space: Int) -> Int { space == 1 ? textLanes : space == 2 ? imageLanes : space == Edits.soundSpace ? soundLanes : lanes }
     /// The sound lanes, counted as one more space after the segments' own.
     static let soundSpace = 4
 
-    /// Enough lanes of each kind for the segments, and at least one effect lane.
+    /// Enough lanes of each kind for the segments, keeping empty ones: while a block is dragged.
     mutating func fitLanes() {
-        lanes = max(lanes, (segments.filter { $0.space == 0 }.map(\.lane).max() ?? -1) + 1, 1)
+        lanes = max(lanes, (segments.filter { $0.space == 0 }.map(\.lane).max() ?? -1) + 1, 0)
         textLanes = max(textLanes, (texts.map(\.lane).max() ?? -1) + 1, 0)
         imageLanes = max(imageLanes, (images.map(\.lane).max() ?? -1) + 1, 0)
-        frameLanes = max(frameLanes, (segments.filter { $0.space == 3 }.map(\.lane).max() ?? -1) + 1, 0)
         soundLanes = max(soundLanes, (sounds.map(\.lane).max() ?? -1) + 1, 0)
+    }
+
+    /// Only the lanes in use, in their order, each count the number of them: an empty lane goes and the
+    /// ones under it move up. The text and image rows keep their place in the stack.
+    // @ref LLP 0002#rows — lanes come from use
+    mutating func compactLanes(itemWins: Bool = false) {
+        func squeeze(_ used: [Int]) -> [Int: Int] {
+            Dictionary(uniqueKeysWithValues: Array(Set(used)).sorted().enumerated().map { ($1, $0) })
+        }
+        let to = squeeze(segments.filter { $0.space == 0 }.map(\.lane))
+        segments = segments.map { s in
+            guard s.space == 0, let l = to[s.lane] else { return s }
+            var m = s; m.lane = l; return m
+        }
+        lanes = to.count
+        settleLayers(itemWins: itemWins)
+        let heard = squeeze(sounds.map(\.lane))
+        sounds = sounds.map { var m = $0; m.lane = heard[$0.lane] ?? $0.lane; return m }
+        soundLanes = heard.count
     }
 
     func fits(_ s: Segment) -> Bool {
@@ -447,7 +477,7 @@ struct Edits: Codable, Equatable {
     /// Images keep their lanes: a template knows nothing of them.
     mutating func pack(_ made: [Segment]) {
         segments = []
-        lanes = 0; textLanes = 0; frameLanes = 0
+        lanes = 0; textLanes = 0
         for var seg in made.sorted(by: { $0.start < $1.start }) {
             if seg.kind != "image" {
                 var lane = 0
@@ -456,7 +486,7 @@ struct Edits: Codable, Equatable {
             }
             segments.append(seg)
         }
-        fitLanes()
+        compactLanes()
     }
 
     static func same(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.0015 }
@@ -478,22 +508,6 @@ struct Edits: Codable, Equatable {
     var texts: [Segment] { segments.filter { $0.kind == "text" } }
     var images: [Segment] { segments.filter { $0.kind == "image" } }
     var masks: [Segment] { segments.filter { $0.kind == "mask" } }
-    /// The texts and images showing at `t`, back to front: the images, the lowest lane in front, then
-    /// the texts over them, in the order they are listed, as they always were.
-    // @ref LLP 0002#images — lane order is the stacking order
-    // @ref LLP 0002#depth — `order` first; a tie keeps the old rule
-    func overlays(at t: Double, behind: Bool = false) -> [Segment] {
-        Edits.depth(segments.filter { $0.isOverlay && $0.isBehind == behind && t >= $0.start && t < $0.end })
-    }
-
-    static func depth(_ items: [Segment]) -> [Segment] {
-        let all = Array(items.enumerated())
-        let images = all.filter { $0.element.kind == "image" }
-            .sorted { ($0.element.order ?? 0, -$0.element.lane, $0.offset) < ($1.element.order ?? 0, -$1.element.lane, $1.offset) }
-        let texts = all.filter { $0.element.kind == "text" }
-            .sorted { ($0.element.order ?? 0, $0.offset) < ($1.element.order ?? 0, $1.offset) }
-        return (images + texts).map(\.element)
-    }
     var turns: [Segment] { segments.filter { $0.kind == "3d" } }
 
     /// The first sound lane where `s` plays alone; one past the last when none has room.
@@ -518,94 +532,6 @@ struct Edits: Codable, Equatable {
             }
         }
         return out.filter { $0.end - $0.start > 0.3 }
-    }
-}
-
-// @ref LLP 0002#depth — one front-to-back stack; arranging moves an item among its own kind in its layer
-extension Edits {
-    static let arrangeSteps: [(step: String, name: String)] = [
-        ("forward", "Bring Forward"), ("backward", "Send Backward"), ("front", "Bring to Front"), ("back", "Send to Back"),
-        ("behind", "Send Behind Video"), ("in-front", "Bring In Front of Video"),
-    ]
-
-    static func arrangeName(_ step: String) -> String? { arrangeSteps.first { $0.step == step }?.name }
-
-    func depthStack(kind: String, behind: Bool) -> [Segment] {
-        Edits.depth(segments.filter { $0.kind == kind && $0.isBehind == behind })
-    }
-
-    func arrangeProblem(_ id: String, _ step: String) -> String? {
-        guard let s = segments.first(where: { $0.id == id }), s.isOverlay else { return "Only a text or an image has a depth." }
-        guard Edits.arrangeName(step) != nil else { return "No arrange step \(step)." }
-        let noun = s.kind == "text" ? "text" : "image", place = s.isBehind ? "behind the video" : "in front of the video"
-        switch step {
-        case "behind": return s.isBehind ? "It is already behind the video." : nil
-        case "in-front": return s.isBehind ? nil : "It is already in front of the video."
-        default:
-            let stack = depthStack(kind: s.kind, behind: s.isBehind)
-            guard let i = stack.firstIndex(where: { $0.id == id }) else { return nil }
-            let others = stack.indices.filter { $0 != i && stack[$0].overlaps(s) }
-            if others.isEmpty { return "No other \(noun) \(place) shows at the same time." }
-            let up = step == "forward" || step == "front"
-            if up, !others.contains(where: { $0 > i }) { return "It is already in front of the other \(noun)s \(place)." }
-            if !up, !others.contains(where: { $0 < i }) { return "It is already behind the other \(noun)s \(place)." }
-            return nil
-        }
-    }
-
-    func arranged(_ id: String, _ step: String) -> Edits? {
-        guard let s = segments.first(where: { $0.id == id }), arrangeProblem(id, step) == nil else { return nil }
-        var next = self
-        for member in Joins.run(s, in: segments) where next.arrangeProblem(member.id, step) == nil {
-            next.arrange(member.id, step)
-        }
-        return next == self ? nil : next
-    }
-
-    private mutating func arrange(_ id: String, _ step: String) {
-        guard let s = segments.first(where: { $0.id == id }) else { return }
-        var stack = depthStack(kind: s.kind, behind: s.isBehind)
-        guard let i = stack.firstIndex(where: { $0.id == id }) else { return }
-        let others = stack.indices.filter { $0 != i && stack[$0].overlaps(s) }
-        switch step {
-        case "behind", "in-front":
-            stack.remove(at: i)
-            restack(stack, kind: s.kind, behind: s.isBehind)
-            var moved = s
-            moved.layer = step == "behind" ? "behind" : nil
-            var into = depthStack(kind: s.kind, behind: step == "behind").filter { $0.id != id }
-            if step == "behind" { into.append(moved) } else { into.insert(moved, at: 0) }
-            replaceItem(moved)
-            restack(into, kind: s.kind, behind: step == "behind")
-            return
-        case "forward":
-            guard let j = others.first(where: { $0 > i }) else { return }
-            stack.insert(stack.remove(at: i), at: j)
-        case "backward":
-            guard let j = others.last(where: { $0 < i }) else { return }
-            stack.insert(stack.remove(at: i), at: j)
-        case "front": stack.append(stack.remove(at: i))
-        case "back": stack.insert(stack.remove(at: i), at: 0)
-        default: return
-        }
-        restack(stack, kind: s.kind, behind: s.isBehind)
-    }
-
-    private mutating func replaceItem(_ s: Segment) {
-        if let k = segments.firstIndex(where: { $0.id == s.id }) { segments[k] = s }
-    }
-
-    private mutating func restack(_ stack: [Segment], kind: String, behind: Bool) {
-        let ids = stack.map(\.id)
-        let plain = Edits.depth(segments.filter { $0.kind == kind && $0.isBehind == behind && ids.contains($0.id) }.map { var p = $0; p.order = nil; return p })
-        let rank = Dictionary(uniqueKeysWithValues: plain.enumerated().map { ($1.id, $0) })
-        let keep = stack.indices.allSatisfy { i in
-            stack.indices.allSatisfy { j in i >= j || !stack[i].overlaps(stack[j]) || rank[stack[i].id, default: 0] < rank[stack[j].id, default: 0] }
-        }
-        for (n, id) in ids.enumerated() {
-            guard let k = segments.firstIndex(where: { $0.id == id }) else { continue }
-            segments[k].order = keep ? nil : n
-        }
     }
 }
 
@@ -1503,11 +1429,15 @@ struct Framing {
     /// The texts and images showing at `t`, over `scene`.
     func overlay(_ scene: CIImage, at t: Double) -> CIImage {
         // @ref LLP 0002#rows — a whole-frame effect covers the images; the words stay readable unless it covers everything
+        // @ref LLP 0005#layers — in row order; a `frame` reach covers up to the front-most image
         var out = cover(scene, after: "video", at: t)
         let over = edits.overlays(at: t)
-        for s in over where s.kind == "image" { out = renderImage(s, at: t).composited(over: out) }
-        out = cover(out, after: "images", at: t)
-        for s in over where s.kind == "text" { out = renderText(s, at: t).composited(over: out) }
+        let lastImage = over.lastIndex { $0.kind == "image" }
+        if lastImage == nil { out = cover(out, after: "images", at: t) }
+        for (i, s) in over.enumerated() {
+            out = (s.kind == "image" ? renderImage(s, at: t) : renderText(s, at: t)).composited(over: out)
+            if i == lastImage { out = cover(out, after: "images", at: t) }
+        }
         out = cover(out, after: "texts", at: t)
         return out.cropped(to: CGRect(origin: .zero, size: canvas))
     }

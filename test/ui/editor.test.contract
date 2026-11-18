@@ -23,13 +23,13 @@ test "an empty recording has one clip part and nothing on it"
   expect state summary.parts == 1
   expect state summary.removed == 0
   expect state summary.effects == 0
-  expect state summary.lanes == 1
+  expect state summary.lanes == 0
   expect state summary.moves == 0
 
 test "a click on a zoom selects it; the inspector sets its level and deletes it"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 275 176 mouse
+  tap "timeline" drag 0 0 from 286 242 mouse
   clock data
   expect text "segment-title" == "Zoom In"
   expect text "start" == "0:01.00"
@@ -49,7 +49,7 @@ test "a click on a zoom selects it; the inspector sets its level and deletes it"
 test "a typed time that clashes says why under its field; Return refuses it and the field goes back"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 275 176 mouse
+  tap "timeline" drag 0 0 from 286 242 mouse
   clock data
   expect text "segment-title" == "Zoom In"
   type "end" "5.5"
@@ -66,7 +66,7 @@ test "a typed time that clashes says why under its field; Return refuses it and 
 test "a click on a mask selects it and shows its style"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 220 212 mouse
+  tap "timeline" drag 0 0 from 233 278 mouse
   clock data
   expect text "segment-title" == "Mask"
   expect state sel.style == "solid"
@@ -77,7 +77,7 @@ test "a click on a mask selects it and shows its style"
 test "a clip part is removed and put back from the inspector"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 220 91 mouse
+  tap "timeline" drag 0 0 from 233 157 mouse
   clock data
   expect text "segment-title" == "Clip Part"
   expect state sel.transition == "crossfade"
@@ -97,7 +97,7 @@ test "Split Clip with the playhead at the start is off and says why"
   expect state summary.parts == 1
   expect state summary.removed == 0
   expect state summary.effects == 0
-  expect state summary.lanes == 1
+  expect state summary.lanes == 0
   expect state summary.moves == 0
 
 test "Split follows the selection; Split All Lanes is off at the start and says why"
@@ -106,7 +106,7 @@ test "Split follows the selection; Split All Lanes is off at the start and says 
   expect state summary.splitLabel == "Split Clip"
   expect disabled "split-all"
   expect state summary.splitAllWhy == "Nothing under the playhead can be split there."
-  tap "timeline" drag 0 0 from 275 176 mouse
+  tap "timeline" drag 0 0 from 286 242 mouse
   clock data
   expect state summary.splitLabel == "Split Zoom"
   expect state summary.canSplit == false
@@ -115,9 +115,9 @@ test "Split follows the selection; Split All Lanes is off at the start and says 
 test "Split Text splits the selected text at the playhead, as one undo step"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 275 12 mouse
+  tap "timeline" drag 0 0 from 286 12 mouse
   clock data
-  tap "timeline" drag 0 0 from 259 314 mouse
+  tap "timeline" drag 0 0 from 271 62 mouse
   clock data
   expect state summary.splitLabel == "Split Text"
   expect state summary.canSplit == true
@@ -177,7 +177,7 @@ test "⌘Z undoes and ⇧⌘Z and ⌘Y redo; a slider scrub is one step"
 test "while a text field has the focus, ⌘Z is the field's"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 259 314 mouse
+  tap "timeline" drag 0 0 from 271 62 mouse
   clock data
   tap "text-words"
   expect state typing == true
@@ -208,7 +208,7 @@ test "Clear Edits asks first, names the recording, and can be undone"
   expect state summary.parts == 1
   expect state summary.removed == 0
   expect state summary.effects == 0
-  expect state summary.lanes == 1
+  expect state summary.lanes == 0
   expect state summary.moves == 0
   expect state summary.undoName == "Clear Edits"
   tap "undo"
@@ -246,7 +246,7 @@ test "the floating settings panel stays on the stage"
   tap "panel-menu-button"
   tap "menu-panel-float"
   clock settle
-  tap "timeline" drag 0 0 from 259 314 mouse
+  tap "timeline" drag 0 0 from 271 62 mouse
   clock data
   expect tree has "float-panel"
   expect text "segment-title" == "Text"
@@ -276,7 +276,7 @@ test "the inspector's sections fold, and the look's controls change look.json"
 test "a click on a text selects it; its words show in the inspector"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 259 314 mouse
+  tap "timeline" drag 0 0 from 271 62 mouse
   clock data
   expect text "segment-title" == "Text"
   expect state sel.text == "Hello"
@@ -324,6 +324,7 @@ test "each area has its own bar: the toolbar the piece, the viewer bar the video
   expect tree has "crop-open"
   expect tree has "clock"
   expect tree has "motion-paths"
+  expect tree has "add"
   expect tree has "split-clip"
   expect disabled "split-all"
   expect tree has "zoom-controls"
@@ -344,7 +345,7 @@ test "the floating settings panel never covers the timeline, however low it is d
   tap "panel-menu-button"
   tap "menu-panel-float"
   clock settle
-  tap "timeline" drag 0 0 from 259 314 mouse
+  tap "timeline" drag 0 0 from 271 62 mouse
   clock data
   expect tree has "float-panel"
   tap "float-grip" drag 0 840
@@ -352,30 +353,21 @@ test "the floating settings panel never covers the timeline, however low it is d
   expect state floatClear == true
   expect state floatH >= 100
 
-test "VIDEO folds to one line with the Clip in it; ON TOP moves up under it, and unfolding puts every row back"
+test "the rows are layers: a text row in front sits over the Video; a click on the Clip, then on the text, selects each"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 40 45 mouse
+  tap "timeline" drag 0 0 from 233 157 mouse
   clock data
-  tap "timeline" drag 0 0 from 259 108 mouse
+  expect text "segment-title" == "Clip Part"
+  tap "timeline" drag 0 0 from 271 62 mouse
   clock data
   expect text "segment-title" == "Text"
   expect state sel.text == "Hello"
-  tap "timeline" drag 0 0 from 40 45 mouse
-  clock data
-  tap "timeline" drag 0 0 from 220 91 mouse
-  clock data
-  expect text "segment-title" == "Clip Part"
-  tap "timeline" drag 0 0 from 259 314 mouse
-  clock data
-  expect text "segment-title" == "Text"
 
 test "a blur's Applies To stack: a click on a layer, the dragged line and Video Only set its reach"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 40 45 mouse
-  clock data
-  tap "timeline" drag 0 0 from 734 273 mouse
+  tap "timeline" drag 0 0 from 735 278 mouse
   clock data
   expect text "segment-title" == "Blur"
   expect state sel.scope == "frame"
@@ -399,13 +391,11 @@ test "a blur's Applies To stack: a click on a layer, the dragged line and Video 
   tap "scope-line"
   clock data
   expect state sel.scope == "scene"
-  tap "timeline" drag 0 0 from 40 45 mouse
-  clock data
 
 test "a text gets a blur and a black and white of its own from its inspector"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 259 314 mouse
+  tap "timeline" drag 0 0 from 271 62 mouse
   clock data
   expect text "segment-title" == "Text"
   tap "text-fx-blur"
@@ -418,7 +408,7 @@ test "a text gets a blur and a black and white of its own from its inspector"
 test "a text's Depth stack sends it behind the video and back; the ⋯ arrange command is one undo step"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 259 314 mouse
+  tap "timeline" drag 0 0 from 271 62 mouse
   clock data
   expect text "segment-title" == "Text"
   expect state sel.layer == "front"
@@ -477,3 +467,10 @@ test "Export refuses unfilled lines and lists them; Show First focuses the first
   tap "export"
   clock until state exportLine == "Saved." within 60000
   expect text "export-line" == "Saved."
+
+test "View › Show Empty Lanes is a view setting, off by default"
+  tap "recording-empty"
+  clock data
+  expect state summary.lanes == 0
+  expect state summary.showEmptyLanes == false
+  expect tree has "menu-empty-lanes"

@@ -177,7 +177,7 @@ All three take `radius` (0–0.5 of the box's short side) for rounded corners.
 ## Whole-frame reach
 
 `blur` and `mono` take a `scope`: a cut in the stack background, video, images, texts (back to
-front). It covers every layer under the cut. Any `scope` but `"video"` sits on the whole-frame lanes.
+front). It covers every layer under the cut. Every reach sits on the effect lanes, as the video's own effects do.
 Still one blur and one black and white at a time, whatever the reach (`one-blur`, `one-mono`): two
 reaches over one moment would cover the lower layers twice. A file from before this rule may hold a
 video blur under a whole-frame one: it opens and plays as it did, and `validate` reports it. To cover
@@ -233,9 +233,9 @@ The default (no `scope`): only the video, as above.
 
 ## Depth
 
-A text's or an image's `layer`: where it sits in the stack texts, images, video, behind the video,
-background (front to back). Its row on the timeline stays where it is. `order` sets which item of the
-same kind and layer is in front (see [edits.md](edits.md#depth-layer-and-order)).
+A text's or an image's `layer`: which side of the video its row is on. The rows of texts and images
+are one stack with the video among them, and their order is the draw order: `layers` lists them front
+to back (see [edits.md](edits.md#depth-layers-and-layer)).
 
 ### `front`
 

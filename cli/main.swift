@@ -231,18 +231,11 @@ func findings(_ r: Recording) -> [Problem] {
     func rules(_ ref: ItemRef) {
         for c in broken where c.item == ref || ((ref.kind == "image" || ref.kind == "text") && c.item?.image == ref.id) { out.append(Problem(text: report(c, e, map: map), key: c.key)) }
     }
-    // Opening a file raises each lane count to fit, so the counts are checked as the file declares them.
-    // A missing count is derived, as is `lanes` in an old file without `textLanes`: its lanes are renumbered.
-    let raw = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("edits.json")))) as? [String: Any]) ?? [:]
-    func count(_ key: String, _ fitted: Int) -> Int { key == "lanes" && raw["textLanes"] == nil ? fitted : (raw[key] as? Int) ?? fitted }
     for s in e.segments {
         let at = "\(s.kind) \(s.id) (\(stamp(s.start))–\(stamp(s.end)))"
         if !Segment.kinds.contains(s.kind) { say("\(at): unknown kind; one of \(Segment.kinds.joined(separator: ", "))") }
         if s.end - s.start < 0.1 { say(report(Rules.minLength(.of(s), duration: d), e, map: map)) }
         if s.start < 0 || s.end > d + 0.01 { say("\(at): outside the recording, 0:00–\(stamp(d))") }
-        if case let key = ["lanes", "textLanes", "imageLanes", "frameLanes"][s.space], s.lane < 0 || s.lane >= count(key, e.laneCount(space: s.space)) {
-            say("\(at): lane \(s.lane), but \(key) is \(count(key, e.laneCount(space: s.space)))")
-        }
         if s.id.contains(":") { say("\(at): an id can't contain a colon") }
         if e.segments.filter({ $0.id == s.id }).count > 1 { say("\(at): another segment has the same id") }
         rules(.of(s))
@@ -295,7 +288,6 @@ func findings(_ r: Recording) -> [Problem] {
         if s.length <= 0 { say("\(at): length must be above 0") }
         if s.offset < 0 { say("\(at): offset can't be below 0") }
         if s.start < 0 || s.start >= d { say("\(at): starts outside the recording, 0:00–\(stamp(d))") }
-        if s.lane < 0 || s.lane >= count("soundLanes", e.soundLanes) { say("\(at): lane \(s.lane), but soundLanes is \(count("soundLanes", e.soundLanes))") }
         if !(0...1).contains(s.volume) { say("\(at): volume must be 0–1") }
         if s.fadeIn < 0 || s.fadeOut < 0 { say("\(at): fades can't be below 0") }
         rules(.sound(s))
@@ -315,6 +307,24 @@ func findings(_ r: Recording) -> [Problem] {
 }
 
 
+
+/// The lane counts a file declares that differ from the lanes in use: notes, never a failure.
+// @ref LLP 0002#rows — lanes come from use; the app writes the counts
+func laneNotes(_ r: Recording) -> [String] {
+    let raw = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: r.folder.appendingPathComponent("edits.json")))) as? [String: Any]) ?? [:]
+    let e = r.edits
+    let used = ["lanes": e.lanes, "textLanes": e.textLanes, "imageLanes": e.imageLanes, "soundLanes": e.soundLanes]
+    // @ref LLP 0005#layers — a row the file names that is not one, or names twice, is left out when it is read
+    var seen = Set<String>()
+    let bad = ((raw["layers"] as? [Any]) ?? []).compactMap { entry -> String? in
+        guard let key = entry as? String, LayerRow(key: key) != nil else { return "layers: \(entry) is not a row; a row is \"video\", \"text:<lane>\" or \"image:<lane>\"" }
+        return seen.insert(key).inserted ? nil : "layers: \(key) is named twice; the first is kept"
+    }
+    return bad + used.keys.sorted().compactMap { key in
+        guard let declared = raw[key] as? Int, declared != used[key], key != "lanes" || raw["textLanes"] != nil else { return nil }
+        return "\(key) is \(declared); \(used[key]!) \(used[key] == 1 ? "is" : "are") in use. Leave the counts out: lanes come from use."
+    }
+}
 
 // MARK: Recording, through the app
 
@@ -435,7 +445,11 @@ case "show":
         let t = r.edits.transitions[Edits.key(p.end)].map { " → \($0)" } ?? ""
         print("  \(stamp(p.start))–\(stamp(p.end))\(p.removed ? "  removed" : "")\(t)")
     }
-    print("segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front), f a whole-frame lane):")
+    // @ref LLP 0005#layers
+    if r.edits.segments.contains(where: \.isOverlay) {
+        print("layers, front to back: \(r.edits.stack().map { $0.isVideo ? "video" : "\($0.kind == "text" ? "t" : "i")\($0.lane)" }.joined(separator: ", "))")
+    }
+    print("segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane; t0 and i0 the front ones):")
     for s in r.edits.segments.sorted(by: { ($0.space, $0.lane, $0.start) < ($1.space, $1.lane, $1.start) }) {
         var what = s.kind
         switch s.kind {
@@ -458,7 +472,7 @@ case "show":
         }
         if s.isOverlay, s.isBehind { what += "  behind the video" }
         if s.isOverlay, let n = s.order { what += "  order \(n)" }
-        print("  \(["e", "t", "i", "f"][s.space])\(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]\(joins(s, r.edits.segments))")
+        print("  \(["e", "t", "i"][s.space])\(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]\(joins(s, r.edits.segments))")
         // An image's own moves and effects, or a text's own effects, under it.
         for m in (s.moves ?? []).sorted(by: { $0.t < $1.t }) {
             print("        move lands \(stamp(m.t)) after \(m.duration)s \(m.style): x \(m.to.x) y \(m.to.y) scale \(m.to.scale)  [\(m.id)]")
@@ -493,6 +507,7 @@ case "validate":
     let standing = found.filter { $0.key.map(before.contains) ?? false }, fresh = found.filter { !($0.key.map(before.contains) ?? false) }
     if fresh.isEmpty { print("ok") } else { fresh.forEach { print($0.text) } }
     standing.forEach { print("note: before this change: \($0.text)") }
+    laneNotes(r).forEach { print("note: \($0)") }
     if !fresh.isEmpty { exit(1) }
 
 case "frame":

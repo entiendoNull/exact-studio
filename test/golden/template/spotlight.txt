@@ -3,6 +3,7 @@ recorded 0:30.00, plays as 0:30.00; 7 clicks; folder <library>/len30-16x9
 look: graphite background, 16:9, padding 8%, 3D off
 clip parts:
   0:00.00–0:30.00
-segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front), f a whole-frame lane):
+layers, front to back: t0, video
+segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane; t0 and i0 the front ones):
   e0: 0:25.00–0:27.80  zoom 1.6×  [spotlight-z2]
   t0: 0:00.20–0:04.00  text “Line” shadow in:rise out:fade  [spotlight-t1]

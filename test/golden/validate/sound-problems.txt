@@ -7,4 +7,4 @@ sound gone (0:12.00, 0.0s of sounds/none.wav): sounds/none.wav is not a readable
 sound gone (0:12.00, 0.0s of sounds/none.wav): length must be above 0
 sound gone (0:12.00, 0.0s of sounds/none.wav): offset can't be below 0
 sound gone (0:12.00, 0.0s of sounds/none.wav): starts outside the recording, 0:00–0:10.00
-sound gone (0:12.00, 0.0s of sounds/none.wav): lane 1, but soundLanes is 1
+note: soundLanes is 1; 2 are in use. Leave the counts out: lanes come from use.

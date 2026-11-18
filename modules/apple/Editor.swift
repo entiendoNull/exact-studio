@@ -34,6 +34,8 @@ final class Editor {
     private var playing: NSKeyValueObservation?
     /// Said when the selection, an edit or the play state changes: the module turns it into a watched topic.
     var onChange: () -> Void = {}
+    /// Opens + Add where the timeline shows it.
+    var onAddMenu: () -> Void = {}
 
     var folder: URL { Library.recordings.appendingPathComponent(id) }
     var duration: Double { min(meta.duration, asset.duration.seconds.isFinite ? asset.duration.seconds : meta.duration) }
@@ -42,6 +44,7 @@ final class Editor {
 
     init?(id: String) {
         guard let meta = Library.meta(id) else { return nil }
+        Settings.dropOldFolds()
         CursorArt.prepare()
         self.id = id
         self.meta = meta
@@ -517,7 +520,7 @@ final class Editor {
     private var baseline: Edits { dragOrigin ?? committed?.edits ?? edits }
 
     // @ref LLP 0002#what-may-overlap — a taken lane is never a refusal in the app
-    private func settle(_ proposed: Edits) -> Edits {
+    private func settle(_ proposed: Edits, compact: Bool = true) -> Edits {
         var next = proposed
         // @ref LLP 0002#split — a half moved or resized away from the other is no longer joined
         next.dropLooseJoins(map: TimeMap(duration: duration, edits: next))
@@ -529,7 +532,8 @@ final class Editor {
                   let mover = [c.item, c.other].compactMap({ $0 }).first(where: changed.contains) else { break }
             Editor.relane(&next, mover, map: map)
         }
-        next.fitLanes()
+        // @ref LLP 0002#rows — lanes come from use; a drag in progress keeps them so the rows stay under the pointer
+        if compact { next.compactLanes() } else { next.fitLanes() }
         return next
     }
 
@@ -630,9 +634,7 @@ final class Editor {
             recentImages.removeAll { $0 == item.id }
             recentImages.insert(item.id, at: 0)
         }
-        if let s = selectedSegment ?? selectedItem { reveal(space: s.space) }
-        else if selectedSound != nil { reveal(space: Edits.soundSpace) }
-        else if selectedPiece != nil || selectedMove != nil || id == Editor.recordedSound { reveal(space: 0) }
+        if !clipOpen, selectedMove != nil || selectedSegment?.space == 0 { Settings.store.set(false, forKey: Settings.clipFoldedKey) }
         notify()
     }
 
@@ -750,26 +752,33 @@ final class Editor {
         var s = segment
         var next = edits
         s.lane = next.freeLane(for: s)
-        if let want = wantLane, want < next.laneCount(space: s.space) {
+        if let want = wantLane, want <= next.laneCount(space: s.space) {
             var there = s
             there.lane = want
             if next.fits(there) { s.lane = want }
         }
         next.segments.append(s)
         next.fitLanes()
-        reveal(space: s.space)
         if apply(next) { select(s.id) }
     }
 
     // MARK: Images
     // @ref LLP 0002#images — images share lanes; each has its own moves and effects
 
-    /// The image lanes and the text lanes open in the timeline, and the groups folded away: "video" (the Clip and every
-    /// row under it), "top" (texts and images), "sound" and "frame". How the timeline looks, not part of the edit.
-    private(set) var openImageLanes: Set<Int> = []
-    private(set) var openTextLanes: Set<Int> = []
-    private(set) var folded = Settings.folded
-    var videoOpen: Bool { !folded.contains("video") }
+    /// The image lanes and the text lanes open in the timeline. How the timeline looks, not part of the edit.
+    /// The items whose lane is open: kept by item, so a lane renumbered when the stack changes stays open.
+    private var openItems: Set<String> = []
+    var openImageLanes: Set<Int> { openLanes("image") }
+    var openTextLanes: Set<Int> { openLanes("text") }
+    private func openLanes(_ kind: String) -> Set<Int> { Set(edits.segments.filter { $0.kind == kind && openItems.contains($0.id) }.map(\.lane)) }
+    /// Whether the Clip shows its Moves and Effects rows. How the timeline looks, kept between launches.
+    // @ref LLP 0005#layers — the Clip's rows fold with it
+    var clipOpen: Bool { !Settings.store.bool(forKey: Settings.clipFoldedKey) }
+
+    func toggleClip() {
+        Settings.store.set(clipOpen, forKey: Settings.clipFoldedKey)
+        redrawViews()
+    }
     /// The images and texts selected so far, the last one first.
     private var recentImages: [String] = []
 
@@ -777,18 +786,17 @@ final class Editor {
 
     /// Open or fold an image lane (space 2) or a text lane (space 1): open, it shows one item's own rows.
     func toggleLane(space: Int, _ lane: Int) {
-        if space == 1 {
-            if openTextLanes.contains(lane) { openTextLanes.remove(lane) } else { openTextLanes.insert(lane) }
-        } else {
-            if openImageLanes.contains(lane) { openImageLanes.remove(lane) } else { openImageLanes.insert(lane) }
-        }
+        let kind = space == 1 ? "text" : "image", on = Set(edits.segments.filter { $0.kind == kind && $0.lane == lane }.map(\.id))
+        if openLanes(kind).contains(lane) { openItems.subtract(on) } else { openItems.formUnion(on) }
         redrawViews()
     }
 
     func isOpen(space: Int, lane: Int) -> Bool { space == 1 ? openTextLanes.contains(lane) : space == 2 && openImageLanes.contains(lane) }
 
     private func open(_ item: Segment) {
-        if item.kind == "text" { openTextLanes.insert(item.lane) } else if item.kind == "image" { openImageLanes.insert(item.lane) }
+        guard item.isOverlay else { return }
+        openItems.formUnion(edits.segments.filter { $0.kind == item.kind && $0.lane == item.lane }.map(\.id))
+        openItems.insert(item.id)
     }
 
     func currentImage(lane: Int) -> Segment? { currentItem(space: 2, lane: lane) }
@@ -802,19 +810,6 @@ final class Editor {
         if let s = selectedItem, let hit = on.first(where: { $0.id == s.id }) { return hit }
         if let id = recentImages.first(where: { id in on.contains { $0.id == id } }) { return on.first { $0.id == id } }
         return on.first { playhead >= $0.start && playhead < $0.end } ?? on.first
-    }
-
-    func toggle(group: String) {
-        if folded.contains(group) { folded.remove(group) } else { folded.insert(group) }
-        Settings.store.set(folded.sorted(), forKey: Settings.foldedKey)
-        redrawViews()
-    }
-
-    /// The group a selection or a new segment shows in opens, so it is never out of sight.
-    private func reveal(space: Int) {
-        guard !probing else { return }
-        let group = space == 0 ? "video" : space == 3 ? "frame" : space == Edits.soundSpace ? "sound" : "top"
-        if folded.contains(group) { toggle(group: group) }
     }
 
     // MARK: Timeline zoom
@@ -846,6 +841,15 @@ final class Editor {
         let at = playhead >= zoomStart && playhead <= zoomStart + span ? playhead : zoomStart + span / 2
         let next = min(max(zoom * factor, 1), max(zoomMax, 1))
         setZoom(next, start: at - (at - zoomStart) * zoom / next)
+    }
+
+    // @ref LLP 0002#rows — a view setting, never in edits.json
+    var showEmptyLanes: Bool { Settings.showEmptyLanes }
+
+    func setShowEmptyLanes(_ on: Bool) {
+        Settings.showEmptyLanes = on
+        redrawViews()
+        onChange()
     }
 
     func setWheelZoom(_ on: Bool) {
@@ -1122,14 +1126,13 @@ final class Editor {
             }
             var next = edits
             s.lane = next.freeLane(for: s, map: map)
-            if let want = wantLane, want < next.soundLanes {
+            if let want = wantLane, want <= next.soundLanes {
                 var there = s
                 there.lane = want
                 if next.conflict(there, map: map) == nil { s.lane = want }
             }
             next.sounds.append(s)
             next.fitLanes()
-            reveal(space: Edits.soundSpace)
             if apply(next) { select(Editor.soundID(s.id)) }
         } catch { refuse((error as? Sounds.Refused)?.why ?? "Couldn’t add that sound.") }
     }
@@ -1191,31 +1194,7 @@ final class Editor {
         apply(next)
     }
 
-    /// A new empty lane in a space (`Segment.space`): 0 for the video's effects, 1 for texts, 2 for images, 3 for whole-frame effects.
-    func addLane(space: Int = 0) {
-        var next = edits
-        switch space {
-        case 1: next.textLanes += 1
-        case 2: next.imageLanes += 1
-        case 3: next.frameLanes += 1
-        case Edits.soundSpace: next.soundLanes += 1
-        default: next.lanes += 1
-        }
-        reveal(space: space)
-        apply(next)
-    }
-
     // @ref LLP 0005#the-lane-menu
-    private static func setLaneCount(_ e: inout Edits, space: Int, _ n: Int) {
-        switch space {
-        case 1: e.textLanes = n
-        case 2: e.imageLanes = n
-        case 3: e.frameLanes = n
-        case Edits.soundSpace: e.soundLanes = n
-        default: e.lanes = n
-        }
-    }
-
     private static func relane(_ e: inout Edits, space: Int, _ map: (Int) -> Int?) {
         e.segments = e.segments.compactMap { s in
             guard s.space == space else { return s }
@@ -1230,31 +1209,26 @@ final class Editor {
         }
     }
 
-    private func relaneOpen(space: Int, _ map: (Int) -> Int?) {
-        if space == 1 { openTextLanes = Set(openTextLanes.compactMap(map)) }
-        else if space == 2 { openImageLanes = Set(openImageLanes.compactMap(map)) }
-        else { return }
-        redrawViews()
-    }
-
-    func insertLane(space: Int, at index: Int) {
-        let count = edits.laneCount(space: space)
-        let at = min(max(index, 0), count)
-        var next = edits
-        Editor.setLaneCount(&next, space: space, count + 1)
-        let shift = { (l: Int) -> Int? in l >= at ? l + 1 : l }
-        Editor.relane(&next, space: space, shift)
-        reveal(space: space)
-        if named("New \(TimelineMenus.kindName(space)) Lane", { apply(next) }) { relaneOpen(space: space, shift) }
+    /// Drag a text or image row by its label to a place in the stack (counted before it is taken out).
+    // @ref LLP 0005#layers
+    func moveLayer(_ row: LayerRow, to index: Int) {
+        guard let next = edits.movingRow(row, to: index) else { return }
+        named(row.kind == "text" ? "Move Text Layer" : "Move Image Layer") { apply(next) }
     }
 
     func moveLane(_ lane: Int, space: Int, by step: Int) {
+        // @ref LLP 0005#layers — a text or image row steps through the stack, past the video too
+        if space == 1 || space == 2 {
+            guard let next = edits.steppingRow(LayerRow(kind: space == 1 ? "text" : "image", lane: lane), by: step) else { return }
+            named(step < 0 ? "Move Lane Up" : "Move Lane Down") { apply(next) }
+            return
+        }
         let other = lane + step
         guard lane >= 0, other >= 0, lane < edits.laneCount(space: space), other < edits.laneCount(space: space), lane != other else { return }
         var next = edits
         let swap = { (l: Int) -> Int? in l == lane ? other : l == other ? lane : l }
         Editor.relane(&next, space: space, swap)
-        if named(step < 0 ? "Move Lane Up" : "Move Lane Down", { apply(next) }) { relaneOpen(space: space, swap) }
+        named(step < 0 ? "Move Lane Up" : "Move Lane Down") { apply(next) }
     }
 
     func laneItems(_ lane: Int, space: Int) -> Int {
@@ -1264,13 +1238,12 @@ final class Editor {
 
     func deleteLane(_ lane: Int, space: Int) {
         let count = edits.laneCount(space: space)
-        guard lane >= 0, lane < count, space != 0 || count > 1 else { return }
+        guard lane >= 0, lane < count else { return }
         var next = edits
-        Editor.setLaneCount(&next, space: space, count - 1)
-        let drop = { (l: Int) -> Int? in l == lane ? nil : l > lane ? l - 1 : l }
+        // A text or image lane is a row of the stack, named by its number: the others keep theirs until it settles.
+        let drop = { (l: Int) -> Int? in l == lane ? nil : space == 1 || space == 2 || l < lane ? l : l - 1 }
         Editor.relane(&next, space: space, drop)
         if named("Delete Lane", { apply(next) }) {
-            relaneOpen(space: space, drop)
             dropGoneSelection()
             notify()
         }
@@ -1280,7 +1253,6 @@ final class Editor {
     /// a visual effect) another visual kind.
     func setValue(number: Double?, kind: String?) {
         guard var s = selectedSegment else { return }
-        let was = s.space
         if s.kind == "zoom", let n = number { s.level = n }
         if s.kind == "speed", let n = number { s.rate = n }
         if Segment.visual.contains(s.kind), let k = kind, Segment.visual.contains(k) {
@@ -1288,19 +1260,8 @@ final class Editor {
             // Spotlight and cursor highlight follow the cursor on the video: they have no reach.
             if k != "blur" && k != "mono" { s.scope = nil }
         }
-        s.space != was ? relaneTo(s) : replace(s)
+        replace(s)
         sampleSegment(s, part: "in")
-    }
-
-    /// Put `s` on the first free lane of its space, as when its reach takes it to the other lanes.
-    private func relaneTo(_ segment: Segment) {
-        var s = segment
-        var next = edits
-        next.segments.removeAll { $0.id == s.id }
-        s.lane = next.freeLane(for: s)
-        next.segments.append(s)
-        next.fitLanes()
-        apply(next)
     }
 
     /// Set one field of the selected text, or ("add-effect") give it an effect of its own.
@@ -1509,7 +1470,6 @@ final class Editor {
         var lane = 0
         while zooms.contains(where: { z in next.segments.contains { $0.space == 0 && $0.lane == lane && $0.overlaps(z) } }) { lane += 1 }
         zooms = zooms.map { var z = $0; z.lane = lane; return z }
-        next.lanes = max(next.lanes, lane + 1)
         next.segments += zooms
         apply(next)
         select("")
@@ -1523,12 +1483,9 @@ final class Editor {
         let n = Double(value)
         switch field {
         case "scope":
-            // Between the video's lanes and the whole-frame lanes: it lands on the first free one there.
-            // @ref LLP 0002#where-an-effect-applies
+            // @ref LLP 0002#where-an-effect-applies — a reach changes what it covers, never its row
             guard s.kind == "blur" || s.kind == "mono", Segment.scopes.contains(value) else { return }
-            let was = s.space
             s.scope = value == "video" ? nil : value
-            if s.space != was { return relaneTo(s) }
         case "pose": let a = Editor.pose(value); s.tilt = a.tilt; s.turn = a.turn; s.roll = a.roll
         case "tilt": if let n { s.tilt = min(max(n, -80), 80) }
         case "turn": if let n { s.turn = min(max(n, -80), 80) }
@@ -1706,7 +1663,6 @@ final class Editor {
         let m = Move(id: Editor.newID("m"), t: playhead, to: placementNow, style: lastStyle, duration: lastDuration)
         var next = edits
         next.moves.append(m)
-        reveal(space: 0)
         apply(next)
         select("m:" + m.id)
     }
@@ -1876,14 +1832,37 @@ final class Editor {
         guard let origin = dragOrigin else { return moved }
         moved.segments = moved.segments.map { $0.isOverlay ? Editor.tidy($0) : $0 }
         moved.lanes = origin.lanes; moved.textLanes = origin.textLanes; moved.imageLanes = origin.imageLanes
-        moved.frameLanes = origin.frameLanes; moved.soundLanes = origin.soundLanes
+        moved.soundLanes = origin.soundLanes
+        if let ref = dragCheck?.item { Editor.fall(&moved, ref, map: TimeMap(duration: duration, edits: moved)) }
         moved.fitLanes()
         return moved
     }
 
+    /// A dropped block goes up to the first lane of its kind with room, so a lane holds what overlaps and no more.
+    /// An image keeps the lane it is dropped on: its lane is its place in the draw order.
+    // @ref LLP 0002#rows — a second lane of a kind exists only while two of its items overlap
+    private static func fall(_ e: inout Edits, _ ref: ItemRef, map: TimeMap) {
+        switch ref.kind {
+        case "image", "text", "move", "image-move": return
+        case "sound":
+            guard let i = e.sounds.firstIndex(where: { $0.id == ref.id }) else { return }
+            e.sounds[i].lane = min(e.sounds[i].lane, e.freeLane(for: e.sounds[i], map: map))
+        case "image-effect":
+            guard let i = e.segments.firstIndex(where: { $0.id == ref.image }), var fx = e.segments[i].effects,
+                  let j = fx.firstIndex(where: { $0.id == ref.id }) else { return }
+            var row = 0
+            while row < fx[j].lane, fx.contains(where: { $0.id != ref.id && $0.lane == row && $0.overlaps(fx[j]) }) { row += 1 }
+            fx[j].lane = row
+            e.segments[i].effects = fx
+        default:
+            guard let i = e.segments.firstIndex(where: { $0.id == ref.id }) else { return }
+            e.segments[i].lane = min(e.segments[i].lane, e.freeLane(for: e.segments[i]))
+        }
+    }
+
     // @ref LLP 0005#refusals — the check runs on every drag step, not only on the drop
     private func check(_ ref: ItemRef) {
-        let next = settle(dropped())
+        let next = settle(dropped(), compact: false)
         let conflict = Editor.newConflict(next, since: baseline, duration: duration)
         func lane(_ e: Edits) -> Int? {
             switch ref.kind {
@@ -2038,7 +2017,7 @@ final class Editor {
 
     var summary: [String: Any] {
         let parts = pieces
-        return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes + edits.textLanes + edits.imageLanes + edits.frameLanes, "images": edits.images.count,
+        return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes + edits.textLanes + edits.imageLanes + edits.soundLanes, "images": edits.images.count,
                 "moves": edits.moves.count, "length": map.outputDuration, "source": duration, "playing": isPlaying,
                 "device": meta.isDevice, "found": meta.device == true, "cursorDrawn": meta.drawsCursor,
                 "baseScale": (edits.base.scale * 100).rounded(), "undoName": undoName, "redoName": redoName,
@@ -2047,7 +2026,7 @@ final class Editor {
                 "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),
                 "angleMove": (selectedMove ?? angleMove).map { Editor.stamp($0.t) } ?? "",
                 "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge,
-                "zoomed": zoomed, "wheelZoom": wheelZoom,
+                "zoomed": zoomed, "wheelZoom": wheelZoom, "showEmptyLanes": showEmptyLanes,
                 "splitLabel": splitLabel, "canSplit": splitProblem.isEmpty, "splitWhy": splitProblem,
                 "canSplitAll": splitAllProblem.isEmpty, "splitAllWhy": splitAllProblem]
     }
@@ -2183,8 +2162,10 @@ enum History {
         }
         if e == ["removed"] { return b.edits.removed.count > a.edits.removed.count ? "Remove Part" : "Restore Part" }
         if e == ["transitions"] { return "Transition" }
-        if e.isSubset(of: ["segments", "lanes", "textLanes", "imageLanes", "frameLanes"]) {
-            let c = changed(a.edits.segments, b.edits.segments, id: \.id)
+        if e.isSubset(of: ["segments", "lanes", "textLanes", "imageLanes", "layers"]) {
+            var c = changed(a.edits.segments, b.edits.segments, id: \.id)
+            // A row that moves up or down for a new one is not a change of its own.
+            if !c.added.isEmpty || !c.removed.isEmpty { c.changed = c.changed.filter { !Set(fields($0.0, $0.1)).isSubset(of: ["lane", "layer"]) } }
             if c.added.count == 1, c.removed.isEmpty, c.changed.count == 1, c.changed[0].1.kind == c.added[0].kind { return "Split " + kindName(c.added[0].kind) }
             if c.added.count == 1, c.removed.isEmpty { return "Add " + kindName(c.added[0].kind) }
             if c.removed.count == 1, c.added.isEmpty { return "Remove " + kindName(c.removed[0].kind) }
@@ -2192,7 +2173,7 @@ enum History {
                 let (x, y) = c.changed[0]
                 return segmentName(x, y)
             }
-            if c.added.isEmpty, c.removed.isEmpty, c.changed.isEmpty { return b.edits.lanes + b.edits.textLanes + b.edits.imageLanes + b.edits.frameLanes > a.edits.lanes + a.edits.textLanes + a.edits.imageLanes + a.edits.frameLanes ? "Add Lane" : "Remove Lane" }
+            if c.added.isEmpty, c.removed.isEmpty, c.changed.isEmpty { return b.edits.lanes + b.edits.textLanes + b.edits.imageLanes > a.edits.lanes + a.edits.textLanes + a.edits.imageLanes ? "Add Lane" : "Remove Lane" }
             return "Edit"
         }
         if e == ["moves"] || e == ["moves", "three"] {

@@ -121,6 +121,7 @@ shape Summary
   edge: string
   zoomed: bool
   wheelZoom: bool
+  showEmptyLanes: bool
   splitLabel: string
   canSplit: bool
   splitWhy: string
@@ -673,6 +674,11 @@ component ExactStudio
                     column width=56 height=5 border-radius=3 background-color="-exact-tertiary-label"
                   row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" resize=lowerBarSized testId="timeline-bar"
                     row gap=8 align-items="center"
+                      // @ref LLP 0005#add-where-it-goes — the one way in: every kind of thing, at the playhead
+                      button press=editDo("add-menu") buttonStyle="filled" title="Add a text, an image, a zoom, an effect, a move or a sound at the playhead" testId="add"
+                        image "symbol:sf/plus"
+                        text "Add"
+                      column width=1 height=22 background-color="-exact-separator"
                       button press=editDo("split") disabled=(not summary.canSplit) buttonStyle="bordered" title=(summary.canSplit ? `${summary.splitLabel} at the playhead (S)` : summary.splitWhy) testId="split-clip"
                         image "symbol:sf/scissors"
                         text summary.splitLabel
@@ -742,6 +748,9 @@ component ExactStudio
                       text "Clear Edits…"
                     button press=askRemove(selected) -exact-menu="file" aria-label="Delete Recording…" testId="menu-delete"
                       text "Delete Recording…"
+                    // @ref LLP 0002#rows — a view setting, as Motion Paths is
+                    button press=zoomTimeline("empty-lanes") -exact-menu="view" aria-label="Show Empty Lanes" aria-pressed=summary.showEmptyLanes aria-selected=summary.showEmptyLanes testId="menu-empty-lanes"
+                      text "Show Empty Lanes"
                     // @ref LLP 0005#depth — Exact adds no menu of its own, so the arrange commands sit in Edit
                     button press=arrange("forward") -exact-menu="edit" disabled=(not sel.canForward) aria-label="Bring Forward" testId="menu-arrange-forward"
                       text "Bring Forward"
@@ -1272,7 +1281,17 @@ component SettingsCard
             option "Blur out" value="blur"
             option "None" value="none"
         text "Drag the image in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
-        text "To animate it or add an effect to it, use the + on its Position and Effects rows in the timeline." font="-exact-caption1" color="-exact-tertiary-label"
+        // @ref LLP 0002#rows — its own Moves and Effects rows appear with what they hold
+        row gap=8
+          button press=imageField("add-move", "") buttonStyle="bordered" flex=1 testId="image-add-move"
+            text "Add Move"
+          button popovertarget="image-fx-menu" buttonStyle="bordered" flex=1 testId="image-add-effect"
+            text "Add Effect"
+          column id="image-fx-menu" popover="auto" role="menu" aria-label="Add an effect to this image"
+            for k in ["blur", "mono", "fade", "pulse", "float", "wiggle"] key=k
+              button press=imageField("add-effect", k) popovertarget="image-fx-menu" popovertargetaction="hide" testId=`image-fx-${k}`
+                text imageFxLabel(k)
+        text "Each adds a row under the image's lane, at the playhead." font="-exact-caption1" color="-exact-tertiary-label"
       // @ref LLP 0005#depth — the Applies-to stack again, with this item as the line
       if sel.layer != ""
         column gap=10 testId="depth"

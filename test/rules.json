@@ -11,12 +11,7 @@
           "lane": 0,
           "level": 2
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -36,12 +31,7 @@
           "lane": 1,
           "level": 0.7
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "zoom b",
     "line1": "One zoom at a time.",
@@ -60,12 +50,7 @@
           "lane": 0,
           "rate": 2
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -85,12 +70,7 @@
           "lane": 1,
           "rate": 0.5
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "speed b",
     "line1": "One speed at a time.",
@@ -109,12 +89,7 @@
           "lane": 0,
           "style": "hold"
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -134,12 +109,7 @@
           "lane": 1,
           "style": "orbit"
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "3d b",
     "line1": "One 3D turn at once.",
@@ -157,12 +127,7 @@
           "end": 3,
           "lane": 0
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -180,12 +145,7 @@
           "end": 4,
           "lane": 1
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "spotlight b",
     "line1": "One spotlight at a time.",
@@ -203,12 +163,7 @@
           "end": 3,
           "lane": 0
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -226,12 +181,7 @@
           "end": 4,
           "lane": 1
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "highlight b",
     "line1": "One highlight at a time.",
@@ -249,12 +199,7 @@
           "end": 3,
           "lane": 0
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -273,12 +218,7 @@
           "lane": 0,
           "scope": "frame"
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 1,
-      "soundLanes": 0
+      ]
     },
     "item": "blur b",
     "line1": "One blur at a time.",
@@ -297,12 +237,7 @@
           "lane": 0,
           "scope": "background"
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 2,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -322,12 +257,7 @@
           "lane": 1,
           "scope": "scene"
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 2,
-      "soundLanes": 0
+      ]
     },
     "item": "mono b",
     "line1": "One black & white at once.",
@@ -346,12 +276,7 @@
           "lane": 0,
           "style": "orbit"
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -371,12 +296,7 @@
           "lane": 1,
           "level": 2
         }
-      ],
-      "lanes": 2,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "zoom z",
     "line1": "No zoom during an orbit.",
@@ -387,11 +307,6 @@
     "rule": "move-after-move",
     "before": {
       "segments": [],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0,
       "moves": [
         {
           "id": "a",
@@ -406,11 +321,6 @@
     },
     "after": {
       "segments": [],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0,
       "moves": [
         {
           "id": "a",
@@ -450,12 +360,7 @@
           "end": 3,
           "lane": 0
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -473,12 +378,7 @@
           "end": 4,
           "lane": 0
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "highlight b",
     "line1": "That lane is taken.",
@@ -506,12 +406,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 1,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -540,12 +435,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 1,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "image i (0:02.00–0:06.00): its pulse effect e2",
     "line1": "One of each per image.",
@@ -574,12 +464,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 1,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -601,12 +486,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 1,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "image i (0:02.00–0:06.00): its blur effect e1",
     "line1": "Keep it inside the image.",
@@ -635,12 +515,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 1,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -662,12 +537,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 1,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "image i (0:02.00–0:06.00): its sparkle effect e1",
     "line1": "No such image effect.",
@@ -686,12 +556,7 @@
           "end": 3,
           "lane": 0
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -702,12 +567,7 @@
           "end": 1.05,
           "lane": 0
         }
-      ],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "spotlight a",
     "line1": "Too short.",
@@ -718,11 +578,6 @@
     "app": "toggleRemoved",
     "before": {
       "segments": [],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0,
       "splits": [
         5
       ],
@@ -732,11 +587,6 @@
     },
     "after": {
       "segments": [],
-      "lanes": 1,
-      "textLanes": 0,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0,
       "splits": [
         5
       ],
@@ -771,12 +621,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 1,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -804,12 +649,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 1,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "text t (0:01.00–0:06.00): its blur effect e2",
     "line1": "One of each per text.",
@@ -838,12 +678,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 1,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -865,12 +700,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 1,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "text t (0:01.00–0:06.00): its fade effect e1",
     "line1": "Keep it inside the text.",
@@ -898,12 +728,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 1,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "after": {
       "segments": [
@@ -924,12 +749,7 @@
             }
           ]
         }
-      ],
-      "lanes": 1,
-      "textLanes": 1,
-      "imageLanes": 0,
-      "frameLanes": 0,
-      "soundLanes": 0
+      ]
     },
     "item": "text t (0:01.00–0:06.00): its pulse effect e1",
     "line1": "No such text effect.",
