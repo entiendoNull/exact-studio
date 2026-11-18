@@ -1504,6 +1504,37 @@ func differ(_ a: [UInt8], _ b: [UInt8]) -> (most: Int, count: Int) {
     return (most, count)
 }
 
+test("an old file with empty lanes and overlapping texts and images draws exactly as before, frame for frame") {
+    let e = open("full")
+    let json = """
+    { "lanes": 4, "textLanes": 3, "imageLanes": 4, "segments": [
+      { "id": "a", "kind": "image", "start": 0, "end": 9, "lane": 3, "file": "images/logo.png", "x": 0.4, "y": 0.4, "size": 0.5 },
+      { "id": "b", "kind": "image", "start": 2, "end": 8, "lane": 1, "file": "images/logo.png", "x": 0.5, "y": 0.5, "size": 0.5, "opacity": 0.6 },
+      { "id": "t2", "kind": "text", "start": 1, "end": 6, "lane": 2, "text": "Second", "x": 0.5, "y": 0.5, "size": 0.2, "style": "box" },
+      { "id": "t1", "kind": "text", "start": 0, "end": 7, "lane": 0, "text": "First", "x": 0.5, "y": 0.45, "size": 0.2, "style": "box", "color": "pink" },
+      { "id": "z", "kind": "zoom", "start": 3, "end": 5, "lane": 3, "level": 1.5 } ] }
+    """
+    let read = try decode(json)
+    var asWritten = read
+    let raw = (try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])["segments"] as! [[String: Any]]
+    let lanes = Dictionary(uniqueKeysWithValues: raw.map { ($0["id"] as! String, $0["lane"] as! Int) })
+    asWritten.segments = asWritten.segments.map { var s = $0; s.lane = lanes[s.id]!; return s }
+    asWritten.layers = nil
+    eq(read.lanes, 1); eq(read.imageLanes, 2); eq(read.textLanes, 2)
+    let checker = CIFilter.checkerboardGenerator()
+    checker.width = 12; checker.color0 = CIColor(red: 0.9, green: 0.4, blue: 0.1); checker.color1 = CIColor(red: 0.1, green: 0.3, blue: 0.8)
+    let frame = checker.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: e.meta.width, height: e.meta.height))
+    let before = Framing(meta: e.meta, look: e.look, edits: asWritten, cursor: e.cursor, folder: e.folder)
+    let after = Framing(meta: e.meta, look: e.look, edits: read, cursor: e.cursor, folder: e.folder)
+    for t in stride(from: 0.25, to: 10, by: 0.5) {
+        expect(pixels(before, frame, at: t) == pixels(after, frame, at: t), "at \(t) the frames differ")
+    }
+    var swapped = read
+    swapped.layers = ["image:1", "image:0", "text:0", "text:1", "video"]
+    let other = Framing(meta: e.meta, look: e.look, edits: swapped, cursor: e.cursor, folder: e.folder)
+    expect(pixels(other, frame, at: 4) != pixels(after, frame, at: 4), "the comparison sees the stack")
+}
+
 test("an old file with whole-frame lanes draws exactly as before, frame for frame") {
     let e = open("full")
     let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("valid/full/edits.json"))) as! [String: Any]
@@ -2115,7 +2146,7 @@ if let shots = ProcessInfo.processInfo.environment["EXACT_STUDIO_SHOTS"] {
             try! rep.representation(using: .png, properties: [:])!.write(to: out.appendingPathComponent(name))
         }
         let row = view.rows.first { $0.kind == .lane(0, 1) }!
-        let x = { (t: Double) in CGFloat(170 + 14) + CGFloat(t / e.duration) * (view.bounds.width - 170 - 14 - 22) }
+        let x = { (t: Double) in CGFloat(184) + CGFloat(t / e.duration) * (view.bounds.width - 184 - 14) }
         let grab = CGPoint(x: x(7.4), y: row.y + row.height / 2)
         view.mouseDown(with: event(.leftMouseDown, grab))
         for step in 1...8 { view.mouseDragged(with: event(.leftMouseDragged, CGPoint(x: grab.x - CGFloat(step) * (x(7.4) - x(3.6)) / 8, y: grab.y))) }
@@ -2143,7 +2174,9 @@ if let shots = ProcessInfo.processInfo.environment["EXACT_STUDIO_SHOTS"] {
         at(e, 2.4)
         let effects = menu(.lane(0, 0), e)
         guard case let .sub(_, zoom)? = effects.first(where: { if case .sub("Zoom", _) = $0 { return true }; return false }) else { return }
-        for (name, entries) in [("off-menu-zoom.png", zoom), ("off-menu-move.png", menu(.position, e))] {
+        let add = TimelineMenus.add(e)
+        guard case let .sub2(_, _, addZoom)? = add.first(where: { if case .sub2("Zoom", _, _) = $0 { return true }; return false }) else { return }
+        for (name, entries) in [("off-menu-zoom.png", zoom), ("off-menu-move.png", menu(.position, e)), ("add-menu.png", add), ("add-menu-zoom.png", addZoom)] {
             let m = view.nsMenu(entries)
             let shot = out.appendingPathComponent(name)
             try? FileManager.default.removeItem(at: shot)
@@ -2166,6 +2199,29 @@ if let shots = ProcessInfo.processInfo.environment["EXACT_STUDIO_SHOTS"] {
             }
             expect(FileManager.default.fileExists(atPath: shot.path), "\(name) written")
         }
+        // @ref LLP 0005#layers — a row dragged by its label, the blue line where it lands
+        let layered = open("full", edits: """
+        { "segments": [
+          { "id": "t1", "kind": "text", "start": 0.5, "end": 4, "text": "Notification controls" },
+          { "id": "t2", "kind": "text", "start": 2, "end": 5, "text": "New in 2.0" },
+          { "id": "logo", "kind": "image", "start": 1, "end": 8, "file": "images/logo.png" },
+          { "id": "glow", "kind": "image", "start": 3, "end": 9, "file": "images/logo.png", "layer": "behind" },
+          { "id": "z", "kind": "zoom", "start": 1, "end": 2.5, "level": 2 } ],
+          "moves": [{ "id": "m", "t": 6, "to": { "x": 0.4 } }] }
+        """)
+        view.attach(layered)
+        view.display()
+        save("layers.png")
+        let logo = view.rows.first { $0.kind == .lane(2, 0) }!, top = view.rows.first { $0.kind == .lane(1, 0) }!
+        let from = CGPoint(x: 70, y: logo.y + logo.height / 2)
+        view.mouseDown(with: event(.leftMouseDown, from))
+        view.mouseDragged(with: event(.leftMouseDragged, CGPoint(x: 70, y: top.y + 3)))
+        view.display()
+        save("layer-drag.png")
+        view.mouseUp(with: event(.leftMouseUp, CGPoint(x: 70, y: top.y + 3)))
+        view.display()
+        save("layer-dropped.png")
+        eq(layered.edits.stack().first, LayerRow(kind: "image", lane: 0), "the image row is at the top")
         w.orderOut(nil)
         view.detach()
     }

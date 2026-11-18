@@ -103,8 +103,8 @@ final class TimelineView: NSView {
         let e = editor.edits, dragged = draggedSpace, empty = editor.showEmptyLanes
         func extra(_ space: Int) -> Int { dragged == space || empty ? 1 : 0 }
         var targets: [LayerRow] = []
-        if extra(1) > 0 { targets.append(LayerRow(kind: "text", lane: e.textLanes)) }
-        if extra(2) > 0 { targets.append(LayerRow(kind: "image", lane: e.imageLanes)) }
+        // A dragged text or image opens a row of its own where it meets another, so no target row shifts the stack under the pointer.
+        if empty { targets = [LayerRow(kind: "text", lane: e.textLanes), LayerRow(kind: "image", lane: e.imageLanes)] }
         // @ref LLP 0002#rows — an item's own rows, as the video's Moves row, show only with what they hold
         func effectRows(_ item: Segment) {
             var lanes = max(empty ? 1 : 0, ((item.effects ?? []).map(\.lane).max() ?? -1) + 1)
