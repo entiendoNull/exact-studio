@@ -6,7 +6,7 @@
 **Role:** Root
 **Author:** Jacob Clausen / Claude
 **Date:** 2026-11-12
-**Related:** LLP 0001, LLP 0002, LLP 0003, LLP 0004, LLP 0005
+**Related:** LLP 0001, LLP 0002, LLP 0003, LLP 0004, LLP 0005, LLP 0006, LLP 0007
 
 Start here. Then read the doc for the part you change.
 
@@ -31,6 +31,8 @@ capture  →  recording folder  →  editor  →  renderer  →  preview / expor
 | Rendering, 3D, templates | `Compositor.swift`, `Scene3D.swift`, `Templates.swift` | [LLP 0003](./0003-one-renderer-and-3d.decision.md) |
 | Files as the API, CLI for agents | `cli/main.swift`, `exact-studio`, `docs/edits.md`, `schema/` | [LLP 0004](./0004-recordings-are-files.decision.md) |
 | The UI | `app.contract`, `app.ts`, `Timeline.swift`, `Studio.swift` | [LLP 0005](./0005-ui.principles.md) |
+| Masks that hide secrets | `Compositor.swift` (`hide`), `Studio.swift` (the box), `cli/main.swift` (`mask`, `frame --raw`) | [LLP 0006](./0006-masks.decision.md) |
+| Agents record through the running app | `Control.swift`, `Studio.swift` (`agentRequest`), `cli/main.swift` (`sources`, `record`), `mcp/server.ts` | [LLP 0007](./0007-agents-record.decision.md) |
 
 `app.contract` is the view. `app.ts` talks to the native module. `Studio.swift` is that module:
 it takes ops (`edit`, `look`, `export`, …) and hosts the native preview and timeline views.
@@ -39,8 +41,9 @@ it takes ops (`edit`, `look`, `export`, …) and hosts the native preview and ti
 
 - **Clip**: the video track. Split it into **parts**; remove parts.
 - **Lane**: a row for one kind of thing: the video's effects, texts, sounds, or whole-frame effects. As many as you want.
-- **Image**: a picture on top of the video. Each is its own row, with its own Position and Effects rows.
+- **Image**: a picture on top of the video, on an image lane. It has its own Position and Effects rows, shown under its lane.
 - **Sound**: the recorded sound, which follows the cuts; or a sound you add (music, an effect), which plays straight through.
+- **Mask**: a box on the video that hides a secret with a blur, big pixels or a solid colour. It stays on the content as the video moves.
 - **Position**: where the video sits in the frame and how it moves. Its own track.
 - **Look**: the frame around the video: background, shape, padding, corners, shadow, cursor.
 - **Simulators**: what the sidebar calls devices. Not "Devices".

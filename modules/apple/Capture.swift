@@ -134,6 +134,9 @@ final class SourcePicker: NSObject {
         let name: String
         let icon: NSImage?
         let windowID: CGWindowID?
+        /// For agents, who name a source rather than point at it (Studio.agentSources).
+        var app = "", title = ""
+        var sourceKind: SourceKind = .display
     }
 
     /// A candidate's shape as a one-off screenshot shows it, in its own points (origin
@@ -183,7 +186,7 @@ final class SourcePicker: NSObject {
                 .withSymbolConfiguration(.init(pointSize: 30, weight: .regular))
             return NSScreen.screens.compactMap { s in
                 guard let n = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return nil }
-                return Candidate(source: "display:\(n)", frame: s.frame, name: many ? s.localizedName : "Display", icon: icon, windowID: nil)
+                return Candidate(source: "display:\(n)", frame: s.frame, name: many ? s.localizedName : "Display", icon: icon, windowID: nil, title: s.localizedName)
             }
         }
         let me = ProcessInfo.processInfo.processIdentifier
@@ -200,13 +203,13 @@ final class SourcePicker: NSObject {
             let app = info[kCGWindowOwnerName as String] as? String ?? owner?.localizedName ?? ""
             let title = info[kCGWindowName as String] as? String ?? ""
             // @ref LLP 0001#sources — device windows belong to the Simulator picker, which lights the phone
-            let device = Sources.kind(bundle: owner?.bundleIdentifier ?? "", app: app, title: title) != .window
-            guard device == (kind == .simulator) else { return nil }
+            let found = Sources.kind(bundle: owner?.bundleIdentifier ?? "", app: app, title: title)
+            guard (found != .window) == (kind == .simulator) else { return nil }
             let name = title.isEmpty ? app : title
             guard !name.isEmpty else { return nil }
             // The list's origin is the main display's top-left; AppKit's is its bottom-left.
             let frame = CGRect(x: b["X"] ?? 0, y: top - (b["Y"] ?? 0) - h, width: w, height: h)
-            return Candidate(source: "window:\(id)", frame: frame, name: name, icon: owner?.icon, windowID: id)
+            return Candidate(source: "window:\(id)", frame: frame, name: name, icon: owner?.icon, windowID: id, app: app, title: title, sourceKind: found)
         }
     }
 

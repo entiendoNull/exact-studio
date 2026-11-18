@@ -3,7 +3,8 @@
 // watches: "status" (recording or not), "recordings" (the library changed)
 // and "edits" (a recording's edits or selection changed).
 //
-//   call   {op: "status"}                       → {recording, name, kind, sound, error}  error: the last start's, from here or the menu bar
+//   call   {op: "status"}                       → {recording, name, kind, sound, error, finished}  error: the last start's, from here or the menu bar;
+//                                                   finished: the id of the last recording that stopped, from either
 //          {op: "selection", id}                → {id, kind ("clip" for a part of the clip), level, rate, start, end,
 //                                                   startText, endText, removed, first, last, problem}
 //          {op: "summary", id}                  → {parts, removed, effects, lanes, length, source}
@@ -21,6 +22,7 @@
 //          {op: "delete", id}                   → {ok, error}
 //          {op: "reveal", path}                 → {ok}
 //          {op: "crop", id, edge, by}           → {ok}  nudges a recording's crop by `by` (unit) at an edge
+//   Agents reach the recorder through Control.swift's folder, not through these ops: see `serve`.
 #if os(macOS)
 import AppKit
 import AVFoundation
@@ -52,10 +54,22 @@ final class Studio: ExactModule {
     private static let soundKey = "ExactStudio.recordSound"
     /// Why the last start failed ("" when it did not), wherever it was asked from; the sidebar shows it.
     private var lastError = ""
+    /// The last recording that finished, wherever it was stopped; the view selects it when this changes.
+    private var finished = ""
     private var editors: [String: Editor] = [:]
     private var keys: Any?
     /// The recording the preview shows: Space plays and pauses it.
     var active = ""
+    /// Who started the recording running now: "app" (the sidebar or the menu bar) or "agent".
+    private var recordingBy = "app"
+    private var maxTimer: Timer?
+    private var maxSeconds = 0.0
+    /// Whether the running recording takes the system's sound.
+    private var recordingSound = false
+    /// The last recording that ended, for an agent that asks after it stopped: id, folder, name, kind, duration, by, stoppedBy.
+    private var last: [String: Any] = [:]
+    /// Answers agents' requests (Control.swift).
+    private var control: ControlServer?
 
     override func destroy() {
         if let keys { NSEvent.removeMonitor(keys) }
@@ -64,6 +78,10 @@ final class Studio: ExactModule {
         clock = nil
         if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
         statusItem = nil
+        maxTimer?.invalidate()
+        maxTimer = nil
+        control?.stop()
+        control = nil
     }
 
     required init(context: ExactModuleContext) {
@@ -83,6 +101,9 @@ final class Studio: ExactModule {
             // An automated run gets no menu bar item: it would outlive nothing and only clutter the bar.
             DispatchQueue.main.async { [weak self] in self?.installStatusItem() }
         }
+        // Under the agent, the control folder is the scratch library's, so a drive never answers the person's tools.
+        let root = context.agent ? Library.root.appendingPathComponent("control", isDirectory: true) : Control.folder
+        DispatchQueue.main.async { [weak self] in self?.serve(root) }
     }
 
     /// The open recording's editor, made on first use.
@@ -111,7 +132,7 @@ final class Studio: ExactModule {
     override func call(_ request: [String: Any]) throws -> [String: Any] {
         switch request["op"] as? String {
         case "status":
-            return ["recording": recorder != nil, "name": recorder?.name ?? "", "kind": recorder?.kind.rawValue ?? "", "sound": sound, "error": lastError]
+            return ["recording": recorder != nil, "name": recorder?.name ?? "", "kind": recorder?.kind.rawValue ?? "", "sound": sound, "error": lastError, "finished": finished]
         case "selection":
             return editor(request["id"] as? String ?? "")?.selection ?? Self.emptySelection
         case "look":
@@ -328,33 +349,38 @@ final class Studio: ExactModule {
     }
 
     /// The end of a start: `error` is "" when it worked or was cancelled.
-    private func started(_ error: String, _ reply: ExactReply?) {
+    /// `then` is an agent's: it gets the error ("" when it started), and no window comes forward.
+    private func started(_ error: String, _ reply: ExactReply?, _ then: ((String) -> Void)? = nil) {
         if error != lastError {
             lastError = error
             context.changed("status")
         }
         reply?.send(["ok": error.isEmpty && recorder != nil, "error": error])
-        if reply == nil && !error.isEmpty { showMainWindow() }
+        then?(error)
+        if reply == nil && then == nil && !error.isEmpty { showMainWindow() }
     }
 
-    private func begin(_ source: String, area: (NSScreen, CGRect)?, reply: ExactReply?) {
+    private func begin(_ source: String, area: (NSScreen, CGRect)?, reply: ExactReply?, sound: Bool? = nil, by: String = "app",
+                       then: ((String) -> Void)? = nil) {
         starting = true
         let id = Self.newID()
         let folder = Library.recordings.appendingPathComponent(id, isDirectory: true)
-        let sound = self.sound
+        let sound = sound ?? self.sound
         Task { @MainActor in
             defer { starting = false }
             do {
                 let r = try await Recorder.make(source: source, area: area, folder: folder, id: id, sound: sound)
                 try await r.start()
                 recorder = r
+                recordingBy = by
+                recordingSound = sound
                 recordingSince = Date()
                 updateStatusItem()
                 context.changed("status")
-                started("", reply)
+                started("", reply, then)
             } catch {
                 try? FileManager.default.removeItem(at: folder)
-                started("Couldn’t start recording: \(error)", reply)
+                started("Couldn’t start recording: \(error)", reply, then)
             }
         }
     }
@@ -367,20 +393,36 @@ final class Studio: ExactModule {
         context.changed("status")
     }
 
-    private func stop(reply: ExactReply?) {
-        guard let r = recorder else { reply?.send(["ok": false, "error": "Not recording.", "id": ""]); return }
+    /// `stoppedBy`: "app", "menu", "agent" or "max". `then` is an agent's: the finished recording, or the error.
+    private func stop(reply: ExactReply?, stoppedBy: String = "app", then: ((RecordingMeta?, String) -> Void)? = nil) {
+        guard let r = recorder else {
+            reply?.send(["ok": false, "error": "Not recording.", "id": ""])
+            then?(nil, "Not recording.")
+            return
+        }
         recorder = nil
+        maxTimer?.invalidate()
+        maxTimer = nil
+        let by = recordingBy
         updateStatusItem()
         context.changed("status")
         Task { @MainActor in
             do {
                 let meta = try await r.stop()
+                last = ["id": meta.id, "folder": r.folder.path, "name": meta.name, "kind": meta.kind, "duration": meta.duration,
+                        "by": by, "stoppedBy": stoppedBy]
+                finished = meta.id
                 context.changed("recordings")
+                context.changed("status")
                 reply?.send(["ok": true, "error": "", "id": meta.id])
+                then?(meta, "")
             } catch {
                 try? FileManager.default.removeItem(at: r.folder)
+                last = ["id": "", "folder": "", "name": r.name, "kind": r.kind.rawValue, "duration": 0, "by": by, "stoppedBy": stoppedBy,
+                        "error": "\(error)"]
                 context.changed("recordings")
                 reply?.send(["ok": false, "error": "\(error)", "id": ""])
+                then?(nil, "\(error)")
             }
         }
     }
@@ -389,6 +431,125 @@ final class Studio: ExactModule {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd-HHmmss"
         return f.string(from: Date())
+    }
+
+    // MARK: Agents
+
+    /// Answers agents' requests from the control folder: sources, start, status, stop.
+    // @ref LLP 0007#the-channel — the app records for the agent, so the permission and the menu bar mark are the app's
+    private func serve(_ root: URL) {
+        let server = ControlServer(root: root) { [weak self] request, reply in
+            guard let self else { return reply(["ok": false, "code": "failed", "error": "Exact Studio is closing."]) }
+            self.agentRequest(request, reply: reply)
+        }
+        do {
+            try server.start()
+            control = server
+        } catch {
+            NSLog("exact-studio: agents can't record: \(error)")
+        }
+    }
+
+    private func agentRequest(_ r: [String: Any], reply: @escaping ([String: Any]) -> Void) {
+        func refuse(_ code: String, _ error: String) { reply(["ok": false, "code": code, "error": error, "last": last]) }
+        let permission = "Screen Recording is not allowed for Exact Studio. A person must allow it in System Settings › Privacy & Security › Screen & System Audio Recording, then reopen Exact Studio."
+        switch r["op"] as? String ?? "" {
+        case "sources":
+            let allowed = CGPreflightScreenCaptureAccess()
+            if !allowed && !context.agent { CGRequestScreenCaptureAccess() }
+            reply(["ok": true, "allowed": allowed, "items": agentSources().map(\.json)])
+        case "status":
+            reply(agentStatus())
+        case "start":
+            let source = r["source"] as? String ?? ""
+            guard source.hasPrefix("window:") || source.hasPrefix("display:") else { return refuse("nomatch", "No source \(source).") }
+            // @ref LLP 0007#never-take-over — a running recording, or a picker the person has open, is theirs
+            if let rec = recorder {
+                return refuse("busy", "Already recording \(rec.name) (\(rec.kind.rawValue)), started \(recordingBy == "agent" ? "by an agent" : "in the app") \(Int(Date().timeIntervalSince(recordingSince))) s ago. It was left running; stop it first if it is yours.")
+            }
+            if starting { return refuse("busy", "A recording is starting in Exact Studio now. It was left alone.") }
+            if picker != nil { return refuse("busy", "A person has a recording picker open in Exact Studio. It was left alone; try again when it is closed.") }
+            guard CGPreflightScreenCaptureAccess() else {
+                if !context.agent { CGRequestScreenCaptureAccess() }
+                return refuse("permission", permission)
+            }
+            var area: (NSScreen, CGRect)?
+            if let a = r["area"] as? [NSNumber], a.count == 4 {
+                let did = UInt32(source.dropFirst(8))
+                guard source.hasPrefix("display:"),
+                      let screen = NSScreen.screens.first(where: { ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == did }) else {
+                    return refuse("nomatch", "That display is gone.")
+                }
+                let rect = CGRect(x: a[0].doubleValue, y: a[1].doubleValue, width: a[2].doubleValue, height: a[3].doubleValue)
+                guard rect.width >= 40, rect.height >= 40, CGRect(origin: .zero, size: screen.frame.size).contains(rect) else {
+                    return refuse("nomatch", "That area is not inside the display.")
+                }
+                area = (screen, rect)
+            }
+            let sound = (r["sound"] as? String).flatMap { ["on": true, "off": false][$0] }
+            let limit = (r["max"] as? NSNumber)?.doubleValue ?? 0
+            begin(source, area: area, reply: nil, sound: sound, by: "agent") { [weak self] error in
+                guard let self else { return }
+                guard error.isEmpty, let rec = self.recorder else {
+                    let gone = error.contains("gone") ? "That window or display is gone; list the sources again. " : ""
+                    return refuse(CGPreflightScreenCaptureAccess() ? "failed" : "permission", gone + (CGPreflightScreenCaptureAccess() ? error : permission))
+                }
+                self.maxSeconds = limit
+                if limit > 0 {
+                    self.maxTimer = Timer.scheduledTimer(withTimeInterval: limit, repeats: false) { [weak self, weak rec] _ in
+                        guard let self, let rec, self.recorder === rec else { return }
+                        self.stop(reply: nil, stoppedBy: "max")
+                    }
+                }
+                reply(self.agentStatus())
+            }
+        case "stop":
+            guard let rec = recorder else {
+                if starting { return refuse("busy", "A recording is starting; ask again in a moment.") }
+                let ended = (last["id"] as? String).map { $0.isEmpty ? "" : " The last recording, \($0), was stopped \(Self.stopper(last["stoppedBy"] as? String ?? ""))." } ?? ""
+                return refuse("notrecording", "Not recording." + ended)
+            }
+            if recordingBy != "agent" && (r["any"] as? Bool) != true {
+                return refuse("notyours", "The recording running now (\(rec.name), \(Int(Date().timeIntervalSince(recordingSince))) s) was started in the app, not by an agent. It was left running. Stop it only if the person asked you to (any: true, or --any).")
+            }
+            stop(reply: nil, stoppedBy: "agent") { [weak self] meta, error in
+                guard let self else { return }
+                guard meta != nil else { return refuse("failed", error) }
+                reply(["ok": true, "recording": false, "last": self.last])
+            }
+        default:
+            refuse("unknown", "Exact Studio answers sources, status, start and stop.")
+        }
+    }
+
+    private static func stopper(_ by: String) -> String {
+        ["menu": "from the menu bar", "app": "in the app", "agent": "by an agent", "max": "by itself at its --max limit"][by] ?? "in the app"
+    }
+
+    private func agentStatus() -> [String: Any] {
+        guard let rec = recorder else {
+            return ["ok": true, "recording": false, "starting": starting, "sound": sound, "last": last]
+        }
+        return ["ok": true, "recording": true, "starting": false, "id": rec.id, "folder": rec.folder.path, "name": rec.name, "kind": rec.kind.rawValue,
+                "by": recordingBy, "elapsed": Date().timeIntervalSince(recordingSince), "max": recordingBy == "agent" ? maxSeconds : 0,
+                "sound": recordingSound, "last": last]
+    }
+
+    /// What an agent can name: the displays, the other apps' windows and the Simulators, as the pickers list them.
+    // @ref LLP 0007#names — the same lists the pickers end in, so a Simulator is cropped to the phone and a window keeps its shape
+    private func agentSources() -> [SourceEntry] {
+        let displays = SourcePicker.candidates(.display).map { c in
+            SourceEntry(id: c.source, kind: "display", name: c.title, width: Int(c.frame.width), height: Int(c.frame.height))
+        }
+        let windows = SourcePicker.candidates(.window).map { c in
+            SourceEntry(id: c.source, kind: "window", name: c.title.isEmpty || c.title == c.app ? c.app : "\(c.app) — \(c.title)",
+                        app: c.app, title: c.title, width: Int(c.frame.width), height: Int(c.frame.height))
+        }
+        let devices = SourcePicker.candidates(.simulator).map { c in
+            SourceEntry(id: c.source, kind: c.sourceKind.rawValue, name: c.name, app: c.sourceKind == .emulator ? "Android Emulator" : c.app,
+                        title: c.title, width: Int(c.frame.width), height: Int(c.frame.height))
+        }
+        return SourceEntry.named(displays + devices + windows)
     }
 
     // MARK: Menu bar
@@ -494,7 +655,7 @@ final class Studio: ExactModule {
     }
 
     @objc private func stopFromMenuBar() {
-        stop(reply: nil)
+        stop(reply: nil, stoppedBy: "menu")
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -642,8 +803,9 @@ final class PlayerHost: NSView {
     private let cropLines = CAShapeLayer()
     private let cropGrid = CAShapeLayer()
     private let cropHandles = CAShapeLayer()
-    private enum CropDrag { case edges(left: Bool, right: Bool, top: Bool, bottom: Bool, from: CGPoint, start: UnitRect), move(CGPoint, UnitRect) }
-    private var cropDrag: CropDrag?
+    /// A rectangle being dragged by its sides (a corner moves two) or as a whole: the crop's, or a mask's.
+    private enum RectDrag { case edges(left: Bool, right: Bool, top: Bool, bottom: Bool, from: CGPoint, start: UnitRect), move(CGPoint, UnitRect) }
+    private var cropDrag: RectDrag?
     /// The crop while it is dragged, before it is saved.
     private var cropLive: UnitRect?
     /// The smallest crop, as a share of each side.
@@ -689,6 +851,130 @@ final class PlayerHost: NSView {
         cropHandles.shadowRadius = 2
         cropHandles.shadowOffset = .zero
         for l in [rawFrame, cropShade, cropGrid, cropLines, cropHandles] { l.isHidden = true; layer?.addSublayer(l) }
+        // A selected mask: its rectangle and the crop's handles, on the video where it is now.
+        maskLines.fillColor = nil
+        maskLines.strokeColor = NSColor.white.withAlphaComponent(0.9).cgColor
+        maskLines.lineWidth = 1.5
+        maskHandles.fillColor = nil
+        maskHandles.strokeColor = NSColor.white.cgColor
+        maskHandles.lineWidth = 4
+        maskHandles.lineCap = .round
+        maskHandles.shadowColor = NSColor.black.cgColor
+        maskHandles.shadowOpacity = 0.5
+        maskHandles.shadowRadius = 2
+        maskHandles.shadowOffset = .zero
+        // Clipped to the video: a mask the zoom pushes past the edge shows only its part on the video.
+        maskClip.masksToBounds = true
+        for l in [maskLines, maskHandles] { maskClip.addSublayer(l) }
+        layer?.addSublayer(maskClip)
+    }
+
+    // MARK: Masks
+    // @ref LLP 0006#follows-the-video — the box sits on the video as it is placed and zoomed now
+
+    private let maskClip = CALayer()
+    private let maskLines = CAShapeLayer()
+    private let maskHandles = CAShapeLayer()
+    /// A mask's rectangle being dragged, and the view transform it was grabbed in.
+    private var maskDrag: (id: String, grab: RectDrag, view: CGAffineTransform)?
+
+    /// Where the full recorded frame's unit coordinates (origin top-left, before the crop), a mask's
+    /// rect, are in this view at the playhead: nil while the video is turned in 3D or spun, where a flat
+    /// box cannot follow it.
+    private var recordingInView: CGAffineTransform? {
+        guard let editor, let m = editor.framing.frameToCanvas(at: editor.playhead) else { return nil }
+        let c = editor.framing.canvas
+        let t = m.concatenating(CGAffineTransform(scaleX: video.width / c.width, y: video.height / c.height))
+            .concatenating(CGAffineTransform(translationX: video.minX, y: video.minY))
+        return abs(t.b) < 1e-6 && abs(t.c) < 1e-6 ? t : nil
+    }
+
+    private static func box(_ u: UnitRect) -> CGRect { CGRect(x: u.x, y: u.y, width: u.w, height: u.h) }
+
+    /// What a press at `p` takes hold of a rectangle drawn at `r` (both in this view): a side, or two
+    /// near a corner; else the inside, to move it; else nothing. `u` is the press in the rectangle's units.
+    /// A side is held from up to 14 points outside it, and from inside only up to a quarter of the box,
+    /// so a small box still moves when pressed in its middle.
+    private static func grab(_ p: CGPoint, _ r: CGRect, unit u: CGPoint, start: UnitRect) -> RectDrag? {
+        let reach: CGFloat = 14, inX = min(reach, r.width / 4), inY = min(reach, r.height / 4)
+        let spanY = p.y >= r.minY - reach && p.y <= r.maxY + reach, spanX = p.x >= r.minX - reach && p.x <= r.maxX + reach
+        let left = p.x >= r.minX - reach && p.x <= r.minX + inX && spanY
+        let right = p.x >= r.maxX - inX && p.x <= r.maxX + reach && spanY && !left
+        let bottom = p.y >= r.minY - reach && p.y <= r.minY + inY && spanX
+        let top = p.y >= r.maxY - inY && p.y <= r.maxY + reach && spanX && !bottom
+        if left || right || top || bottom { return .edges(left: left, right: right, top: top, bottom: bottom, from: u, start: start) }
+        return r.contains(p) ? .move(u, start) : nil
+    }
+
+    /// The rectangle a grab has been dragged to, at `u`: inside `bounds` (the whole frame for the crop,
+    /// the visible video for a mask), at least `m` on each side.
+    private static func dragged(_ d: RectDrag, to u: CGPoint, minimum m: Double, within bounds: UnitRect = .full) -> UnitRect {
+        let bx0 = bounds.x, bx1 = bounds.x + bounds.w, by0 = bounds.y, by1 = bounds.y + bounds.h
+        switch d {
+        case let .move(from, start):
+            var c = start
+            c.x = min(max(start.x + u.x - from.x, bx0), max(bx0, bx1 - start.w))
+            c.y = min(max(start.y + u.y - from.y, by0), max(by0, by1 - start.h))
+            return c
+        case let .edges(left, right, top, bottom, from, start):
+            var x0 = start.x, x1 = start.x + start.w, y0 = start.y, y1 = start.y + start.h
+            let dx = u.x - from.x, dy = u.y - from.y
+            if left { x0 = min(max(start.x + dx, bx0), x1 - m) }
+            if right { x1 = max(min(start.x + start.w + dx, bx1), x0 + m) }
+            if top { y0 = min(max(start.y + dy, by0), y1 - m) }
+            if bottom { y1 = max(min(start.y + start.h + dy, by1), y0 + m) }
+            return UnitRect(x: x0, y: y0, w: x1 - x0, h: y1 - y0)
+        }
+    }
+
+    /// An L at each corner, a short bar at the middle of each side long enough for one.
+    private static func handles(_ r: CGRect) -> CGPath {
+        let k = min(18, r.width / 4, r.height / 4), b = min(12, r.width / 6, r.height / 6)
+        let h = CGMutablePath()
+        for (c, dx, dy) in [(CGPoint(x: r.minX, y: r.minY), 1.0, 1.0), (CGPoint(x: r.maxX, y: r.minY), -1.0, 1.0),
+                            (CGPoint(x: r.maxX, y: r.maxY), -1.0, -1.0), (CGPoint(x: r.minX, y: r.maxY), 1.0, -1.0)] {
+            h.move(to: CGPoint(x: c.x + dx * k, y: c.y)); h.addLine(to: c); h.addLine(to: CGPoint(x: c.x, y: c.y + dy * k))
+        }
+        if r.width >= 60 {
+            h.move(to: CGPoint(x: r.midX - b, y: r.minY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.minY))
+            h.move(to: CGPoint(x: r.midX - b, y: r.maxY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.maxY))
+        }
+        if r.height >= 60 {
+            h.move(to: CGPoint(x: r.minX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.minX, y: r.midY + b))
+            h.move(to: CGPoint(x: r.maxX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.maxX, y: r.midY + b))
+        }
+        return h
+    }
+
+    /// The selected mask's box and handles, or none.
+    private func drawMask() {
+        guard !cropping, let s = editor?.selectedSegment, s.kind == "mask", let u = s.rect, let t = maskDrag?.view ?? recordingInView else {
+            maskLines.path = nil; maskHandles.path = nil; return
+        }
+        maskClip.frame = video
+        for l in [maskLines, maskHandles] { l.frame = maskClip.bounds }
+        let r = Self.box(u).applying(t).offsetBy(dx: -video.minX, dy: -video.minY)
+        maskLines.path = CGPath(rect: r, transform: nil)
+        // Thinner on a small box, so the handles never hide what it covers.
+        maskHandles.lineWidth = min(4, max(2, min(r.width, r.height) / 8))
+        maskHandles.path = Self.handles(r)
+    }
+
+    /// A press on the selected mask's box, or on a mask showing now: hold it to move or resize it.
+    private func maskDown(_ p: CGPoint) -> Bool {
+        guard let editor, video.insetBy(dx: -14, dy: -14).contains(p), let t = recordingInView else { return false }
+        let at = p.applying(t.inverted())
+        if let s = editor.selectedSegment, s.kind == "mask", let u = s.rect, let g = Self.grab(p, Self.box(u).applying(t), unit: at, start: u) {
+            maskDrag = (s.id, g, t)
+            return true
+        }
+        let now = editor.playhead
+        if let s = editor.edits.masks.last(where: { now >= $0.start && now < $0.end && $0.rect.map { Self.box($0).applying(t).contains(p) } == true }), let u = s.rect {
+            editor.select(s.id)
+            maskDrag = (s.id, .move(at, u), t)
+            return true
+        }
+        return false
     }
 
     /// The recorded frame at the playhead, as captured.
@@ -724,7 +1010,7 @@ final class PlayerHost: NSView {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         for l in [rawFrame, cropShade, cropGrid, cropLines, cropHandles] { l.isHidden = !cropping }
-        for l in [player, still, outline, guides] as [CALayer] { l.opacity = cropping ? 0 : 1 }
+        for l in [player, still, outline, guides, maskClip] as [CALayer] { l.opacity = cropping ? 0 : 1 }
         guard cropping else { return }
         let f = frameRect
         rawFrame.frame = f
@@ -741,59 +1027,21 @@ final class PlayerHost: NSView {
             grid.move(to: CGPoint(x: r.minX, y: y)); grid.addLine(to: CGPoint(x: r.maxX, y: y))
         }
         cropGrid.path = grid
-        // An L at each corner, a short bar at each edge's middle.
-        let k = min(18, r.width / 4, r.height / 4), b = min(12, r.width / 6, r.height / 6)
-        let h = CGMutablePath()
-        for (c, dx, dy) in [(CGPoint(x: r.minX, y: r.minY), 1.0, 1.0), (CGPoint(x: r.maxX, y: r.minY), -1.0, 1.0),
-                            (CGPoint(x: r.maxX, y: r.maxY), -1.0, -1.0), (CGPoint(x: r.minX, y: r.maxY), 1.0, -1.0)] {
-            h.move(to: CGPoint(x: c.x + dx * k, y: c.y)); h.addLine(to: c); h.addLine(to: CGPoint(x: c.x, y: c.y + dy * k))
-        }
-        h.move(to: CGPoint(x: r.midX - b, y: r.minY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.minY))
-        h.move(to: CGPoint(x: r.midX - b, y: r.maxY)); h.addLine(to: CGPoint(x: r.midX + b, y: r.maxY))
-        h.move(to: CGPoint(x: r.minX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.minX, y: r.midY + b))
-        h.move(to: CGPoint(x: r.maxX, y: r.midY - b)); h.addLine(to: CGPoint(x: r.maxX, y: r.midY + b))
-        cropHandles.path = h
+        cropHandles.path = Self.handles(r)
     }
 
     private func cropDown(_ p: CGPoint) {
-        let r = onFrame(cropNow), f = frameRect
+        let f = frameRect
         let u = CGPoint(x: (p.x - f.minX) / f.width, y: 1 - (p.y - f.minY) / f.height)
         // Within reach of a side: that side moves; of two sides (a corner): both.
-        let reach: CGFloat = 14
-        let near = { (a: CGFloat, b: CGFloat) in abs(a - b) <= reach }
-        let inY = p.y >= r.minY - reach && p.y <= r.maxY + reach, inX = p.x >= r.minX - reach && p.x <= r.maxX + reach
-        let left = near(p.x, r.minX) && inY, right = near(p.x, r.maxX) && inY && !left
-        let bottom = near(p.y, r.minY) && inX, top = near(p.y, r.maxY) && inX && !bottom
-        if left || right || top || bottom {
-            cropDrag = .edges(left: left, right: right, top: top, bottom: bottom, from: u, start: cropNow)
-        } else if r.contains(p) {
-            cropDrag = .move(u, cropNow)
-        } else {
-            cropDrag = nil
-        }
+        cropDrag = Self.grab(p, onFrame(cropNow), unit: u, start: cropNow)
     }
 
     private func cropDragged(_ p: CGPoint) {
         guard let cropDrag else { return }
         let f = frameRect
         let u = CGPoint(x: (p.x - f.minX) / f.width, y: 1 - (p.y - f.minY) / f.height)
-        let m = Self.cropMinimum
-        var c: UnitRect
-        switch cropDrag {
-        case let .move(from, start):
-            c = start
-            c.x = min(max(start.x + u.x - from.x, 0), 1 - start.w)
-            c.y = min(max(start.y + u.y - from.y, 0), 1 - start.h)
-        case let .edges(left, right, top, bottom, from, start):
-            var x0 = start.x, x1 = start.x + start.w, y0 = start.y, y1 = start.y + start.h
-            let dx = u.x - from.x, dy = u.y - from.y
-            if left { x0 = min(max(start.x + dx, 0), x1 - m) }
-            if right { x1 = max(min(start.x + start.w + dx, 1), x0 + m) }
-            if top { y0 = min(max(start.y + dy, 0), y1 - m) }
-            if bottom { y1 = max(min(start.y + start.h + dy, 1), y0 + m) }
-            c = UnitRect(x: x0, y: y0, w: x1 - x0, h: y1 - y0)
-        }
-        cropLive = c
+        cropLive = Self.dragged(cropDrag, to: u, minimum: Self.cropMinimum)
         layoutCrop()
     }
 
@@ -817,7 +1065,8 @@ final class PlayerHost: NSView {
         // An image moves as time passes, so its outline follows the playhead.
         watched = editor?.player
         ticking = editor?.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in
-            guard let self, self.editor?.selectedImage != nil, self.drag == nil else { return }
+            // A mask's box follows the video as it moves.
+            guard let self, self.editor?.selectedImage != nil || self.editor?.selectedSegment?.kind == "mask", self.drag == nil, self.maskDrag == nil else { return }
             self.drawOverlay()
         }
         editor?.freeze = { [weak self] image in
@@ -872,6 +1121,7 @@ final class PlayerHost: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
+        drawMask()
         guard let editor else { outline.path = nil; guides.path = nil; return }
         if cropping { layoutCrop(); return }
         let f = editor.framing
@@ -892,6 +1142,8 @@ final class PlayerHost: NSView {
         guard let editor else { return }
         if cropping { return cropDown(convert(e.locationInWindow, from: nil)) }
         dragged = false
+        // The selected mask's box first: its handles reach a little outside it.
+        if case let p = convert(e.locationInWindow, from: nil), editor.selectedSegment?.kind == "mask", maskDown(p) { drag = nil; return drawOverlay() }
         let u = unit(convert(e.locationInWindow, from: nil))
         let f = editor.framing
         let t = editor.playhead
@@ -904,6 +1156,8 @@ final class PlayerHost: NSView {
             if s.id != held { editor.select(s.id) }
             let box = frame(s)
             drag = .text(s.id, u, CGPoint(x: box.x + box.w / 2, y: box.y + box.h / 2))
+        } else if maskDown(convert(e.locationInWindow, from: nil)) {
+            drag = nil
         } else if contains(f.subjectFrame(at: t), u) {
             if editor.selectedSegment?.isOverlay == true { editor.select("") }
             // ⌥-drag turns it in 3D (switching 3D on); a plain drag moves it.
@@ -927,6 +1181,14 @@ final class PlayerHost: NSView {
 
     override func mouseDragged(with e: NSEvent) {
         if cropping { return cropDragged(convert(e.locationInWindow, from: nil)) }
+        if let md = maskDrag, let editor {
+            dragged = true
+            let u = convert(e.locationInWindow, from: nil).applying(md.view.inverted())
+            // Kept on the visible video: a mask is placed where it can be seen.
+            let c = editor.meta.crop
+            editor.setMaskRect(md.id, Self.dragged(md.grab, to: u, minimum: 0.02 * min(c.w, c.h), within: c), live: true)
+            return drawOverlay()
+        }
         guard let editor, let drag else { return }
         dragged = true
         let u = unit(convert(e.locationInWindow, from: nil))
@@ -960,6 +1222,11 @@ final class PlayerHost: NSView {
 
     override func mouseUp(with e: NSEvent) {
         if cropping { return cropUp() }
+        if let md = maskDrag {
+            maskDrag = nil
+            if dragged, let u = editor?.edits.segments.first(where: { $0.id == md.id })?.rect { editor?.setMaskRect(md.id, u, live: false) }
+            return drawOverlay()
+        }
         guard let editor, let drag else { return }
         switch drag {
         case .subject: editor.endPlace()

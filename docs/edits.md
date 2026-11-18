@@ -12,7 +12,7 @@ app's UI. The app watches the files: a change shows in its open preview within a
 ├── mask-*.png      a device's silhouette, if one was found
 ├── images/         the pictures the edit puts on the video; `exact-studio image` copies them here
 ├── sounds/         the music and sounds the edit plays over the video; `exact-studio sound` copies them here
-├── edits.json      the timeline: cuts, transitions, effects, texts, images, sounds, zooms, speed, moves, 3D
+├── edits.json      the timeline: cuts, transitions, effects, masks, texts, images, sounds, zooms, speed, moves, 3D
 └── look.json       the frame: background, shape, padding, corners, shadow, cursor
 ```
 
@@ -25,6 +25,8 @@ JSON Schemas: [`schema/edits.schema.json`](../schema/edits.schema.json), [`schem
 ./exact-studio show latest               # parts, segments, moves and look, in readable form
 ./exact-studio image latest logo.png --at 2 --for 6   # a picture on top of the video; prints the new segment
 ./exact-studio sound latest music.m4a --at 0          # music over the video; prints the new sound
+./exact-studio frame latest 2 --raw                   # .exact/frame.png: the full recorded frame, to measure a mask on
+./exact-studio mask latest --rect 0.1,0.2,0.3,0.05 --at 2 --for 6   # hide that part; prints the new segment
 # …edit edits.json / look.json…
 ./exact-studio validate latest           # exit 1 with one line per problem
 ./exact-studio frame latest 4.5          # .exact/frame.png: the frame at 4.5 s of the video
@@ -40,6 +42,7 @@ JSON Schemas: [`schema/edits.schema.json`](../schema/edits.schema.json), [`schem
 **Every time in `edits.json` is in seconds of the recording** (`capture.mov`), not of the video as it
 plays. Cuts and speed changes make the two differ: `show` prints both lengths, and
 `frame <id> <t>` takes video time (`--source` for recording time) and prints the other.
+`--raw` renders the full recorded frame at that time instead, before the crop and with no edits (see [Masks](#masks)).
 
 ## edits.json
 
@@ -50,6 +53,7 @@ plays. Cuts and speed changes make the two differ: `show` prints both lengths, a
   "transitions": { "4200": "crossfade" },
   "lanes": 1,
   "textLanes": 1,
+  "imageLanes": 0,
   "frameLanes": 0,
   "base": { "x": 0.5, "y": 0.5, "scale": 1 },
   "moves": [],
@@ -92,19 +96,25 @@ and `lane` (0 up). A segment's kind decides which rows its `lane` counts:
 
 | what | kinds | its `lane` counts | how many there are |
 |---|---|---|---|
-| an effect on the video | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, and `blur` or `mono` with no `scope` | the video's effect lanes | `lanes` (at least 1) |
+| an effect on the video | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, `mask`, and `blur` or `mono` with no `scope` | the video's effect lanes | `lanes` (at least 1) |
 | a text | `text` | the text lanes | `textLanes` |
-| an image | `image` | nothing shared: each image is its own row, and `lane` is its place among the images, 0 in front | one for each image |
+| an image | `image` | the image lanes, 0 in front | `imageLanes` |
 | an effect on the whole picture | `blur` or `mono` with `scope` `"frame"` or `"all"` | the whole-frame lanes | `frameLanes` |
 
 An effect on the video never touches a text or an image, and an image's own effects (below) never
 touch the video. Two segments on one lane must not overlap in time, and these never overlap
 anywhere: two `zoom`s, two `speed`s, two `3d`s, or two of the same visual effect with the same reach.
-Texts and images overlap freely. Images are drawn over the video with the lowest `lane` in front,
-and texts over the images.
+Texts, images and masks on separate lanes overlap freely. Images are drawn over the video with the lowest
+`lane` in front, and texts over the images.
 
 A file with no `textLanes` is an old one, where texts and whole-frame effects shared the effect
 lanes: the app sorts them into lanes of their own kind when it reads it.
+A file with no `imageLanes` is an old one, where each image had a lane of its own: each image keeps
+its lane, so the picture stacks as before, and `imageLanes` becomes the number of images.
+
+Each `lane` must be below the count the file declares (`lanes`, `textLanes`, `frameLanes`,
+`soundLanes`). The app raises a count that is too low when it opens the file, but `validate` reports
+it. A count the file leaves out is derived from the lanes in use.
 
 | kind | fields | |
 |---|---|---|
@@ -115,6 +125,7 @@ lanes: the app sorts them into lanes of their own kind when it reads it.
 | `blur` | `scope` | none: only the video. `"frame"`: the whole picture, background and images included; texts stay sharp on top. `"all"`: texts too |
 | `mono` | `scope` | black and white, the same reaches |
 | `3d` | `tilt`, `turn`, `roll`, `style` | turns the video in 3D over its span and back, even with 3D off; `style` `"hold"` or `"orbit"` (one full turn) |
+| `mask` | `rect`, `style`, `color`, `radius` | hides a part of the recording; see [Masks](#masks) |
 | `text` | see below | |
 | `image` | see below | |
 
@@ -137,8 +148,8 @@ in the recording's folder, so the recording stays whole when it is copied.
 ./exact-studio image <id> ~/Desktop/logo.png --at 2 --for 6
 ```
 
-copies the picture to `images/logo.png`, adds this segment at 2 s of the recording for 6 s, and
-prints it. Then edit the segment like any other:
+copies the picture to `images/logo.png`, adds this segment at 2 s of the recording for 6 s, on the
+first image lane free then (else a new one), and prints it. Then edit the segment like any other:
 
 ```json
 { "id": "image1", "kind": "image", "start": 2, "end": 8, "lane": 0, "file": "images/logo.png",
@@ -172,8 +183,60 @@ image. Kinds: `blur`; `mono` (black and white); `fade` (to `level`, an opacity o
 `pulse`, `float` and `wiggle` (a gentle motion while they last). Two effects on one `lane` must not
 overlap, nor two of the same kind on any lane.
 
+**Lanes:** images that follow one another can share a lane. Images that show at the same time need
+separate lanes; the lower `lane` is in front. A lane is below `imageLanes`.
+
 To blur or grey the whole picture instead, images included, use a `blur` or `mono` segment with
 `scope` `"frame"` (texts stay sharp) or `"all"` (texts too).
+
+### Masks
+
+A mask hides a part of the recording: an API key, an email, a name. It is an effect on the video,
+on the video's effect lanes, with `start` and `end` like a blur.
+
+```json
+{ "id": "mask1", "kind": "mask", "start": 2, "end": 8, "lane": 1,
+  "rect": { "x": 0.1, "y": 0.2, "w": 0.3, "h": 0.05 }, "style": "blur" }
+```
+
+**Mask fields:** `rect` (what it hides: `x`, `y` its top-left corner, `w`, `h` its size, all 0–1 of
+the **full recorded frame (before the crop)**, origin top-left; required); `style` (`blur`, the default; `pixels`; or `solid`); `color` (for
+`solid`: `"#RRGGBB"`, or a text colour's name; default black); `radius` (rounded corners, as a share of
+its shorter side, 0–0.5; default 0).
+
+- **`rect` is in the full recorded frame (before the crop),** not in the frame you see and not in the
+  crop. The finished frame adds a crop, a background, padding, a zoom and moves; the mask ignores all
+  of them. So a later crop never moves it off the secret, and it stays on the same content when the
+  video is placed, moved, zoomed or turned in 3D.
+- Only the part inside the crop shows. A mask partly outside the crop hides what is visible of it; one
+  fully outside hides nothing, and `show` says so.
+- **It never fades.** It is at full strength on every frame from `start` to `end`. Let it start a
+  little before the secret shows and end a little after.
+- It is applied first, before the video's own blur and black and white, so they cannot weaken it.
+  12 pt text is unreadable under any style.
+- It hides a fixed place in the recording. When the secret moves (a page scrolls), add a mask for
+  each place, one after another, or use a larger one.
+- The drawn cursor is drawn over a mask.
+- Masks may show at the same time, on separate lanes. They never clash with each other or with other effects.
+
+**Finding where a secret is.** Render the full recorded frame at a moment it shows:
+
+```sh
+./exact-studio frame <id> 4.5 --raw --out secret.png
+```
+
+This is the recording itself, before the crop, at its own pixel size, with no edits: the picture
+`rect` measures. It prints its size, for example `2514×1772`, and where the crop lies in it. Find the
+secret in it. A pixel at (px, py) is `x = px / 2514`, `y = py / 1772`; its width and height divide the
+same way. Leave a margin of a few pixels on each side. Do not measure on the normal `frame`: it is the
+finished frame, with the crop, background, padding and moves.
+
+```sh
+./exact-studio mask <id> --rect 0.1,0.2,0.3,0.05 --at 4 --for 6 [--style pixels] [--color '#000000']
+```
+
+adds it on the first effect lane free then (else a new one) and prints it. Then render a normal frame
+at its start, its middle and its last moment, and look: the secret must be covered on each.
 
 ### Sounds
 
@@ -248,4 +311,4 @@ the window's own corner radius (a share of its width), measured from its alpha.
 
 `./exact-studio template <id> <name>` replaces the texts, effects, zooms and moves with a ready-made
 edit (`launch`, `hero`, `tour`, `teaser`) laid out for `look.json`'s `aspect`, and keeps the cuts,
-transitions, 3D settings, images and sounds. A good start to adjust from.
+transitions, 3D settings, images, masks and sounds. A good start to adjust from.

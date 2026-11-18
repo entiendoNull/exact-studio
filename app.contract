@@ -11,6 +11,8 @@ shape Status
   sound: bool
   // Why the last start failed, from the sidebar or the menu bar; "" when it did not.
   error: string
+  // The last recording that finished, stopped from the sidebar or the menu bar; "" before one has.
+  finished: string
 
 shape Source
   id: string
@@ -109,8 +111,6 @@ shape Summary
   angleMove: string
   thickness: number
   edge: string
-  sound: bool
-  volume: number
   zoomed: bool
   wheelZoom: bool
 
@@ -140,7 +140,7 @@ fn sourceLabel(k: string): string = k == "pick-display" ? "Display" : k == "pick
 fn sourceCaption(k: string): string = k == "pick-display" ? "A whole screen" : k == "pick-window" ? "Its real shape" : k == "area" ? "Drag a rectangle" : "Only the phone"
 fn sourceTestId(k: string): string = k == "pick-display" ? "record-display" : k == "pick-window" ? "record-pick-window" : k == "area" ? "record-area" : "record-simulator"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn kindTitle(kind: string, level: number, rate: number): string = kind == "recorded" ? "Recorded Sound" : kind == "sound" ? "Sound" : kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "recorded" ? "Recorded Sound" : kind == "sound" ? "Sound" : kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "mask" ? "Mask" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn imageFxLabel(kind: string): string = kind == "blur" ? "Blur" : kind == "mono" ? "Black & White" : kind == "fade" ? "Fade" : kind == "pulse" ? "Pulse" : kind == "float" ? "Float" : "Wiggle"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
@@ -224,6 +224,9 @@ component ExactStudio
   // A recording can start from the menu bar too, so its clock starts when the status says so.
   task began when status.recording
     after(1, markStart)
+  // And it can stop there, so the recording that finished is selected once, when the status names it.
+  task landed when status.finished != "" key=status.finished
+    after(1, selectFinished)
 
   action step
     now = performanceNow()
@@ -236,6 +239,9 @@ component ExactStudio
   action markStart
     startedAt = performanceNow()
     now = performanceNow()
+  action selectFinished
+    selected = status.finished
+    cropping = false
   action stop
     send stopped = stopRecording()
   action afterStop
@@ -568,7 +574,7 @@ component ExactStudio
                       image "symbol:sf/crop"
                       text "Crop"
                     // The zoom buttons and the length: one unit at the right end, wrapping together.
-                    row flex=1 gap=8 align-items="center" justify-content="flex-end"
+                    row flex-grow=1 flex-shrink=0 gap=8 align-items="center" justify-content="flex-end"
                       // Zoom the timeline; the last button says whether the mouse wheel zooms it too.
                       row gap=4 align-items="center" testId="zoom-controls"
                         button press=zoomTimeline("zoom-out") aria-label="Zoom out" buttonStyle="bordered" testId="zoom-out"
@@ -580,7 +586,7 @@ component ExactStudio
                         button press=zoomTimeline("wheel") aria-label="Zoom with the mouse wheel" aria-pressed=summary.wheelZoom buttonStyle="bordered" testId="zoom-wheel"
                           image (summary.wheelZoom ? "symbol:sf/computermouse.fill" : "symbol:sf/computermouse")
                       text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex-shrink=0 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
-                  studio-timeline clip=rec.id aria-label="Timeline" height=timelineH testId="timeline"
+                  studio-timeline clip=rec.id aria-label="Timeline" height=timelineH flex-shrink=1 min-height=150 testId="timeline"
                   if sel.id != "" and panelMode == "overlay"
                     button press=closePanel appearance="none" aria-label="Close the settings" position="absolute" inset=0 background-color="#00000073" testId="lightbox-backdrop"
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
@@ -937,6 +943,18 @@ component SettingsCard
             button role="radio" aria-checked=(sel.scope == "all") press=segField("scope", "all") flex=1 testId="scope-all"
               text "Everything"
           text (sel.scope == "all" ? "Covers the whole picture, texts too." : sel.scope == "frame" ? "Covers the video, the background and the images. Texts stay sharp on top." : "Covers only the video.") font="-exact-caption1" color="-exact-tertiary-label"
+      if sel.kind == "mask"
+        text "Hides a part of the recording. It stays on that part when you crop, or when the video moves, zooms or turns." font="-exact-caption1" color="-exact-tertiary-label"
+        text "Hide with" font="-exact-caption1" color="-exact-secondary-label"
+        row role="radiogroup" aria-label="Hide with"
+          for m in ["blur", "pixels", "solid"] key=m
+            button role="radio" aria-checked=(sel.style == m) press=segField("style", m) flex=1 testId=`mask-${m}`
+              text (m == "blur" ? "Blur" : m == "pixels" ? "Pixels" : "Solid")
+        if sel.style == "solid"
+          row align-items="center" gap=8
+            text "Colour" flex=1
+            studio-color hex=sel.color change=segField("color") aria-label="Mask colour" width=64 height=28 testId="mask-color"
+        text "Drag the box in the preview to move it; drag a corner or an edge to resize it." font="-exact-caption1" color="-exact-tertiary-label"
       if sel.kind == "3d"
         text "Turns in 3D over its span and back, even with Show in 3D off." font="-exact-caption1" color="-exact-tertiary-label"
         row role="radiogroup" aria-label="Turn style"

@@ -5,7 +5,7 @@
 **Systems:** Capture
 **Author:** Jacob Clausen / Claude
 **Date:** 2026-11-12
-**Related:** LLP 0000
+**Related:** LLP 0000, LLP 0007
 
 Decided by Jacob while building v1 (2026-11-11).
 
@@ -53,6 +53,7 @@ Asked for by Jacob on 2026-11-13: four sources, each picked on the screen.
   beside it.
 - The Displays and Windows lists are gone; the pickers replace them.
 - The **Simulators** list stays: one click on a named device records it. That is the main use.
+- An agent names a source instead and gets no picker (LLP 0007). It records through the same paths.
 
 ## Menu bar
 
@@ -62,6 +63,7 @@ Asked for by Jacob on 2026-11-13: four sources, each picked on the screen.
 - System Sound is one setting, kept by the native module. The sidebar switch and the menu item
   both change it.
 - A start from the menu that fails brings the window forward, where the card shows why.
+- A recording that finishes is selected, whether the sidebar or the menu bar stopped it: `status.finished` names it.
 - Under the agent there is no menu bar item.
 
 ## Windows keep their own shape

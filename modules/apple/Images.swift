@@ -1,7 +1,7 @@
 // An image on the video: a picture file in the recording's folder, drawn over the finished
 // frame like a text. It can fade or spring in and out, and it has moves and effects of its own,
 // as the video has. The preview, the export and the CLI draw it here.
-// @ref LLP 0002#images — an image is a row of its own, with its own moves and effects
+// @ref LLP 0002#images — images sit on image lanes; each has its own moves and effects
 #if os(macOS)
 import AppKit
 import CoreImage

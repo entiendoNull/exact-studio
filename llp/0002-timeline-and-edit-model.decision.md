@@ -20,8 +20,9 @@ The rows are in four groups, and a row holds one kind of thing:
   part and remove it; kept parts can crossfade or fade into each other. Its **Sound**, when it has
   one: the recorded sound's waveform, with the removed parts dimmed (see Sound). Its **Position**: where
   the video sits and how it moves, one track, because the video can only be in one place at a
-  time. Its **Effects** lanes: zooms, speed, blur, mono, spotlight, highlight and 3D turns.
-- **On top of the video.** **Text** lanes, and one row for each **image** (below).
+  time. Its **Effects** lanes: zooms, speed, blur, mono, spotlight, highlight, 3D turns and masks
+  (LLP 0006).
+- **On top of the video.** **Text** lanes, then **Image** lanes (below).
 - **Sound.** Lanes for the sounds you add: music on one, short sounds on another (see Sound).
 - **The whole frame.** Lanes for a blur or black and white that covers the whole picture: the
   video, the background and the images. Texts stay sharp on top, so a title reads over a blurred
@@ -30,8 +31,8 @@ The rows are in four groups, and a row holds one kind of thing:
 Why: an effect on a lane must say what it changes. A video effect only ever changes the video,
 an image's effect only that image, and a whole-frame effect everything. Nobody has to guess.
 
-- The video's Sound, Position and Effects rows fold away under the Clip. Each image's rows fold away
-  under the image. So the timeline stays short however much is in it.
+- The video's Sound, Position and Effects rows fold away under the Clip. An image's own rows fold
+  away under its lane. So the timeline stays short however much is in it.
 - Each row has a + that adds its own kind of thing (LLP 0005).
 - An empty lane can be removed; one Effects lane always stays.
 
@@ -39,12 +40,18 @@ an image's effect only that image, and a whole-frame effect everything. Nobody h
 
 - An image is a picture file kept in the recording's folder (`images/`), so a recording stays
   whole when it is copied (LLP 0004).
-- Each image is its own row. It works like the video: a block, a **Position** row with its own
-  moves, and **Effects** rows with its own effects (blur, black and white, fade, pulse, float,
-  wiggle). You learn it once.
-- Opening an image's row shows those rows; selecting an image opens it.
-- Images are drawn over the video, the top image row in front. Texts are drawn over the images,
+- An image works like the video: a block, a **Position** row with its own moves, and **Effects**
+  rows with its own effects (blur, black and white, fade, pulse, float, wiggle). You learn it once.
+- Images sit on **image lanes**, as texts sit on text lanes. Images in sequence share a lane;
+  images at the same time go on separate lanes. A new image takes the first lane free at its time.
+- An open lane shows one image's Position and Effects rows at a time: the selected image, else the
+  one on the lane selected last, else the one under the playhead. Those rows are lit only across
+  that image's time, and its block has a thin outline. Selecting an image opens its lane.
+- Images are drawn over the video, the top lane in front. Texts are drawn over the images,
   in the order they are listed, as before images came: old recordings look the same.
+- Decided by Jacob on 2026-11-13. At first each image was its own row. That did not scale: ten
+  logos in a row made ten rows, and it was not what a lane means anywhere else.
+- A file from before has no `imageLanes`. Each of its images keeps the lane it had, so it stacks as before.
 - Dragging an image in the preview places it. When it already has moves, a drag at another time
   adds a move there, as dragging the video does.
 
@@ -52,7 +59,7 @@ an image's effect only that image, and a whole-frame effect everything. Nobody h
 
 - Two segments on one lane never overlap.
 - Never two zooms, two speeds, two 3D turns, or two of the same visual effect with the same
-  reach at one time, even on separate lanes. Texts and images overlap freely.
+  reach at one time, even on separate lanes. Texts, images and masks on separate lanes overlap freely.
 - On one image: never two of the same effect at one time, and its moves and effects stay inside
   its span.
 
