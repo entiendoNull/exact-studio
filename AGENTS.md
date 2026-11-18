@@ -35,8 +35,9 @@ Recordings are folders of plain files: `edits.json` is the timeline, `look.json`
 edit them directly and use `./exact-studio` (list, show, validate, frame, export, template, image,
 sound, mask) to check and render with the app's own renderer. `./exact-studio sources` and
 `record start|status|stop` record without a person, through the running app (LLP 0007).
-`docs/edits.md` is the format; the `edit-recording` skill is the workflow. The app reloads changed
-files within a second.
+`docs/edits.md` is the format; the `edit-recording` skill is the workflow, `direct-recording` the
+craft of a promo or demo, and `send-feedback` how to report a bug or idea (only after the owner
+says yes). The app reloads changed files within a second.
 
 ## Design notes (LLP)
 

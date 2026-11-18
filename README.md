@@ -112,7 +112,13 @@ Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions,
 ./exact-studio mask latest --rect 0.1,0.2,0.3,0.05 --at 2 --for 6
 ```
 
-[`docs/edits.md`](docs/edits.md) documents every field; [`schema/`](schema) has the JSON Schemas; the `edit-recording` skill (`.claude/skills/`) is the workflow.
+[`docs/edits.md`](docs/edits.md) documents every field; [`schema/`](schema) has the JSON Schemas; the skills in `.claude/skills/` guide an agent:
+
+- `edit-recording`: the workflow and mechanics of recording and editing.
+- `direct-recording`: the craft of making a recording into a promo, demo or ad: the key points, the copy, the pacing, the review.
+- `send-feedback`: what to do when Exact Studio gets in the way: note it, ask, then open an issue or a pull request here.
+
+Claude Code in this folder loads them by itself; through MCP, `edit_format`, `directing_guide` and `feedback_guide` return the same guidance.
 
 ### Recording
 
@@ -135,7 +141,7 @@ An agent records through the app, so the app's Screen Recording permission and i
 
 ### MCP
 
-`mcp/server.ts` gives the same verbs to any MCP client: `list_sources`, `start_recording`, `recording_status`, `stop_recording`, `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `add_image`, `add_sound`, `add_mask`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template` and `edit_format`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
+`mcp/server.ts` gives the same verbs to any MCP client: `list_sources`, `start_recording`, `recording_status`, `stop_recording`, `list_recordings`, `show_recording`, `read_edits`, `write_edits`, `write_look`, `add_image`, `add_sound`, `add_mask`, `validate_recording`, `render_frame` (returns the image), `export_video`, `apply_template`, `edit_format`, `directing_guide` and `feedback_guide`. A write is checked first, and a failed check leaves the file as it was. Claude Code picks it up from `.mcp.json` in this folder. Elsewhere:
 
 ```sh
 claude mcp add exact-studio -- bun /path/to/exact-studio/mcp/server.ts

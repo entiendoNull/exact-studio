@@ -288,6 +288,20 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
     inputSchema: { type: 'object', properties: {} },
     call: async () => text(readFileSync(join(root, 'docs/edits.md'), 'utf8')),
   },
+  {
+    name: 'directing_guide',
+    description:
+      'How to direct a recording into promotional material (a launch video, a demo, an ad): understand the product and the footage, find the key points, write the copy, pace the cuts, place zooms and texts with a reading-speed rule, review and hand over. Read it before editing a recording for an audience. The direct-recording skill.',
+    inputSchema: { type: 'object', properties: {} },
+    call: async () => text(readFileSync(join(root, '.claude/skills/direct-recording/SKILL.md'), 'utf8')),
+  },
+  {
+    name: 'feedback_guide',
+    description:
+      'How to send feedback on Exact Studio (GitHub issues and pull requests on entiendoNull/exact-studio) when you hit a bug, a confusing tool or doc, or a missing feature: note it, ask the person at a natural break, never file without their yes, check for duplicates, write a report without private content. The send-feedback skill.',
+    inputSchema: { type: 'object', properties: {} },
+    call: async () => text(readFileSync(join(root, '.claude/skills/send-feedback/SKILL.md'), 'utf8')),
+  },
 ];
 
 async function handle(msg: any): Promise<unknown> {
@@ -298,7 +312,7 @@ async function handle(msg: any): Promise<unknown> {
         capabilities: { tools: {} },
         serverInfo: { name: 'exact-studio', version: '0.1.0' },
         instructions:
-          'Record and edit Exact Studio screen recordings. To record without a person: list_sources → start_recording (with max_seconds) → drive the app you record with your other tools → stop_recording, which returns the new id → edit it as below. Everything on the source is recorded, so prefer a Simulator or one window, and hide any secret with add_mask. Never stop a recording you did not start. To edit, loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end.',
+          'Record and edit Exact Studio screen recordings. To record without a person: list_sources → start_recording (with max_seconds) → drive the app you record with your other tools → stop_recording, which returns the new id → edit it as below. Everything on the source is recorded, so prefer a Simulator or one window, and hide any secret with add_mask. Never stop a recording you did not start. To edit, loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end. To make a recording into a promo, demo or ad for an audience, read directing_guide first: it decides what to cut, where to zoom, what the texts say and how long they stay. When Exact Studio gets in the way (a bug, a confusing tool, a missing feature), read feedback_guide: note it and ask the person before anything is sent.',
       };
     case 'ping':
       return {};
