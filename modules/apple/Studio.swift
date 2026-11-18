@@ -132,7 +132,7 @@ final class Studio: ExactModule {
     ]
     private static let emptySummary: [String: Any] = [
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "images": 0, "moves": 0, "length": 0, "source": 0, "playing": false,
-        "device": false, "found": false, "cursorDrawn": false, "baseScale": 100, "canUndoTemplate": false,
+        "device": false, "found": false, "cursorDrawn": false, "baseScale": 100, "undoName": "", "redoName": "",
         "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "angleMove": "", "thickness": 5, "edge": "metal",
         "zoomed": false, "wheelZoom": true,
     ]
@@ -294,7 +294,8 @@ final class Studio: ExactModule {
         case "deselect": e.select("")
         case "seg": e.setSegment(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "template": e.applyTemplate(r["kind"] as? String ?? "")
-        case "undo-template": e.undoTemplate()
+        case "undo": e.undo()
+        case "redo": e.redo()
         case "look": e.setLookField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "three": e.setThree(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "volume": e.setVolume((r["number"] as? Double ?? 100) / 100)
