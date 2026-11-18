@@ -44,6 +44,7 @@ final class Studio: ExactModule {
     private var starting = false
     /// The picker while it is open.
     private var picker: AnyObject?
+    private var curtain = Curtain()
     private var statusItem: NSStatusItem?
     private var statusMenu: NSMenu?
     private var soundItem: NSMenuItem?
@@ -96,6 +97,8 @@ final class Studio: ExactModule {
         }
         if context.agent {
             Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true)
+            // @ref LLP 0001#out-of-the-way — a drive's window is off screen, and the drive ends when it goes
+            curtain = Curtain(windows: { [] })
             Pictures.mayAsk = false
             Settings.isolate(in: context.data)
             if let f = ProcessInfo.processInfo.environment["EXACT_STUDIO_FIXTURES"], let ids = try? FileManager.default.contentsOfDirectory(atPath: f) {
@@ -335,9 +338,10 @@ final class Studio: ExactModule {
         if source == "area" {
             let picker = AreaPicker()
             self.picker = picker
+            curtain.close()
             picker.pick { [weak self] area in
                 self?.picker = nil
-                guard let area else { self?.started("", reply); return }
+                guard let area else { self?.curtain.open(); self?.started("", reply); return }
                 self?.begin(source, area: area, reply: reply)
             }
         } else if let kind = picks[source] {
@@ -348,9 +352,10 @@ final class Studio: ExactModule {
             }
             let picker = SourcePicker(kind)
             self.picker = picker
+            curtain.close()
             picker.pick(found) { [weak self] picked in
                 self?.picker = nil
-                guard let picked else { self?.started("", reply); return }
+                guard let picked else { self?.curtain.open(); self?.started("", reply); return }
                 self?.begin(picked, area: nil, reply: reply)
             }
         } else {
@@ -373,6 +378,8 @@ final class Studio: ExactModule {
     private func begin(_ source: String, area: (NSScreen, CGRect)?, reply: ExactReply?, sound: Bool? = nil, by: String = "app",
                        then: ((String) -> Void)? = nil) {
         starting = true
+        // @ref LLP 0001#out-of-the-way — the app stays out of the way while it records, an agent's start too
+        curtain.close()
         let id = Self.newID()
         let folder = Library.recordings.appendingPathComponent(id, isDirectory: true)
         let sound = sound ?? self.sound
@@ -390,6 +397,7 @@ final class Studio: ExactModule {
                 started("", reply, then)
             } catch {
                 try? FileManager.default.removeItem(at: folder)
+                curtain.open()
                 started("Couldn’t start recording: \(error)", reply, then)
             }
         }
@@ -411,6 +419,7 @@ final class Studio: ExactModule {
             return
         }
         recorder = nil
+        curtain.open()
         maxTimer?.invalidate()
         maxTimer = nil
         let by = recordingBy
@@ -657,6 +666,7 @@ final class Studio: ExactModule {
 
     /// The app's own window, forward and unminimised.
     private func showMainWindow() {
+        curtain.open()
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
         guard let w = NSApp.windows.first(where: { $0.canBecomeMain }) else { return }

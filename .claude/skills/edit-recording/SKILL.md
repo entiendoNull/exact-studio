@@ -26,6 +26,8 @@ open it when it is not running. With the MCP server, the tools are `list_sources
 1. `./exact-studio sources`: what can be recorded now. The first word of each line is the name to use.
 2. `./exact-studio record start "simulator:iPhone 17 Pro" --max 120`. A unique part of a name works too.
    It starts at once, with no picker. Always give `--max`, so it stops even if you never get to step 4.
+   Exact Studio's own windows fade out while it records, so they never cover the source, and come back
+   when it stops.
 3. Drive the app you record with your other tools: tap, type, scroll. `record status` says how long so far.
 4. `./exact-studio record stop`: it prints the new recording's id and folder.
 5. Go on with that id: `show`, `validate`, `frame`, then edit and export as below.

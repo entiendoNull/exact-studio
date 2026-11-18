@@ -57,6 +57,7 @@ CLI and the MCP server must all do this well.
 - A start records the same `window:<id>` or `display:<id>` the pickers end in, through the same
   `Recorder.make`. So a Simulator is cropped to the phone and a window keeps its shape (LLP 0001).
 - No picker shows: an agent's start is immediate.
+- The app's windows step out of the way while it records, as for a person (LLP 0001#out-of-the-way).
 
 ## Never take over
 
