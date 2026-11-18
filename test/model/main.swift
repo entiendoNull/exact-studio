@@ -1,5 +1,3 @@
-// The edit model's and the Editor's tests, compiled with the app's own sources by test/model.sh.
-// `model video <out.mov> [seconds]` writes the small capture.mov the fixtures and the UI tests use.
 import AppKit
 import AVFoundation
 
@@ -42,7 +40,6 @@ func seg(_ id: String, _ kind: String, _ start: Double, _ end: Double, lane: Int
     return s
 }
 
-/// Runs the main run loop until `done` holds or `seconds` pass.
 func wait(_ seconds: Double = 5, until done: () -> Bool) -> Bool {
     let end = Date().addingTimeInterval(seconds)
     while !done() {
@@ -272,7 +269,6 @@ try FileManager.default.createDirectory(at: Library.recordings, withIntermediate
 try makeVideo(video, seconds: 10)
 var opened = 0
 
-/// A fresh copy of a fixture recording, opened in an Editor with the playhead at 0.
 func open(_ fixture: String, edits: String? = nil) -> Editor {
     opened += 1
     let id = "\(fixture)-\(opened)"

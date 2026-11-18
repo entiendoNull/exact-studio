@@ -1,0 +1,47 @@
+#!/bin/bash
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+usage="./check [--fast] [--update]
+  Runs every check before a pull request; exit 1 when any fails.
+  --fast    skip the macOS UI tests (they build the app and drive it)
+  --update  rewrite the goldens in test/golden from what the CLI prints now; read the diff before committing"
+
+fast=0
+for a in "$@"; do
+  case "$a" in
+    --fast) fast=1 ;;
+    --update) export UPDATE=1 ;;
+    -h|--help) echo "$usage"; exit 0 ;;
+    *) echo "$usage" >&2; exit 2 ;;
+  esac
+done
+
+failed=()
+step() {
+  local name=$1; shift
+  local start=$SECONDS
+  echo "== $name"
+  if "$@"; then echo "-- $name: ok, $((SECONDS - start)) s"; else echo "-- $name: FAILED"; failed+=("$name"); fi
+}
+
+begin=$SECONDS
+step "design notes (./ref-check)" ./ref-check
+step "the view compiles (contract build)" bun exact.mjs contract build app.contract --json --errors-only
+step "the CLI builds (./exact-studio)" ./exact-studio schema
+step "edit model and Editor (test/model)" test/model.sh "$PWD"
+step "CLI, fixtures, goldens, schemas (test/cli.test.ts)" bun test test/cli.test.ts
+step "MCP server (test/mcp.test.ts)" bun test test/mcp.test.ts
+if [ "$fast" = 0 ]; then
+  step "macOS UI, no recordings (app.test.contract)" bun exact.mjs test macos app.test.contract
+  library=$(bun test/library.ts)
+  step "macOS UI, fixture recordings (test/ui)" env EXACT_STUDIO_FIXTURES="$library" bun exact.mjs test macos test/ui/*.test.contract
+  rm -rf "$library"
+fi
+
+echo
+if [ ${#failed[@]} -gt 0 ]; then
+  echo "FAILED in $((SECONDS - begin)) s: ${failed[*]}"
+  exit 1
+fi
+echo "all checks passed in $((SECONDS - begin)) s$([ "$fast" = 1 ] && echo ' (--fast: no UI tests)')"

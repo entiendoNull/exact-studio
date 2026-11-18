@@ -41,3 +41,5 @@ export function run(lib: string, ...args: string[]) {
   const r = spawnSync(cli, [...args, '--library', lib], { cwd: root, encoding: 'utf8' });
   return { code: r.status ?? -1, out: r.stdout.split(lib).join('<library>'), err: r.stderr.split(lib).join('<library>') };
 }
+
+if (import.meta.main) console.log(library('valid', true));

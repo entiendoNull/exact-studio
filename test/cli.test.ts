@@ -30,7 +30,8 @@ let good = '', bad = '';
 beforeAll(() => {
   good = library('valid', true);
   bad = library('invalid');
-});
+  run(good, 'list');
+}, 300_000);
 afterAll(() => {
   drop(good);
   drop(bad);

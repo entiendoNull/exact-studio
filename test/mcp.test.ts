@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { drop, library, root } from './library';
+import { drop, library, root, run } from './library';
 
 let lib = '';
 let server: ReturnType<typeof Bun.spawn>;
@@ -35,6 +35,7 @@ const tool = async (name: string, args: object) => (await call('tools/call', { n
 
 beforeAll(() => {
   lib = library('valid');
+  run(lib, 'list');
   server = Bun.spawn(['bun', join(root, 'mcp/server.ts')], {
     cwd: root,
     stdin: 'pipe',
@@ -43,7 +44,7 @@ beforeAll(() => {
     env: { ...process.env, EXACT_STUDIO_LIBRARY: lib, EXACT_STUDIO_NO_LAUNCH: '1' },
   });
   lines = split(server.stdout as ReadableStream<Uint8Array>)[Symbol.asyncIterator]();
-});
+}, 300_000);
 
 afterAll(() => {
   server.kill();
