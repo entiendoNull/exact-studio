@@ -33,6 +33,7 @@ step "edit model and Editor (test/model)" test/model.sh "$PWD"
 step "CLI, fixtures, goldens, schemas (test/cli.test.ts)" bun test test/cli.test.ts
 step "MCP server (test/mcp.test.ts)" bun test test/mcp.test.ts
 step "effects reference (test/effects.test.ts)" bun test test/effects.test.ts
+step "no other app named (test/no-other-apps.test.ts)" bun test test/no-other-apps.test.ts
 if [ "$fast" = 0 ]; then
   step "macOS UI, no recordings (app.test.contract)" bun exact.mjs test macos app.test.contract
   library=$(bun test/library.ts)

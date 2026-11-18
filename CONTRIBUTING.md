@@ -85,6 +85,7 @@ The UI tests click the timeline at fixed points (`tap "timeline" drag 0 0 from x
 
 - Keep each pull request to one change.
 - Say what changed and how you tested it. Add a screenshot or a short video when the change is visible.
+- Never name another app, in the app, the code, the docs, commits or pull requests. Describe the pattern instead. `./check` refuses known names.
 - A maintainer reviews and merges it.
 
 ## Report a bug or ask for a feature
