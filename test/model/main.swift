@@ -102,6 +102,45 @@ test("an empty file takes every default") {
     eq(e.volume, 1); eq(e.three.on, false); eq(e.base, Placement()); eq(e.segments.count, 0)
 }
 
+test("every key the format calls optional takes its documented default") {
+    let e = try decode("""
+    { "textLanes": 1, "imageLanes": 1, "base": { "x": 0.2 },
+      "segments": [
+        { "id": "z", "kind": "zoom", "start": 1, "end": 2, "level": 2 },
+        { "id": "k", "kind": "mask", "start": 1, "end": 2, "rect": { "x": 0, "y": 0, "w": 0.5, "h": 0.5 } },
+        { "id": "i", "kind": "image", "start": 1, "end": 5, "file": "images/logo.png",
+          "moves": [{ "id": "im", "t": 3, "to": { "scale": 0.5 } }],
+          "effects": [{ "id": "fx", "kind": "pulse", "start": 2, "end": 3 }] }
+      ],
+      "moves": [{ "id": "m", "t": 1, "to": {} }, { "id": "a", "t": 2, "to": { "x": 0.3 }, "angles": { "turn": 20 } }],
+      "sounds": [{ "id": "s", "file": "sounds/beep.wav", "start": 0, "length": 1 }] }
+    """)
+    eq(e.segments.map(\.lane), [0, 0, 0], "a segment's lane")
+    eq(e.segments[1].style, nil, "a mask's style is left out, and drawn as blur")
+    let image = e.segments[2]
+    eq(image.effects?.first?.lane, 0, "an image effect's lane")
+    eq(image.moves?.first, Move(id: "im", t: 3, to: Placement(x: 0.5, y: 0.5, scale: 0.5), style: "smooth", duration: 0.8))
+    eq(e.moves[0], Move(id: "m", t: 1, to: Placement(), style: "smooth", duration: 0.8, angles: nil))
+    eq(e.moves[1].to, Placement(x: 0.3, y: 0.5, scale: 1)); eq(e.moves[1].angles, Angles(tilt: 0, turn: 20, roll: 0))
+    eq(e.base, Placement(x: 0.2, y: 0.5, scale: 1))
+    eq(e.sounds.first?.lane, 0); eq(e.sounds.first?.volume, 1)
+}
+
+test("a file that truly can't be read says where, and a missing file is no file") {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("exact-studio-read-\(getpid()).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try? FileManager.default.removeItem(at: url)
+    expect(try EditFile.read(Edits.self, url) == nil, "a missing file reads as none")
+    for (json, why) in [("{ \"lanes\": \"two\" }", "lanes: Expected to decode Int but found a string instead."),
+                        ("{ \"moves\": [{ \"id\": \"m\", \"to\": {} }] }", "moves.Index 0: missing t"),
+                        ("{ \"segments\": [", "The given data was not valid JSON.")] {
+        try Data(json.utf8).write(to: url)
+        do { _ = try EditFile.read(Edits.self, url); expect(false, "\(json) was read") } catch {
+            expect(EditFile.problem(error).hasPrefix(why), "\(json): \(EditFile.problem(error))")
+        }
+    }
+}
+
 test("an old file: cuts become splits, texts and whole-frame effects get lanes of their own, each image keeps a lane") {
     let e = try JSONDecoder().decode(Edits.self, from: Data(contentsOf: fixtures.appendingPathComponent("valid/old-format/edits.json")))
     eq(e.splits, [4, 5]); eq(e.removed, [4])
@@ -269,7 +308,7 @@ try FileManager.default.createDirectory(at: Library.recordings, withIntermediate
 try makeVideo(video, seconds: 10)
 var opened = 0
 
-func open(_ fixture: String, edits: String? = nil) -> Editor {
+func open(_ fixture: String, edits: String? = nil, look: String? = nil) -> Editor {
     opened += 1
     let id = "\(fixture)-\(opened)"
     let folder = Library.recordings.appendingPathComponent(id)
@@ -283,6 +322,7 @@ func open(_ fixture: String, edits: String? = nil) -> Editor {
     meta["id"] = id
     try! JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
     if let edits { try! Data(edits.utf8).write(to: folder.appendingPathComponent("edits.json")) }
+    if let look { try! Data(look.utf8).write(to: folder.appendingPathComponent("look.json")) }
     UserDefaults.standard.removeObject(forKey: "ExactStudio.folded")
     let e = Editor(id: id)!
     expect(wait { e.player.currentItem?.status == .readyToPlay }, "the player never got ready")
@@ -524,6 +564,44 @@ test("an edit made on disk shows in the open editor") {
     try JSONEncoder().encode(next).write(to: e.folder.appendingPathComponent("edits.json"))
     expect(wait(4) { e.edits.splits == [5] }, "the editor never read the file")
     eq(e.edits.zooms.map(\.id), ["z"])
+}
+
+test("a file without lanes, styles or durations opens as written, and the next change keeps it") {
+    let e = open("empty", edits: """
+    { "segments": [{ "id": "z", "kind": "zoom", "start": 1, "end": 2, "level": 2 }], "moves": [{ "id": "m", "t": 3, "to": { "x": 0.3 } }] }
+    """)
+    eq(e.unreadable, [:]); eq(e.edits.zooms.map(\.id), ["z"]); eq(e.edits.moves.map(\.style), ["smooth"])
+    at(e, 5); e.splitClip()
+    eq(onDisk(e).zooms.map(\.id), ["z"], "saved with the zoom"); eq(onDisk(e).moves.first?.to.x, 0.3)
+}
+
+test("an edits.json the app can't read is never saved over; fixed on disk, it opens and saves again") {
+    let bad = "{ \"lanes\": \"two\", \"splits\": [3] }"
+    let e = open("empty", edits: bad)
+    let file = e.folder.appendingPathComponent("edits.json")
+    expect(e.unreadable["edits.json"]?.hasPrefix("edits.json can’t be read (lanes: Expected to decode Int") == true, "\(e.unreadable)")
+    eq(e.selection["problem"] as? String, e.unreadable["edits.json"], "the inspector shows it")
+    at(e, 1); e.add("zoom-in"); e.splitClip(); e.setVolume(0.5); e.autoZoom(); e.clearAll(); e.addLane()
+    eq(e.problem, e.unreadable["edits.json"]); eq(e.edits, Edits())
+    eq(try String(contentsOf: file, encoding: .utf8), bad, "the file is untouched")
+    e.select("p:0")
+    eq(e.selection["problem"] as? String, e.unreadable["edits.json"], "selecting does not hide it")
+    try Data("{ \"splits\": [5] }".utf8).write(to: file)
+    expect(wait(4) { e.unreadable.isEmpty && e.edits.splits == [5] }, "the editor never read the fixed file")
+    eq(e.selection["problem"] as? String, "")
+    at(e, 7); e.splitClip()
+    eq(onDisk(e).splits, [5, 7], "it saves again")
+}
+
+test("a look.json the app can't read is never saved over") {
+    let bad = "{ \"padding\": \"lots\" }"
+    let e = open("empty", look: bad)
+    expect(e.unreadable["look.json"] != nil, "look.json read")
+    e.setLookField("padding", "20")
+    eq(try String(contentsOf: e.folder.appendingPathComponent("look.json"), encoding: .utf8), bad)
+    expect(e.problem.hasPrefix("look.json can’t be read"), e.problem)
+    at(e, 1); e.add("zoom-in")
+    eq(e.edits.zooms.count, 1, "edits.json is fine, so edits still save")
 }
 
 test("the inspector's selection says what is selected") {

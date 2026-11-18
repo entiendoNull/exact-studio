@@ -98,22 +98,100 @@ describe('invalid recordings fail validate with the expected lines', () => {
     expect(masks).toContain('/segments/0: missing rect');
     expect(masks).toContain('/segments/1/radius: 0.8 is above 0.5');
     expect(masks).toContain('/segments/1/color: matches none of its forms');
+    expect(masks).toContain('/segments/1/style: "glow" is not one of blur, pixels, solid');
+    expect(readFileSync(join(golden, 'validate/mask-problems.txt'), 'utf8')).toContain('no mask style glow; one of blur, pixels, solid');
+    expect(check(editsSchema, { segments: [{ id: 't', kind: 'text', start: 0, end: 1, text: 'Hi', style: 'pill' }] })).toEqual([]);
   });
 
-  test.failing('KNOWN BUG: a segment without lane, or a move without style or duration, is refused though the schema allows it', () => {
+  test('every key the format calls optional may be left out: validate, show and the verbs keep the edit', () => {
     const edits = {
       textLanes: 0,
-      segments: [{ id: 'z', kind: 'zoom', start: 1, end: 2, level: 2 }],
-      moves: [{ id: 'm', t: 1, to: { x: 0.5, y: 0.5, scale: 1 } }],
+      imageLanes: 1,
+      base: { x: 0.4 },
+      segments: [
+        { id: 'z', kind: 'zoom', start: 1, end: 2, level: 2 },
+        { id: 'k', kind: 'mask', start: 3, end: 4, rect: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } },
+        {
+          id: 'i', kind: 'image', start: 5, end: 9, file: 'images/logo.png',
+          moves: [{ id: 'im', t: 7, to: { scale: 0.5 } }],
+          effects: [{ id: 'fx', kind: 'pulse', start: 6, end: 7 }],
+        },
+      ],
+      moves: [{ id: 'm', t: 1, to: { x: 0.5, y: 0.5, scale: 1 } }, { id: 'n', t: 3, to: { y: 0.6 }, angles: { turn: 20 } }],
+      sounds: [{ id: 's', file: 'sounds/beep.wav', start: 0, length: 1 }],
     };
     expect(check(editsSchema, edits)).toEqual([]);
     const dir = library('valid');
     try {
       writeFileSync(join(dir, 'empty/edits.json'), JSON.stringify(edits));
       expect(run(dir, 'validate', 'empty').out).toBe('ok\n');
+      const shown = run(dir, 'show', 'empty');
+      expect(shown.code).toBe(0);
+      expect(shown.out).toContain('e0: 0:01.00–0:02.00  zoom 2.0×  [z]');
+      expect(shown.out).toContain('mask blur rect x 0.1 y 0.1 w 0.2 h 0.2 (full frame)');
+      expect(shown.out).toContain('move lands 0:07.00 after 0.8s smooth: x 0.5 y 0.5 scale 0.5  [im]');
+      expect(shown.out).toContain('effect pulse 0:06.00–0:07.00  [fx]');
+      expect(shown.out).toContain('lands 0:01.00 after 0.8s smooth: x 0.5 y 0.5 scale 1.0  [m]');
+      expect(shown.out).toContain('lands 0:03.00 after 0.8s smooth: x 0.5 y 0.6 scale 1.0  3D tilt 0.0 turn 20.0 roll 0.0  [n]');
+      expect(shown.out).toContain('s0: from 0:00.00 for 1.0s');
+      expect(run(dir, 'mask', 'empty', '--rect', '0.5,0.5,0.1,0.1', '--at', '6').code).toBe(0);
+      const saved = JSON.parse(readFileSync(join(dir, 'empty/edits.json'), 'utf8'));
+      expect(saved.segments.map((s: any) => s.id).slice(0, 3)).toEqual(['z', 'k', 'i']);
+      expect(saved.moves.map((m: any) => [m.id, m.style, m.duration])).toEqual([['m', 'smooth', 0.8], ['n', 'smooth', 0.8]]);
+      expect(saved.base).toEqual({ x: 0.4, y: 0.5, scale: 1 });
+      expect(check(editsSchema, saved)).toEqual([]);
     } finally {
       drop(dir);
     }
+  });
+});
+
+describe('a file that can\'t be read is never written over', () => {
+  let dir = '';
+  const broken = '{ "segments": [ { "id": "z", "kind": "zoom", "start": 1, "end": 2, "level": 2 }, ] ';
+  beforeAll(() => {
+    dir = library('valid');
+    writeFileSync(join(dir, 'empty/edits.json'), broken);
+    writeFileSync(join(dir, 'full/look.json'), '{ "padding": "lots" }');
+  });
+  afterAll(() => drop(dir));
+
+  test('validate says why; show stops with exit 1 and shows no empty edit', () => {
+    const v = run(dir, 'validate', 'empty');
+    expect(v.code).toBe(1);
+    expect(v.out).toStartWith('edits.json: The given data was not valid JSON.');
+    const shown = run(dir, 'show', 'empty');
+    expect(shown.code).toBe(1);
+    expect(shown.out).toBe('');
+    expect(shown.err).toContain("empty can't be read, so nothing was done; the file is left as it is.");
+    const json = run(dir, 'show', 'empty', '--json');
+    expect(json.code).toBe(1);
+    const parsed = JSON.parse(json.out);
+    expect(parsed).toMatchObject({ id: 'empty', folder: '<library>/empty' });
+    expect(parsed.unreadable).toEqual([v.out.split('\n')[0]]);
+    expect(run(dir, 'show', 'full').err).toStartWith('look.json: padding: Expected to decode Double but found a string instead.\n');
+  });
+
+  test('template, image, sound, mask, frame and export refuse it, and the files stay byte for byte', () => {
+    const look = readFileSync(join(dir, 'full/look.json'), 'utf8');
+    const fullEdits = readFileSync(join(dir, 'full/edits.json'), 'utf8');
+    for (const id of ['empty', 'full']) {
+      for (const args of [
+        ['template', id, 'launch'],
+        ['image', id, join(fixtures, 'media/logo.png')],
+        ['sound', id, join(fixtures, 'media/beep.wav')],
+        ['mask', id, '--rect', '0.1,0.1,0.2,0.2'],
+        ['frame', id, '1', '--out', join(dir, 'frame.png')],
+        ['export', id, '--out', join(dir, 'out.mp4')],
+      ]) {
+        const r = run(dir, ...args);
+        expect(r.code).toBe(1);
+        expect(r.err).toContain(`${id} can't be read, so nothing was done`);
+      }
+    }
+    expect(readFileSync(join(dir, 'empty/edits.json'), 'utf8')).toBe(broken);
+    expect(readFileSync(join(dir, 'full/look.json'), 'utf8')).toBe(look);
+    expect(readFileSync(join(dir, 'full/edits.json'), 'utf8')).toBe(fullEdits);
   });
 });
 

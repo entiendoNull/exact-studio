@@ -64,6 +64,8 @@ Recording, through the Exact Studio app (opened when it is not running):
   <id> is a recording folder's name, a unique start of one, or "latest".
   --library <dir> (or EXACT_STUDIO_LIBRARY) names the Recordings folder;
   the default is ~/Movies/Exact Studio/Recordings.
+  When edits.json or look.json can't be read, every verb but validate stops with exit 1 and never writes over it;
+  validate lists why, and show --json gives the folder with the problems under "unreadable".
   The app watches these files: an edit made here shows in its open preview within a second.
 """
 
@@ -91,6 +93,7 @@ let library = URL(fileURLWithPath: option("--library") ?? ProcessInfo.processInf
 struct Recording {
     let id: String, folder: URL, meta: RecordingMeta
     var edits: Edits, look: Look, cursor: [Point]
+    var unreadable: [String]
 }
 
 func decode<T: Decodable>(_ type: T.Type, _ url: URL) throws -> T {
@@ -103,7 +106,8 @@ func all() -> [(String, RecordingMeta)] {
         .sorted { $0.1.created > $1.1.created }
 }
 
-func open(_ ref: String) -> Recording {
+// @ref LLP 0004#a-file-that-cannot-be-read
+func open(_ ref: String, readable: Bool = true) -> Recording {
     let list = all()
     let id: String
     if ref == "latest", let first = list.first { id = first.0 }
@@ -115,10 +119,19 @@ func open(_ ref: String) -> Recording {
     }
     let folder = library.appendingPathComponent(id)
     let meta = list.first { $0.0 == id }!.1
-    let edits = (try? decode(Edits.self, folder.appendingPathComponent("edits.json"))) ?? Edits()
-    let look = (try? decode(Look.self, folder.appendingPathComponent("look.json"))) ?? Look()
+    var unreadable: [String] = []
+    func load<T: Decodable>(_ name: String, _ fallback: T) -> T {
+        do { return try EditFile.read(T.self, folder.appendingPathComponent(name)) ?? fallback } catch {
+            unreadable.append("\(name): \(EditFile.problem(error))")
+            return fallback
+        }
+    }
+    let edits = load("edits.json", Edits()), look = load("look.json", Look())
     let cursor = (try? decode([Point].self, folder.appendingPathComponent("cursor.json"))) ?? []
-    return Recording(id: id, folder: folder, meta: meta, edits: edits, look: look, cursor: cursor)
+    if readable, !unreadable.isEmpty {
+        fail((unreadable + ["\(id) can't be read, so nothing was done; the file is left as it is. Fix it (exact-studio validate \(id) lists the problems)."]).joined(separator: "\n"), code: 1)
+    }
+    return Recording(id: id, folder: folder, meta: meta, edits: edits, look: look, cursor: cursor, unreadable: unreadable)
 }
 
 func write<T: Encodable>(_ value: T, _ url: URL) {
@@ -154,21 +167,8 @@ func maskProblems(_ s: Segment) -> [String] {
 
 /// Problems with a recording's edits, each a line; empty when it is fine.
 func problems(_ r: Recording) -> [String] {
-    var out: [String] = []
+    var out = r.unreadable
     let folder = r.folder
-    for name in ["edits.json", "look.json"] {
-        let url = folder.appendingPathComponent(name)
-        guard FileManager.default.fileExists(atPath: url.path) else { continue }
-        do {
-            if name == "edits.json" { _ = try decode(Edits.self, url) } else { _ = try decode(Look.self, url) }
-        } catch let DecodingError.typeMismatch(_, c), let DecodingError.valueNotFound(_, c) {
-            out.append("\(name): \(c.codingPath.map(\.stringValue).joined(separator: ".")): \(c.debugDescription)")
-        } catch let DecodingError.keyNotFound(k, c) {
-            out.append("\(name): \(c.codingPath.map(\.stringValue).joined(separator: ".")): missing \(k.stringValue)")
-        } catch {
-            out.append("\(name): \(error)")
-        }
-    }
     let d = r.meta.duration, e = r.edits
     // Opening a file raises each lane count to fit, so the counts are checked as the file declares them.
     // A missing count is derived, as is `lanes` in an old file without `textLanes`: its lanes are renumbered.
@@ -329,9 +329,15 @@ case "list":
 
 case "show":
     guard let ref = args.first else { fail(usage) }
-    let r = open(ref)
+    let json = flag("--json")
+    let r = open(ref, readable: !json)
+    if json, !r.unreadable.isEmpty {
+        let out: [String: Any] = ["id": r.id, "name": r.meta.name, "kind": r.meta.kind, "folder": r.folder.path, "unreadable": r.unreadable]
+        print(String(data: try! JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), encoding: .utf8)!)
+        exit(1)
+    }
     let map = TimeMap(duration: r.meta.duration, edits: r.edits)
-    if flag("--json") {
+    if json {
         let pieces = r.edits.pieces(r.meta.duration).map { ["start": $0.start, "end": $0.end, "removed": $0.removed] as [String: Any] }
         let out: [String: Any] = ["id": r.id, "name": r.meta.name, "kind": r.meta.kind, "recorded": r.meta.duration, "length": map.outputDuration,
                                   "folder": r.folder.path, "clicks": r.meta.clicks.map(\.t), "parts": pieces]
@@ -389,7 +395,7 @@ case "show":
 
 case "validate":
     guard let ref = args.first else { fail(usage) }
-    let found = problems(open(ref))
+    let found = problems(open(ref, readable: false))
     if found.isEmpty { print("ok") } else { found.forEach { print($0) }; exit(1) }
 
 case "frame":

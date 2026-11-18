@@ -49,7 +49,9 @@ The loop, from this repository's root:
    it copies the file into the recording and prints the new `image` segment, on the first image
    lane free at that time. Then edit that segment's place, size, moves and effects in `edits.json`. Never point `file` outside the
    recording's folder.
-3. `./exact-studio validate <id>` until it prints `ok`.
+3. `./exact-studio validate <id>` until it prints `ok`. When it says `edits.json` or `look.json` can't
+   be read (broken JSON, a wrong type), every other verb and the app refuse the recording and never
+   write over that file. Fix the file itself; do not delete or replace it, since it is the only copy of the edit.
 4. `./exact-studio frame <id> <seconds>` and look at `.exact/frame.png` at the moments that matter
    (a title's middle, a move's landing, a cut). `--source` takes recording time. `--raw` renders the
    full recorded frame there instead, before the crop, to measure a mask on (see below).

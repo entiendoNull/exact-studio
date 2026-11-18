@@ -1,0 +1,4 @@
+{
+  "segments": [
+    { "id": "z", "kind": "zoom", "start": 1, "end": 2, "level": 2 },
+  ]

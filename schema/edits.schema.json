@@ -65,7 +65,8 @@
           "description": "1 fills the frame inside the padding"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "description": "Where the video sits before any move. A missing x or y is 0.5, a missing scale 1"
     },
     "moves": {
       "type": "array",
@@ -95,7 +96,8 @@
                 "description": "1 fills the frame inside the padding"
               }
             },
-            "additionalProperties": false
+            "additionalProperties": false,
+            "description": "Where it lands. A missing x or y is 0.5, a missing scale 1"
           },
           "style": {
             "enum": [
@@ -107,12 +109,13 @@
               "fade",
               "spin",
               "pop"
-            ]
+            ],
+            "description": "Default smooth"
           },
           "duration": {
             "type": "number",
             "exclusiveMinimum": 0,
-            "description": "Seconds it travels before t"
+            "description": "Seconds it travels before t. Default 0.8"
           },
           "angles": {
             "type": "object",
@@ -128,7 +131,7 @@
               }
             },
             "additionalProperties": false,
-            "description": "Degrees: tilt leans the top away, turn swings the right side away, roll turns it flat."
+            "description": "Degrees: tilt leans the top away, turn swings the right side away, roll turns it flat. A missing one is 0; no angles keeps the angle it had."
           }
         },
         "additionalProperties": false,
@@ -275,7 +278,7 @@
           "lane": {
             "type": "integer",
             "minimum": 0,
-            "description": "Its lane among its own kind: an effect lane, a text lane, an image lane (0 in front) or a whole-frame lane. Two segments on one lane never overlap in time"
+            "description": "Its lane among its own kind: an effect lane, a text lane, an image lane (0 in front) or a whole-frame lane. Two segments on one lane never overlap in time. Default 0"
           },
           "level": {
             "type": "number",
@@ -439,7 +442,8 @@
                       "description": "Multiplies the image's size: 1 keeps it"
                     }
                   },
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "description": "Where it lands. A missing x or y is 0.5, a missing scale 1"
                 },
                 "style": {
                   "enum": [
@@ -451,12 +455,13 @@
                     "fade",
                     "spin",
                     "pop"
-                  ]
+                  ],
+                  "description": "Default smooth"
                 },
                 "duration": {
                   "type": "number",
                   "exclusiveMinimum": 0,
-                  "description": "Seconds it travels before t"
+                  "description": "Seconds it travels before t. Default 0.8"
                 }
               },
               "additionalProperties": false,
@@ -575,7 +580,16 @@
             "then": {
               "required": [
                 "rect"
-              ]
+              ],
+              "properties": {
+                "style": {
+                  "enum": [
+                    "blur",
+                    "pixels",
+                    "solid"
+                  ]
+                }
+              }
             }
           }
         ]

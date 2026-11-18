@@ -72,7 +72,14 @@ plays. Cuts and speed changes make the two differ: `show` prints both lengths, a
 }
 ```
 
-Every key is optional; a missing one takes its default.
+Every key is optional; a missing one takes its default. Inside a segment, a sound or a move, only
+the keys named as required are needed; every other key there takes its default too.
+
+**A file that can't be read is never written over.** When `edits.json` or `look.json` is not
+valid JSON, or a value has the wrong type, the app opens the recording without it, says why in the
+inspector, and saves nothing over that file until it is fixed; it reads the fixed file within a
+second. The CLI does the same: every verb but `validate` stops with exit 1 and writes nothing, and
+`validate` says why. A missing file is no problem: the recording starts clean.
 
 ### Cutting: `splits`, `removed`, `transitions`
 
@@ -91,8 +98,8 @@ The recorded sound, if any, follows the picture: it is cut, sped up and faded at
 
 ### Segments
 
-Each has an `id` (any unique string without a colon), `kind`, `start`, `end` (at least 0.1 s apart)
-and `lane` (0 up). A segment's kind decides which rows its `lane` counts:
+Each has an `id` (any unique string without a colon), `kind`, `start`, `end` (at least 0.1 s apart),
+all required, and `lane` (0 up, default 0). A segment's kind decides which rows its `lane` counts:
 
 | what | kinds | its `lane` counts | how many there are |
 |---|---|---|---|
@@ -171,14 +178,15 @@ BMP; a PNG keeps its transparency); `x`, `y` (its centre, 0–1 of the frame, to
 `animIn` (`pop`, `fade`, `rise`, `slide`, `spin`, `blur`, `none`); `animOut` (`fade`, `pop`, `sink`,
 `blur`, `none`).
 
-**Its own moves, `moves`:** an image moves the way the video does. Each move lands at time `t`
-(inside the image's span), having travelled for `duration` seconds before it, in `style` (`smooth`,
-`linear`, `spring`, `pop`, `swipe`, `fade`, `spin`, `zoom`). `to` is where it lands: `x`, `y`, and
-`scale`, which multiplies `size` (1 keeps it, 0.5 halves it). Before its first move the image is at
+**Its own moves, `moves`:** an image moves the way the video does. Each move has an `id` and lands at
+time `t` (inside the image's span), having travelled for `duration` seconds before it (default 0.8),
+in `style` (`smooth`, the default, `linear`, `spring`, `pop`, `swipe`, `fade`, `spin`, `zoom`). `to`
+is where it lands: `x`, `y` (default 0.5), and `scale`, which multiplies `size` (1 keeps it, the
+default; 0.5 halves it). Before its first move the image is at
 `x`, `y` and `size`.
 
 **Its own effects, `effects`:** each has an `id`, `kind`, `start`, `end` (inside the image's span)
-and `lane` (its row under the image, 0 up). They ease in and out over 0.3 s and touch only this
+and `lane` (its row under the image, 0 up, default 0). They ease in and out over 0.3 s and touch only this
 image. Kinds: `blur`; `mono` (black and white); `fade` (to `level`, an opacity of 0–1, default 0.3);
 `pulse`, `float` and `wiggle` (a gentle motion while they last). Two effects on one `lane` must not
 overlap, nor two of the same kind on any lane.
@@ -270,12 +278,13 @@ and take it from `length`.
 
 ### Placement and moves: `base`, `moves`
 
-`base` is where the video sits before any move: `x`, `y` its centre (0–1, top-left origin), `scale`
-(1 fills the frame inside the padding). Each move lands at time `t`, having travelled for
-`duration` seconds before it, in `style`: `smooth`, `linear`, `spring`, `zoom` (through full screen),
-`swipe`, `fade`, `spin`, `pop`. `to` is where it lands (`x`, `y`, `scale`), and `angles` (`tilt`, `turn`,
-`roll` in degrees) the 3D angle it lands at, used while `three.on`; without `angles` it keeps the
-angle it had.
+`base` is where the video sits before any move: `x`, `y` its centre (0–1, top-left origin, default
+0.5), `scale` (1 fills the frame inside the padding, the default). Each move has an `id` and lands at
+time `t`, having travelled for `duration` seconds before it (default 0.8), in `style`: `smooth` (the
+default), `linear`, `spring`, `zoom` (through full screen), `swipe`, `fade`, `spin`, `pop`. `to` is
+where it lands (`x`, `y`, `scale`, with the same defaults as `base`), and `angles` (`tilt`, `turn`,
+`roll` in degrees, each default 0) the 3D angle it lands at, used while `three.on`; without `angles`
+it keeps the angle it had.
 
 ### 3D: `three`
 
