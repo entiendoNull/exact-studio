@@ -8,7 +8,11 @@ test "a recording opens with its preview, timeline, inspector and look"
   expect tree has "inspector"
   expect tree missing "empty"
   expect text "length" == "Video 0:09 · recorded 0:10"
-  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 10
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
   expect state background == "custom"
   expect state aspect == "9:16"
 
@@ -16,7 +20,11 @@ test "an empty recording has one clip part and nothing on it"
   tap "recording-empty"
   clock data
   expect text "length" == "Video 0:10 · recorded 0:10"
-  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+  expect state summary.parts == 1
+  expect state summary.removed == 0
+  expect state summary.effects == 0
+  expect state summary.lanes == 1
+  expect state summary.moves == 0
 
 test "a click on a zoom selects it; the inspector sets its level and deletes it"
   tap "recording-full"
@@ -32,7 +40,11 @@ test "a click on a zoom selects it; the inspector sets its level and deletes it"
   tap "segment-delete"
   clock data
   expect tree missing "segment"
-  expect text "summary" == "4 clip parts (1 removed) · 9 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 9
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
 
 test "a click on a mask selects it and shows its style"
   tap "recording-full"
@@ -66,7 +78,11 @@ test "Split Clip with the playhead at the start says why it can't"
   tap "split-clip"
   clock data
   expect text "problem" == "Move the playhead into the clip to split it."
-  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+  expect state summary.parts == 1
+  expect state summary.removed == 0
+  expect state summary.effects == 0
+  expect state summary.lanes == 1
+  expect state summary.moves == 0
 
 test "a template replaces the edit; Undo and Redo take it back and forth"
   tap "recording-full"
@@ -78,7 +94,11 @@ test "a template replaces the edit; Undo and Redo take it back and forth"
   expect state summary.undoName == "Template"
   tap "undo"
   clock data
-  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 10
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
   expect state summary.redoName == "Template"
   tap "redo"
   clock data
@@ -120,25 +140,40 @@ test "while a text field has the focus, ⌘Z is the field's"
 test "Clear Edits asks first, names the recording, and can be undone"
   tap "recording-full"
   clock data
+  tap "inspector-more"
   tap "clear"
   clock settle
   tap "clear-cancel"
   clock settle
-  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 10
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
+  tap "inspector-more"
   tap "clear"
   clock settle
   tap "clear-confirm"
   clock settle
   clock data
-  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+  expect state summary.parts == 1
+  expect state summary.removed == 0
+  expect state summary.effects == 0
+  expect state summary.lanes == 1
+  expect state summary.moves == 0
   expect state summary.undoName == "Clear Edits"
   tap "undo"
   clock data
-  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.parts == 4
+  expect state summary.removed == 1
+  expect state summary.effects == 10
+  expect state summary.lanes == 6
+  expect state summary.moves == 1
 
 test "Delete asks first and names the recording; Cancel keeps it"
   tap "recording-empty"
   clock data
+  tap "inspector-more"
   tap "delete"
   clock settle
   expect state removingName == "Empty window"
@@ -146,6 +181,7 @@ test "Delete asks first and names the recording; Cancel keeps it"
   clock settle
   clock data
   expect tree has "recording-empty"
+  tap "inspector-more"
   tap "delete"
   clock settle
   tap "delete-confirm"
@@ -157,6 +193,7 @@ test "Delete asks first and names the recording; Cancel keeps it"
 test "the floating settings panel stays on the stage"
   tap "recording-full"
   clock settle
+  tap "inspector-more"
   tap "panel-menu-button"
   tap "menu-panel-float"
   clock settle
@@ -209,3 +246,21 @@ test "Motion Paths is on by default, turns off, and stays off after a relaunch"
   clock data
   tap "motion-paths"
   expect state showMotionPaths == true
+
+test "the inspector is calm: nothing selected shows the Frame, with no help text"
+  tap "recording-full"
+  clock data
+  expect text "inspector-title" == "Frame"
+  expect tree has "inspector-hint"
+  expect tree missing "sec-help"
+  expect tree has "sec-bg"
+
+test "a recording is deleted from its Library row's right-click menu, after asking"
+  tap "recording-empty" contextmenu
+  tap "library-delete"
+  clock settle
+  expect state removingName == "Empty window"
+  tap "delete-confirm"
+  clock settle
+  clock data
+  expect tree missing "recording-empty"
