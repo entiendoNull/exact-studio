@@ -184,7 +184,6 @@ component ExactStudio
   state listed = 0
   state typingIn = ""
   state removing = ""
-  // The Library row a right-click opened its menu on.
   state aimed = ""
   resource status = recorderStatus() as shape Status else empty()
   resource sources = captureSources(listed) as shape SourceList else empty()
@@ -663,7 +662,6 @@ component ExactStudio
                         text "Clear Edits…"
                       button press=askRemove(selected) popovertarget="inspector-menu" popovertargetaction="hide" destructive=true testId="delete"
                         text "Delete Recording…"
-                  // Edit ▸ Clear Edits… and File ▸ Delete Recording…: menu bar items, with no place on the page.
                   row width=0 height=0 overflow="hidden" margin-top=-30
                     button press=askClear -exact-menu="edit" aria-label="Clear Edits…" testId="menu-clear"
                       text "Clear Edits…"

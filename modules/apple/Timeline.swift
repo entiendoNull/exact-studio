@@ -362,13 +362,19 @@ final class TimelineView: NSView {
         guard let d = editor?.duration, d > 0 else { return 0 }
         return origin + Double(min(max((x - trackRect.minX) / trackRect.width, 0), 1)) * span
     }
-    /// Whether a row has a + that adds to it: the Position rows, the first lane of the video's
-    /// effects, the groups' headers, and an image's first effects row.
-    private func hasPlus(_ r: Row) -> Bool {
+    private func menuRow(_ r: Row) -> TimelineRow? {
         switch r.kind {
-        case .position, .header, .imagePosition, .lane(0, 0), .imageEffects(_, 0): return true
-        default: return false
+        case .position: return .position
+        case let .header(key): return .header(key)
+        case let .lane(space, lane): return .lane(space, lane)
+        case let .imagePosition(id): return .imagePosition(id)
+        case let .imageEffects(id, lane): return .imageEffects(id, lane)
+        case .sound: return nil
         }
+    }
+    private func hasPlus(_ r: Row) -> Bool {
+        guard let editor, let row = menuRow(r) else { return false }
+        return TimelineMenus.plus(row, editor) != nil
     }
     /// At the end of the row's label, every row's in one column just left of the track.
     private func plusRect(_ r: Row) -> CGRect {
@@ -973,56 +979,49 @@ final class TimelineView: NSView {
     private final class Act: NSObject { let run: () -> Void; init(_ run: @escaping () -> Void) { self.run = run } }
     @objc private func picked(_ item: NSMenuItem) { (item.representedObject as? Act)?.run() }
 
-    /// A menu under a row's +: titles and what each does; a nil action is a caption, "-" a line.
-    private func popUp(_ items: [(String, (() -> Void)?)], under r: CGRect) {
+    private func nsMenu(_ entries: [MenuEntry]) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        for (title, action) in items {
-            if title == "-" { menu.addItem(.separator()); continue }
-            let item = NSMenuItem(title: title, action: action == nil ? nil : #selector(picked(_:)), keyEquivalent: "")
-            item.target = self
-            item.isEnabled = action != nil
-            item.representedObject = action.map(Act.init)
-            menu.addItem(item)
+        for entry in entries {
+            switch entry {
+            case .line: menu.addItem(.separator())
+            case let .title(text):
+                let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+            case let .item(title, run):
+                let item = NSMenuItem(title: title, action: #selector(picked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = Act(run)
+                menu.addItem(item)
+            case let .off(title, why):
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                item.toolTip = why
+                menu.addItem(item)
+                let reason = NSMenuItem(title: why, action: nil, keyEquivalent: "")
+                reason.isEnabled = false
+                reason.attributedTitle = NSAttributedString(string: why, attributes: [.font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                                                                                      .foregroundColor: NSColor.tertiaryLabelColor])
+                menu.addItem(reason)
+            case let .sub(title, inner):
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.submenu = nsMenu(inner)
+                menu.addItem(item)
+            }
         }
-        menu.popUp(positioning: nil, at: CGPoint(x: r.minX, y: r.maxY - scrollY + 4), in: self)
+        return menu
     }
 
-    /// What a row's + offers, at the playhead.
+    private func popUp(_ entries: [MenuEntry], under r: CGRect) {
+        nsMenu(entries).popUp(positioning: nil, at: CGPoint(x: r.minX, y: r.maxY - scrollY + 4), in: self)
+    }
+
     private func showAdd(for r: Row) {
-        guard let editor else { return }
-        let at = plusRect(r)
-        switch r.kind {
-        case .position:
-            popUp([("Add Move Here — then drag the video where it should go", { editor.addMove() }), ("-", nil),
-                   ("Side to Side", { editor.pattern("side") }), ("Zoom Tour", { editor.pattern("tour") }), ("Entrance", { editor.pattern("entrance") }),
-                   ("Bounce", { editor.pattern("bounce") }), ("Slow Push In", { editor.pattern("drift") }), ("-", nil),
-                   ("3D Turntable", { editor.pattern("turntable") }), ("3D Orbit", { editor.pattern("orbit") }), ("3D Hero Reveal", { editor.pattern("reveal") }),
-                   ("3D Flip In", { editor.pattern("flip") }), ("3D Float", { editor.pattern("float") })], under: at)
-        case .lane(0, _):
-            popUp([("Effects on the video", nil),
-                   ("Zoom In", { editor.add("zoom-in") }), ("Zoom Out", { editor.add("zoom-out") }), ("Zoom on Clicks", { editor.autoZoom() }), ("-", nil),
-                   ("Slow Down", { editor.add("slow") }), ("Speed Up", { editor.add("fast") }), ("-", nil),
-                   ("Spotlight", { editor.add("spotlight") }), ("Cursor Highlight", { editor.add("highlight") }),
-                   ("Blur", { editor.add("blur") }), ("Black & White", { editor.add("mono") }), ("Mask", { editor.add("mask") }), ("-", nil),
-                   ("3D Turn", { editor.add("3d") }), ("-", nil), ("New Effects Lane", { editor.addLane(space: 0) })], under: at)
-        case .header("top"):
-            popUp([("Text", { editor.add("text") }), ("Image…", { Pictures.pick { editor.addImage($0) } }), ("-", nil),
-                   ("New Text Lane", { editor.addLane(space: 1) }), ("New Image Lane", { editor.addLane(space: 2) })], under: at)
-        case .header("sound"):
-            popUp([("Sound File…", { Sounds.pick { editor.addSound($0) } }), ("-", nil),
-                   ("New Sound Lane", { editor.addLane(space: Edits.soundSpace) })], under: at)
-        case .header:
-            popUp([("Over the whole picture", nil), ("Blur", { editor.add("blur-frame") }), ("Black & White", { editor.add("mono-frame") }), ("-", nil),
-                   ("New Whole-Frame Lane", { editor.addLane(space: 3) })], under: at)
-        case let .imagePosition(id):
-            editor.select(id)
-            editor.addImageMove()
-        case let .imageEffects(id, _):
-            let add = { (kind: String) in { editor.select(id); editor.addImageEffect(kind) } }
-            popUp([("Effects on this image", nil), ("Blur", add("blur")), ("Black & White", add("mono")), ("Fade", add("fade")), ("-", nil),
-                   ("Pulse", add("pulse")), ("Float", add("float")), ("Wiggle", add("wiggle"))], under: at)
-        default: break
+        guard let editor, let row = menuRow(r), let plus = TimelineMenus.plus(row, editor) else { return }
+        switch plus {
+        case let .menu(entries): popUp(entries, under: plusRect(r))
+        case let .direct(run): run()
         }
     }
 

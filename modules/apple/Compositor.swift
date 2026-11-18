@@ -406,6 +406,10 @@ struct Edits: Codable, Equatable {
         soundLanes = max(soundLanes, (sounds.map(\.lane).max() ?? -1) + 1, 0)
     }
 
+    func fits(_ s: Segment) -> Bool {
+        !segments.contains { $0.id != s.id && $0.space == s.space && $0.lane == s.lane && $0.overlaps(s) }
+    }
+
     /// The first lane of `s`'s kind where nothing overlaps it; one past the last when none has room.
     func freeLane(for s: Segment) -> Int {
         var lane = 0

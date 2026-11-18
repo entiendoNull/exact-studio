@@ -601,11 +601,25 @@ final class Editor {
         land(s)
     }
 
+    private var wantLane: Int?
+
+    // @ref LLP 0005#add-where-it-goes
+    func onLane(_ lane: Int?, _ body: () -> Void) {
+        wantLane = lane
+        defer { wantLane = nil }
+        body()
+    }
+
     /// Put a new segment on the first lane with room (a new lane when none has) and select it.
     private func land(_ segment: Segment) {
         var s = segment
         var next = edits
         s.lane = next.freeLane(for: s)
+        if let want = wantLane, want < next.laneCount(space: s.space) {
+            var there = s
+            there.lane = want
+            if next.fits(there) { s.lane = want }
+        }
         next.segments.append(s)
         next.fitLanes()
         reveal(space: s.space)
@@ -932,6 +946,11 @@ final class Editor {
             }
             var next = edits
             s.lane = next.freeLane(for: s, map: map)
+            if let want = wantLane, want < next.soundLanes {
+                var there = s
+                there.lane = want
+                if next.conflict(there, map: map) == nil { s.lane = want }
+            }
             next.sounds.append(s)
             next.fitLanes()
             reveal(space: Edits.soundSpace)

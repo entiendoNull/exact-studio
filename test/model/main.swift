@@ -630,6 +630,47 @@ test("lanes: add one, remove an empty one, never the last effect lane or one in 
     e.removeLane(0, space: 1); eq(e.edits.textLanes, 1, "a lane in use")
 }
 
+func menu(_ row: TimelineRow, _ e: Editor) -> [MenuEntry] {
+    if case let .menu(entries)? = TimelineMenus.plus(row, e) { return entries }
+    problems.append("\(row) has no + menu")
+    return []
+}
+
+test("a + menu holds items only, grouped, under a line that says where they land and what they change") {
+    let e = open("empty")
+    at(e, 1)
+    let effects = menu(.lane(0, 0), e)
+    eq(effects.titles, ["Add to Effects 1 at 0:01.0 · Changes the video only"])
+    eq(effects.choices, ["Zoom › Zoom In", "Zoom › Zoom Out", "Zoom › Zoom on Clicks", "Speed › Slow Down", "Speed › Speed Up",
+                         "Look › Spotlight", "Look › Cursor Highlight", "Look › Blur", "Look › Black & White", "Mask", "3D Turn"])
+    eq(menu(.header("top"), e).choices, ["Text", "Image…"])
+    eq(menu(.header("frame"), e).choices, ["Blur", "Black & White"])
+    eq(menu(.position, e).choices.count, 11)
+    eq(menu(.position, e).titles, ["Move the video at 0:01.0", "Then drag the video where it should go."])
+    for row in [TimelineRow.lane(0, 0), .header("top"), .header("frame"), .position] {
+        expect(!menu(row, e).choices.contains { $0.contains("Lane") }, "\(row)'s + offers a lane")
+    }
+    guard case .direct? = TimelineMenus.plus(.header("sound"), e) else { return problems.append("the Sound +, with one choice, should add at once") }
+    expect(TimelineMenus.plus(.lane(1, 0), e) == nil, "a lane that does not exist has no +")
+}
+
+test("a lane's + adds on that lane; with no room there, on the first free lane of its kind, else a new one") {
+    let e = open("empty")
+    e.addLane()
+    at(e, 1)
+    expect(menu(.lane(0, 1), e).run("Zoom › Zoom In"), "Zoom In is in the Zoom submenu")
+    eq(e.edits.zooms.first?.lane, 1, "on the lane whose + it was")
+    menu(.lane(0, 1), e).run("Look › Blur")
+    eq(e.edits.segments.first { $0.kind == "blur" }?.lane, 0, "no room on lane 2, so the first free lane")
+    menu(.header("top"), e).run("Text")
+    eq(e.edits.textLanes, 1)
+    guard case let .direct(add)? = TimelineMenus.plus(.lane(1, 0), e) else { return problems.append("a text lane's + adds a text at once") }
+    add()
+    eq(e.edits.texts.count, 2)
+    eq(e.edits.textLanes, 2, "the text lane was taken, so a new lane")
+    eq(e.undoName, "Add Text")
+}
+
 test("a blur's reach moves it between the video's lanes and the whole frame's") {
     let e = open("empty")
     at(e, 1); e.add("blur")
