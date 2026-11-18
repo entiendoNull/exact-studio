@@ -611,7 +611,8 @@ component ExactStudio
                       row flex="1 0 0" gap=8 align-items="center" justify-content="flex-end" testId="viewer-right"
                         button press=toggleMotionPaths -exact-menu="view" aria-label="Show Motion Paths" aria-pressed=showMotionPaths aria-selected=showMotionPaths title="Show how the video and the selected image move" buttonStyle="bordered" testId="motion-paths"
                           image "symbol:sf/point.topleft.down.to.point.bottomright.curvepath"
-                          text "Motion Paths"
+                          if stageW == 0 or stageW >= 640
+                            text "Motion Paths"
                   // The handle: drag it to give the preview or the timeline more room.
                   button pan=resizeStage press=resetStage appearance="none" aria-label="Resize the preview; click to reset" cursor="row-resize" align-self="stretch" display="flex" align-items="center" justify-content="center" height=12 margin-top=-6 margin-bottom=-6 testId="stage-handle"
                     column width=56 height=5 border-radius=3 background-color="-exact-tertiary-label"

@@ -524,7 +524,12 @@ final class TimelineView: NSView {
         // a scissors pin over each split; a removed part dark and hatched.
         let gap: CGFloat = 4
         let amber = NSColor(srgbRed: 0.93, green: 0.63, blue: 0.22, alpha: 1)
-        for piece in editor.pieces {
+        let all = editor.pieces
+        let bridged = Set(all.indices.filter { !all[$0].removed && editor.edits.transitions[Edits.key(all[$0].end)] != nil }.flatMap { i -> [Int] in
+            let run = Array(all.indices.dropFirst(i + 1).prefix { all[$0].removed })
+            return (run.last ?? i) + 1 < all.count ? run : []
+        })
+        for (index, piece) in all.enumerated() {
             let r = CGRect(x: x(piece.start) + (piece.start > 0 ? gap : 0), y: clipTop,
                            width: max(3, x(piece.end) - x(piece.start) - (piece.start > 0 ? gap : 0) - (piece.end < d ? gap : 0)), height: clipHeight)
             let shape = NSBezierPath(roundedRect: r, xRadius: 9, yRadius: 9)
@@ -555,7 +560,7 @@ final class TimelineView: NSView {
             (piece.removed ? NSColor(white: 1, alpha: 0.12) : amber.withAlphaComponent(0.9)).setStroke()
             shape.lineWidth = 1.5
             shape.stroke()
-            if piece.removed { title("Removed", in: r) }
+            if piece.removed, !bridged.contains(index) { title("Removed", in: r) }
             if editor.selected == piece.id {
                 NSColor.white.setStroke()
                 let sel = NSBezierPath(roundedRect: r.insetBy(dx: -1.5, dy: -1.5), xRadius: 10, yRadius: 10)
