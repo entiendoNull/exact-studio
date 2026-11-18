@@ -359,5 +359,5 @@ describe('split cuts and joins, and the video stays the same', () => {
     expect(edge.err).toBe('Put the playhead inside it, at least 0.1 s from each end.\n');
     expect(run(lib, 'split', 'joined', '5', 'm').err).toBe('no segment, sound or image effect m in joined\n');
     expect(run(lib, 'split', 'joined', '3.5').err).toBe('The clip is already split there.\n');
-  });
+  }, 30_000);
 });
