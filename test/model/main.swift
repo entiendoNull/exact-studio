@@ -397,16 +397,83 @@ test("a template replaces the texts, effects and moves, keeps the cuts, images a
     let e = open("full")
     let before = e.edits
     e.applyTemplate("launch")
-    eq(e.summary["canUndoTemplate"] as? Bool, true)
+    eq(e.undoName, "Template")
     expect(e.edits != before, "the template changed nothing")
     eq(e.edits.splits, before.splits); eq(e.edits.removed, before.removed)
     eq(e.edits.images.map(\.id), ["img"]); eq(e.edits.masks.map(\.id).sorted(), ["mask1", "mask2"])
     expect(!e.edits.texts.contains { $0.id == "txt" }, "the old text stayed")
     eq(e.problem, "")
-    e.undoTemplate()
-    eq(e.edits, before); eq(onDisk(e), before, "saved"); eq(e.summary["canUndoTemplate"] as? Bool, false)
+    e.undo()
+    eq(e.edits, before); eq(onDisk(e), before, "saved"); eq(e.undoName, ""); eq(e.redoName, "Template")
     e.applyTemplate("nope")
     eq(e.edits, before)
+}
+
+test("every edit is one undo step, named for the Edit menu; redo walks forward again") {
+    let e = open("empty")
+    let start = e.edits
+    at(e, 4); e.splitClip()
+    eq(e.undoName, "Split Clip")
+    e.toggleRemoved()
+    eq(e.undoName, "Remove Part")
+    at(e, 1); e.add("zoom-in")
+    eq(e.undoName, "Add Zoom")
+    let id = e.selectedSegment!.id, length = e.selectedSegment!.end - e.selectedSegment!.start
+    e.drag(id, start: 1.5, end: 1.5 + length, lane: 0); e.drag(id, start: 2, end: 2 + length, lane: 0); e.endDrag()
+    eq(e.undoName, "Move Zoom")
+    let full = e.edits
+    e.undo(); eq(e.edits.zooms.first?.start, 1, "the whole drag is one step")
+    e.undo(); eq(e.edits.zooms.count, 0)
+    eq(e.selected, "", "a selection that is gone is dropped")
+    e.undo(); eq(e.edits.removed, [])
+    e.undo(); eq(e.edits, start); eq(onDisk(e), start, "saved")
+    eq(e.undoName, ""); eq(e.redoName, "Split Clip")
+    e.undo(); eq(e.edits, start, "nothing more to undo")
+    e.redo(); e.redo(); e.redo(); e.redo()
+    eq(e.edits, full); eq(onDisk(e), full, "saved"); eq(e.redoName, "")
+    e.undo(); e.setLookField("shadow", e.look.shadow ? "false" : "true")
+    eq(e.redoName, "", "a new edit drops what could be redone")
+}
+
+test("a slider scrub is one step; a refused edit is none") {
+    let e = open("empty")
+    let padding = e.look.padding
+    for v in stride(from: 10, through: 30, by: 2) { e.setLookField("padding", "\(v)") }
+    eq(e.undoName, "Padding")
+    e.setLookField("background", "sunset")
+    eq(e.undoName, "Background")
+    e.undo(); e.undo()
+    eq(e.look.padding, padding, "the whole scrub")
+    at(e, 1); e.add("zoom-in"); e.add("zoom-in")
+    expect(e.problem != "", "the second zoom is refused")
+    eq(e.undoName, "Add Zoom"); e.undo(); eq(e.edits.zooms.count, 0)
+}
+
+test("Clear Edits, a crop and an edit made on disk each undo as one step") {
+    let e = open("full")
+    let before = e.edits
+    e.clearAll()
+    eq(e.undoName, "Clear Edits"); e.undo(); eq(e.edits, before)
+    let crop = e.meta.crop
+    e.setCrop(UnitRect(x: 0.1, y: 0.1, w: 0.5, h: 0.5))
+    eq(e.undoName, "Crop"); e.undo(); eq(e.meta.crop, crop)
+    eq(Library.meta(e.id)?.crop, crop, "saved")
+    var next = before
+    next.splits = [5]
+    try JSONEncoder().encode(next).write(to: e.folder.appendingPathComponent("edits.json"))
+    expect(wait(4) { e.edits.splits == [5] }, "the editor never read the file")
+    eq(e.undoName, "Edit from File")
+    e.undo()
+    eq(e.edits, before); eq(onDisk(e), before, "written back")
+    expect(!wait(1.2) { e.edits.splits == [5] }, "its own write read back as a change")
+    eq(e.redoName, "Edit from File")
+}
+
+test("each recording has its own history") {
+    let a = open("empty"), b = open("empty")
+    at(a, 1); a.add("zoom-in")
+    eq(b.undoName, "")
+    b.undo(); eq(a.edits.zooms.count, 1)
 }
 
 test("lanes: add one, remove an empty one, never the last effect lane or one in use") {

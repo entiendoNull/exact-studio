@@ -70,6 +70,7 @@ final class Editor {
             DispatchQueue.main.async { self?.notify() }
         }
         stamps = Editor.stamps(folder)
+        committed = snapshot
         watcher = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkDisk() }
     }
 
@@ -103,7 +104,7 @@ final class Editor {
             timing = Editor.timing(disk) != Editor.timing(edits)
             edits = disk
             drawn = true
-            if !selected.isEmpty, selectedSegment == nil, selectedMove == nil, selectedPiece == nil, selectedImageMove == nil, selectedImageEffect == nil, selectedSound == nil, selected != Editor.recordedSound { selected = "" }
+            dropGoneSelection()
         }
         if let data = read("look.json"), let disk = try? JSONDecoder().decode(Look.self, from: data), disk != look {
             look = disk
@@ -116,6 +117,7 @@ final class Editor {
         }
         guard timing || drawn else { return }
         problem = ""
+        record(named: "Edit from File")
         timing ? rebuild(keepTime: true) : refresh()
         notify()
     }
@@ -129,6 +131,7 @@ final class Editor {
         try? data.write(to: folder.appendingPathComponent("look.json"))
         stamps = Editor.stamps(folder)
         UserDefaults.standard.set(data, forKey: "ExactStudio.lastLook")
+        record()
     }
 
     /// Set one field of the look and save it beside the recording.
@@ -250,6 +253,7 @@ final class Editor {
     private func setMeta(_ m: RecordingMeta) {
         meta = m
         try? Library.save(m)
+        record()
         refresh()
         notify()
     }
@@ -348,6 +352,85 @@ final class Editor {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         try? encoder.encode(edits).write(to: folder.appendingPathComponent("edits.json"))
         stamps = Editor.stamps(folder)
+        record()
+    }
+
+    // MARK: Undo
+    // @ref LLP 0002#undo
+
+    private var undone: [HistoryStep] = []
+    private var redone: [HistoryStep] = []
+    private var committed: Snapshot?
+    private var naming: String?
+
+    var snapshot: Snapshot {
+        Snapshot(edits: edits, look: look, crop: meta.crop, cornerRadius: meta.cornerRadius, device: meta.device, mask: meta.mask, maskRect: meta.maskRect)
+    }
+    var undoName: String { undone.last?.name ?? "" }
+    var redoName: String { redone.last?.name ?? "" }
+
+    private func record(named name: String? = nil) {
+        guard let before = committed else { return }
+        let now = snapshot
+        guard now != before else { return }
+        committed = now
+        redone = []
+        let title = name ?? naming
+        let key = title == nil ? History.key(before, now) : nil
+        if let key, let last = undone.last, last.key == key, Date().timeIntervalSince(last.at) < History.gather {
+            undone[undone.count - 1].after = now
+            undone[undone.count - 1].at = Date()
+            return
+        }
+        undone.append(HistoryStep(before: before, after: now, name: title ?? History.name(before, now), key: key, at: Date()))
+        if undone.count > History.limit { undone.removeFirst(undone.count - History.limit) }
+    }
+
+    private func named(_ name: String, _ body: () -> Void) {
+        naming = name
+        defer { naming = nil }
+        body()
+    }
+
+    func undo() {
+        guard let step = undone.popLast() else { return }
+        restore(step.before)
+        redone.append(step)
+        notify()
+    }
+
+    func redo() {
+        guard let step = redone.popLast() else { return }
+        restore(step.after)
+        undone.append(step)
+        notify()
+    }
+
+    private func restore(_ s: Snapshot) {
+        endSample(returning: false)
+        dragOrigin = nil
+        let now = snapshot
+        let retime = Editor.timing(s.edits) != Editor.timing(edits) || !s.sameMeta(now)
+        let lookChanged = s.look != look
+        committed = s
+        edits = s.edits
+        look = s.look
+        meta.crop = s.crop
+        meta.cornerRadius = s.cornerRadius
+        meta.device = s.device
+        meta.mask = s.mask
+        meta.maskRect = s.maskRect
+        if lookChanged { saveLook() }
+        if !s.sameMeta(now) { try? Library.save(meta) }
+        save()
+        problem = ""
+        dropGoneSelection()
+        retime ? rebuild(keepTime: true) : refresh()
+    }
+
+    private func dropGoneSelection() {
+        if !selected.isEmpty, selectedSegment == nil, selectedMove == nil, selectedPiece == nil, selectedImageMove == nil, selectedImageEffect == nil,
+           selectedSound == nil, selected != Editor.recordedSound { selected = "" }
     }
 
     /// What the playback is built from; a change rebuilds it. A sound's volume and fades only change the mix.
@@ -1117,34 +1200,23 @@ final class Editor {
 
     // MARK: Templates
 
-    /// The edits before the last template, for one step back.
-    private var beforeTemplate: Edits?
-
     /// Replace the texts, effects, zooms and moves with a ready-made edit laid out for the
     /// frame's shape. The clip's parts and the 3D settings stay.
     func applyTemplate(_ name: String) {
         let map = self.map
         guard let made = Templates.make(name, duration: map.outputDuration, source: { map.source($0) }, aspect: look.aspect,
                                         clicks: meta.clicks, three: edits.three) else { return }
-        beforeTemplate = edits
         var next = edits
         // The images and masks stay: a template knows nothing of them, and a mask hides something.
         next.pack(made.segments + edits.images + edits.masks)
         next.moves = made.moves
         next.base = made.base
-        apply(next)
-        select("")
-    }
-
-    func undoTemplate() {
-        guard let before = beforeTemplate else { return }
-        beforeTemplate = nil
-        apply(before)
+        named("Template") { apply(next) }
         select("")
     }
 
     func clearAll() {
-        apply(Edits())
+        named("Clear Edits") { apply(Edits()) }
         select("")
     }
 
@@ -1470,7 +1542,6 @@ final class Editor {
         guard let image = try? generator.copyCGImage(at: at, actualTime: nil) else { return quietly ? () : refuse("Couldn’t read a frame of the recording.") }
         var m = meta
         if let found = Bezel.silhouette(image), let name = Library.saveMask(found.mask, in: folder) {
-            if let old = m.mask { try? FileManager.default.removeItem(at: folder.appendingPathComponent(old)) }
             m.crop = found.rect
             m.mask = name
             m.maskRect = found.rect
@@ -1499,7 +1570,6 @@ final class Editor {
 
     func forgetDevice() {
         var m = meta
-        if let old = m.mask { try? FileManager.default.removeItem(at: folder.appendingPathComponent(old)) }
         m.crop = .full
         m.cornerRadius = nil
         m.mask = nil
@@ -1564,7 +1634,7 @@ final class Editor {
         return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes + edits.textLanes + edits.imageLanes + edits.frameLanes, "images": edits.images.count,
                 "moves": edits.moves.count, "length": map.outputDuration, "source": duration, "playing": isPlaying,
                 "device": meta.isDevice, "found": meta.device == true, "cursorDrawn": meta.drawsCursor,
-                "baseScale": (edits.base.scale * 100).rounded(), "canUndoTemplate": beforeTemplate != nil,
+                "baseScale": (edits.base.scale * 100).rounded(), "undoName": undoName, "redoName": redoName,
                 "threeOn": edits.three.on,
                 // The angle the 3D controls edit: the move's in effect at the playhead, else the base.
                 "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),
@@ -1587,6 +1657,177 @@ extension Segment {
     static func article(_ kind: String) -> String {
         ["zoom": "a zoom", "speed": "a speed change", "spotlight": "a spotlight", "highlight": "a cursor highlight",
          "blur": "a blur", "mono": "a black-and-white effect", "text": "a text", "image": "an image", "mask": "a mask"][kind] ?? "an effect"
+    }
+}
+
+struct Snapshot: Equatable {
+    var edits: Edits
+    var look: Look
+    var crop: UnitRect
+    var cornerRadius: Double?
+    var device: Bool?
+    var mask: String?
+    var maskRect: UnitRect?
+
+    func sameMeta(_ o: Snapshot) -> Bool {
+        o.crop == crop && o.cornerRadius == cornerRadius && o.device == device && o.mask == mask && o.maskRect == maskRect
+    }
+}
+
+struct HistoryStep {
+    let before: Snapshot
+    var after: Snapshot
+    var name: String
+    let key: String?
+    var at: Date
+}
+
+enum History {
+    static let limit = 200
+    // @ref LLP 0002#undo — a slider scrub or a run of scrolls is one step
+    static let gather = 1.0
+
+    static func fields<T: Encodable>(_ a: T, _ b: T) -> [String] {
+        guard let x = dictionary(a), let y = dictionary(b) else { return [] }
+        return Set(x.keys).union(y.keys).filter { !equal(x[$0], y[$0]) }.sorted()
+    }
+
+    private static func dictionary<T: Encodable>(_ v: T) -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(v) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    private static func equal(_ a: Any?, _ b: Any?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (a?, b?): return (a as AnyObject).isEqual(b as AnyObject)
+        default: return false
+        }
+    }
+
+    private static func changed<T: Encodable>(_ before: [T], _ after: [T], id: (T) -> String) -> (added: [T], removed: [T], changed: [(T, T)]) {
+        let old = Dictionary(before.map { (id($0), $0) }, uniquingKeysWith: { a, _ in a })
+        let new = Dictionary(after.map { (id($0), $0) }, uniquingKeysWith: { a, _ in a })
+        let added = after.filter { old[id($0)] == nil }
+        let removed = before.filter { new[id($0)] == nil }
+        let changed = after.compactMap { a -> (T, T)? in
+            guard let b = old[id(a)], !fields(b, a).isEmpty else { return nil }
+            return (b, a)
+        }
+        return (added, removed, changed)
+    }
+
+    private static let timeFields: Set<String> = ["start", "end", "lane", "t", "length", "offset"]
+
+    static func key(_ a: Snapshot, _ b: Snapshot) -> String? {
+        let meta = a.sameMeta(b)
+        let look = fields(a.look, b.look)
+        let edits = fields(a.edits, b.edits)
+        if !meta { return nil }
+        if edits.isEmpty { return look.isEmpty ? nil : "look:" + look.joined(separator: ",") }
+        guard look.isEmpty, edits.count == 1, let top = edits.first else { return nil }
+        switch top {
+        case "base": return "base:" + fields(a.edits.base, b.edits.base).joined(separator: ",")
+        case "three": return "three:" + fields(a.edits.three, b.edits.three).joined(separator: ",")
+        case "volume": return "volume"
+        case "segments":
+            let c = changed(a.edits.segments, b.edits.segments, id: \.id)
+            guard c.added.isEmpty, c.removed.isEmpty, c.changed.count == 1, let (x, y) = c.changed.first else { return nil }
+            let f = fields(x, y)
+            return f.contains(where: timeFields.contains) || f.contains("moves") || f.contains("effects") ? nil : "seg:\(y.id):" + f.joined(separator: ",")
+        case "moves":
+            let c = changed(a.edits.moves, b.edits.moves, id: \.id)
+            guard c.added.isEmpty, c.removed.isEmpty, c.changed.count == 1, let (x, y) = c.changed.first else { return nil }
+            let f = fields(x, y)
+            return f.contains(where: timeFields.contains) ? nil : "move:\(y.id):" + f.joined(separator: ",")
+        case "sounds":
+            let c = changed(a.edits.sounds, b.edits.sounds, id: \.id)
+            guard c.added.isEmpty, c.removed.isEmpty, c.changed.count == 1, let (x, y) = c.changed.first else { return nil }
+            let f = fields(x, y)
+            return f.contains(where: timeFields.contains) ? nil : "sound:\(y.id):" + f.joined(separator: ",")
+        default: return nil
+        }
+    }
+
+    static func kindName(_ kind: String) -> String {
+        ["zoom": "Zoom", "speed": "Speed Change", "spotlight": "Spotlight", "highlight": "Cursor Highlight", "blur": "Blur",
+         "mono": "Black & White", "text": "Text", "image": "Image", "mask": "Mask", "3d": "3D Turn"][kind] ?? "Effect"
+    }
+
+    private static let lookNames = ["background": "Background", "customA": "Background", "customB": "Background", "customAngle": "Background",
+                                    "customRadial": "Background", "aspect": "Frame Shape", "padding": "Padding", "radius": "Corners",
+                                    "shadow": "Shadow", "cursor": "Cursor", "cursorSize": "Cursor Size", "clickEffect": "Squeeze on Click",
+                                    "smoothCursor": "Smooth Movement"]
+
+    static func name(_ a: Snapshot, _ b: Snapshot) -> String {
+        if !a.sameMeta(b) {
+            if a.device != b.device || a.mask != b.mask { return b.device == true ? "Find Device" : "Not a Device" }
+            return "Crop"
+        }
+        let look = Set(fields(a.look, b.look).map { lookNames[$0] ?? "Look" })
+        let edits = fields(a.edits, b.edits)
+        if edits.isEmpty { return look.count == 1 ? look.first! : "Look" }
+        if !look.isEmpty { return "Edit" }
+        let e = Set(edits)
+        if e.contains("splits") {
+            return b.edits.splits.count > a.edits.splits.count ? "Split Clip" : "Join Parts"
+        }
+        if e == ["removed"] { return b.edits.removed.count > a.edits.removed.count ? "Remove Part" : "Restore Part" }
+        if e == ["transitions"] { return "Transition" }
+        if e.isSubset(of: ["segments", "lanes", "textLanes", "imageLanes", "frameLanes"]) {
+            let c = changed(a.edits.segments, b.edits.segments, id: \.id)
+            if c.added.count == 1, c.removed.isEmpty, c.changed.count == 1, c.changed[0].1.kind == c.added[0].kind { return "Split " + kindName(c.added[0].kind) }
+            if c.added.count == 1, c.removed.isEmpty { return "Add " + kindName(c.added[0].kind) }
+            if c.removed.count == 1, c.added.isEmpty { return "Remove " + kindName(c.removed[0].kind) }
+            if c.added.isEmpty, c.removed.isEmpty, c.changed.count == 1 {
+                let (x, y) = c.changed[0]
+                return segmentName(x, y)
+            }
+            if c.added.isEmpty, c.removed.isEmpty, c.changed.isEmpty { return b.edits.lanes + b.edits.textLanes + b.edits.imageLanes + b.edits.frameLanes > a.edits.lanes + a.edits.textLanes + a.edits.imageLanes + a.edits.frameLanes ? "Add Lane" : "Remove Lane" }
+            return "Edit"
+        }
+        if e == ["moves"] || e == ["moves", "three"] {
+            let c = changed(a.edits.moves, b.edits.moves, id: \.id)
+            if c.added.count >= 1, c.removed.isEmpty { return c.added.count == 1 ? "Add Move" : "Add Moves" }
+            if c.removed.count == 1, c.added.isEmpty { return "Remove Move" }
+            if c.added.isEmpty, c.removed.isEmpty, c.changed.count == 1 {
+                let f = fields(c.changed[0].0, c.changed[0].1)
+                return f == ["t"] ? "Move Move" : f.contains("angles") ? "3D Angle" : "Edit Move"
+            }
+            return "Edit Moves"
+        }
+        if e == ["base"] { return "Placement" }
+        if e == ["three"] { return "3D" }
+        if e == ["volume"] { return "Volume" }
+        if e.isSubset(of: ["sounds", "soundLanes"]) {
+            let c = changed(a.edits.sounds, b.edits.sounds, id: \.id)
+            if c.added.count == 1, c.removed.isEmpty { return "Add Sound" }
+            if c.removed.count == 1, c.added.isEmpty { return "Remove Sound" }
+            if c.changed.count == 1, c.added.isEmpty, c.removed.isEmpty {
+                let f = fields(c.changed[0].0, c.changed[0].1)
+                return f.contains("file") ? "Replace Sound" : f.allSatisfy(timeFields.contains) ? "Move Sound" : "Edit Sound"
+            }
+        }
+        return "Edit"
+    }
+
+    private static func segmentName(_ x: Segment, _ y: Segment) -> String {
+        let f = fields(x, y)
+        let kind = kindName(y.kind)
+        if f.contains("effects") {
+            let n = (y.effects?.count ?? 0) - (x.effects?.count ?? 0)
+            return n > 0 ? "Add Image Effect" : n < 0 ? "Remove Image Effect" : "Edit Image Effect"
+        }
+        if f.contains("moves") && !f.contains("start") {
+            let n = (y.moves?.count ?? 0) - (x.moves?.count ?? 0)
+            return n > 0 ? "Add Image Move" : n < 0 ? "Remove Image Move" : "Edit Image Move"
+        }
+        if f.contains("start") || f.contains("end") || f.contains("lane") {
+            return abs((y.end - y.start) - (x.end - x.start)) > 0.0005 ? "Resize " + kind : "Move " + kind
+        }
+        if f.allSatisfy({ ["x", "y", "rect"].contains($0) }) { return "Move " + kind }
+        if f == ["file"] { return "Replace " + kind }
+        return "Edit " + kind
     }
 }
 #endif

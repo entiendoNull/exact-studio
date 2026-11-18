@@ -68,18 +68,106 @@ test "Split Clip with the playhead at the start says why it can't"
   expect text "problem" == "Move the playhead into the clip to split it."
   expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
 
-test "a template replaces the edit, and Undo Template puts it back"
+test "a template replaces the edit; Undo and Redo take it back and forth"
   tap "recording-full"
   clock data
+  expect disabled "undo"
   tap "templates"
   tap "template-tour"
   clock data
-  expect state summary.canUndoTemplate == true
-  tap "templates"
-  tap "template-undo"
+  expect state summary.undoName == "Template"
+  tap "undo"
   clock data
-  expect state summary.canUndoTemplate == false
   expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state summary.redoName == "Template"
+  tap "redo"
+  clock data
+  expect state summary.undoName == "Template"
+  expect state summary.redoName == ""
+
+test "⌘Z undoes and ⇧⌘Z and ⌘Y redo; a slider scrub is one step"
+  tap "recording-empty"
+  clock data
+  type "padding" "12"
+  type "padding" "16"
+  type "padding" "20"
+  clock data
+  expect state padding == 20
+  expect state summary.undoName == "Padding"
+  type "root" key "Meta+z"
+  clock data
+  expect state padding == 8
+  type "root" key "Meta+Shift+z"
+  clock data
+  expect state padding == 20
+  type "root" key "Meta+z"
+  type "root" key "Meta+y"
+  clock data
+  expect state padding == 20
+
+test "while a text field has the focus, ⌘Z is the field's"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 240 280 mouse
+  clock data
+  tap "text-words"
+  expect state typing == true
+  type "text-words" key "Meta+z"
+  clock data
+  expect state summary.undoName == ""
+  expect state sel.text == "Hello"
+
+test "Clear Edits asks first, names the recording, and can be undone"
+  tap "recording-full"
+  clock data
+  tap "clear"
+  clock settle
+  tap "clear-cancel"
+  clock settle
+  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  tap "clear"
+  clock settle
+  tap "clear-confirm"
+  clock settle
+  clock data
+  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+  expect state summary.undoName == "Clear Edits"
+  tap "undo"
+  clock data
+  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+
+test "Delete asks first and names the recording; Cancel keeps it"
+  tap "recording-empty"
+  clock data
+  tap "delete"
+  clock settle
+  expect state removingName == "Empty window"
+  tap "delete-cancel"
+  clock settle
+  clock data
+  expect tree has "recording-empty"
+  tap "delete"
+  clock settle
+  tap "delete-confirm"
+  clock settle
+  clock data
+  expect tree missing "recording-empty"
+  expect state selected == ""
+
+test "the floating settings panel stays on the stage"
+  tap "recording-full"
+  clock settle
+  tap "panel-menu-button"
+  tap "menu-panel-float"
+  clock settle
+  tap "timeline" drag 0 0 from 240 280 mouse
+  clock data
+  expect tree has "float-panel"
+  expect text "segment-title" == "Text"
+  tap "float-grip" drag 950 820
+  clock data
+  expect state floatX <= 460
+  expect state floatY <= 160
 
 test "the inspector's sections fold, and the look's controls change look.json"
   tap "recording-empty"

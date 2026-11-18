@@ -90,6 +90,24 @@ Decided by Jacob on 2026-11-13, when added sounds came:
   video. A start in a removed part plays from the next kept moment.
 - Two sounds on one lane never play at once. Each has its own volume and fades.
 
+## Undo
+
+Asked for by Jacob on 2026-11-18. Before, only a template could be taken back.
+
+- Every change to the edit, the look or the crop is one step: a split, an add, a remove, a drag,
+  an inspector setting, a template, Clear Edits, Find a Device.
+- ⌘Z undoes, ⇧⌘Z and ⌘Y redo. Edit ▸ Undo names the step ("Undo Split Clip"); so do the two
+  arrow buttons beside Play.
+- A drag is one step: it saves on the drop. A slider scrub or a run of scrolls over the preview is
+  one step too: changes to the same setting of the same thing less than a second apart are one.
+- Each recording has its own history while the app runs. It is not saved.
+- A change an agent or the CLI makes to the files is one step, "Edit from File". Undoing it
+  writes the files back, so the agent sees it.
+- While a text field has the focus, ⌘Z is the field's own.
+- Selection, zoom and playback are not steps.
+- A device's old silhouette file stays in the folder, so undoing Find a Device or Not a Device
+  brings it back.
+
 ## Defaults
 
 - A new recording gets **no** automatic zoom. "Zoom on Clicks" is a button you press.

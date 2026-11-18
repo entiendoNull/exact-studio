@@ -103,7 +103,8 @@ shape Summary
   found: bool
   cursorDrawn: bool
   baseScale: number
-  canUndoTemplate: bool
+  undoName: string
+  redoName: string
   threeOn: bool
   tilt: number
   turn: number
@@ -174,9 +175,15 @@ component ExactStudio
   // The timeline's height, set by dragging the handle under the preview; the preview takes the rest.
   state timelineH = 330 persist
   state panelY = 24 persist
+  state stageW = 0
+  state stageH = 0
+  state floatW = 0
+  state floatH = 0
   state startedAt = 0
   state now = 0
   state listed = 0
+  state typingIn = ""
+  state removing = ""
   resource status = recorderStatus() as shape Status else empty()
   resource sources = captureSources(listed) as shape SourceList else empty()
   resource library = recordings() as shape RecordingList else empty()
@@ -197,6 +204,12 @@ component ExactStudio
   derive isDevice = summary.device or (match current { case some(r) => r.kind == "simulator" or r.kind == "emulator", case none => false })
   derive devices = sources.items.filter(s => s.kind == "simulator" or s.kind == "emulator")
   derive cardLeft = panelMode == "left" and sel.id != ""
+  // @ref LLP 0005#calm-by-default
+  derive floatX = stageW == 0 ? panelX : min(panelX, max(0, stageW - floatW - 16))
+  derive floatY = stageH == 0 ? panelY : min(panelY, max(0, stageH - floatH - 16))
+  derive typing = typingIn != "" and typingIn == sel.id
+  derive currentName = match current { case some(r) => r.name, case none => "" }
+  derive removingName = match first(library.items.filter(r => r.id == removing)) { case some(r) => r.name, case none => "" }
   derive leftShown = leftOpen or cardLeft
   derive gradients = ["ocean", "sunset", "mint", "midnight", "graphite", "paper", "peach", "lagoon", "berry", "aurora", "ember", "lavender", "citrus", "forest", "sky", "rose", "dusk", "steel", "candy", "deepsea", "sand", "neon", "glow", "noir"]
   derive background = lk.background
@@ -289,9 +302,20 @@ component ExactStudio
     exportOpen = false
   action reveal
     send revealed = revealFile(exportPath)
+  action askRemove(id: string)
+    removing = id
+    showModal("confirm-delete")
+  action askClear
+    showModal("confirm-clear")
   action remove
-    send deleted = deleteRecording(selected)
-    selected = ""
+    send deleted = deleteRecording(removing)
+    if removing == selected
+      selected = ""
+    removing = ""
+  action fieldIn
+    typingIn = sel.id
+  action fieldOut
+    typingIn = ""
   action trim(edge: string, by: number)
     send nudged = nudgeCrop(selected, edge, by)
   action add(track: string)
@@ -323,11 +347,17 @@ component ExactStudio
   action resetStage
     timelineH = 330
   action dragPanel(dx: number, dy: number)
-    panelX = max(0, panelX + dx)
-    panelY = max(0, panelY + dy)
+    panelX = max(0, floatX + dx)
+    panelY = max(0, floatY + dy)
   action dropPanel(vx: number, vy: number)
-    panelX = round(panelX)
-    panelY = round(panelY)
+    panelX = round(floatX)
+    panelY = round(floatY)
+  action stageSized(w: number, h: number)
+    stageW = w
+    stageH = h
+  action floatSized(w: number, h: number)
+    floatW = w
+    floatH = h
   action closePanel
     send edited = editClip(selected, "deselect", "", 0, "")
   action toggleSection(name: string)
@@ -435,7 +465,7 @@ component ExactStudio
             scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
               if cardLeft
                 column padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box"
-                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
+                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
               else
                 column gap=30 padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
                   if status.recording
@@ -529,7 +559,7 @@ component ExactStudio
                   text "Record something to start" font="-exact-title2" font-weight=600
                   text "Pick a display, a window, an area or a Simulator in the sidebar. A Simulator or an emulator is cropped to its bezel, nothing more." color="-exact-secondary-label" text-align="center" max-width="28rem"
               case some(rec)
-                column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease"
+                column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease" resize=stageSized
                   studio-preview clip=rec.id look=look cropping=(cropping ? "true" : "") aria-label="Preview" flex=1 min-height=200 testId="preview"
                   if cropping
                     row gap=10 align-items="center" padding="8px 12px" border-radius=12 background-color="-exact-tertiary-background" testId="crop-bar"
@@ -546,6 +576,11 @@ component ExactStudio
                     button press=editDo("play") aria-label=(summary.playing ? "Pause" : "Play") buttonStyle="filled" testId="play"
                       image (summary.playing ? "symbol:pause-fill" : "symbol:play-fill")
                     column width=1 height=22 background-color="-exact-separator"
+                    row gap=4 align-items="center"
+                      button press=editDo("undo") disabled=(summary.undoName == "") aria-label=(summary.undoName == "" ? "Undo" : `Undo ${summary.undoName}`) aria-keyshortcuts=(typing ? "" : "Meta+Z") title=(summary.undoName == "" ? "Undo" : `Undo ${summary.undoName}`) buttonStyle="bordered" testId="undo"
+                        image "symbol:sf/arrow.uturn.backward"
+                      button press=editDo("redo") disabled=(summary.redoName == "") aria-label=(summary.redoName == "" ? "Redo" : `Redo ${summary.redoName}`) aria-keyshortcuts=(typing ? "" : "Meta+Shift+Z Meta+Y") title=(summary.redoName == "" ? "Redo" : `Redo ${summary.redoName}`) buttonStyle="bordered" testId="redo"
+                        image "symbol:sf/arrow.uturn.forward"
                     column width=1 height=22 background-color="-exact-separator"
                     button press=editDo("split-clip") buttonStyle="bordered" testId="split-clip"
                       image "symbol:sf/scissors"
@@ -566,10 +601,6 @@ component ExactStudio
                       button press=template("teaser") popovertarget="template-menu" popovertargetaction="hide" testId="template-teaser"
                         text "Social Teaser"
                         text "A blurred hook, pops, a 3D tumble, a call to action"
-                      if summary.canUndoTemplate
-                        hr
-                        button press=editDo("undo-template") popovertarget="template-menu" popovertargetaction="hide" testId="template-undo"
-                          text "Undo Template"
                     button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
                       image "symbol:sf/crop"
                       text "Crop"
@@ -592,14 +623,14 @@ component ExactStudio
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
                       scroll width="24rem" max-height="85%" pointer-events="auto" border-radius=16 box-shadow="0px 18px 60px #00000080" background-color="-exact-secondary-background"
                         column padding=12
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
                   if sel.id != "" and panelMode == "float"
-                    column position="absolute" left=panelX top=panelY width="24rem" max-height="80%" border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
+                    column position="absolute" left=floatX top=floatY width="24rem" max-height="80%" resize=floatSized border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0
                         column padding=12 padding-top=4
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
@@ -610,7 +641,7 @@ component ExactStudio
                       image "symbol:alert" color="-exact-system-orange" aria-hidden=true
                       text sel.problem font="-exact-footnote" flex=1
                   if sel.id != "" and panelMode == "dock"
-                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
+                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
                   else
                     column gap=10
                       button press=toggleSection("place") appearance="none" aria-expanded=openPlace testId="sec-place" padding-top=2 padding-bottom=2
@@ -780,9 +811,9 @@ component ExactStudio
                       text (isDevice ? "Cut to the phone’s own outline, side buttons included. Crop, under the preview, trims it further." : "Cuts the video to a phone’s own outline when the recording shows a Simulator in its window.") font="-exact-caption1" color="-exact-tertiary-label"
 
                   row gap=8
-                    button press=editDo("clear") buttonStyle="bordered" flex=1 testId="clear"
+                    button press=askClear buttonStyle="bordered" flex=1 testId="clear"
                       text "Clear Edits"
-                    button press=remove buttonStyle="bordered" flex=1 testId="delete"
+                    button press=askRemove(selected) buttonStyle="bordered" flex=1 testId="delete"
                       text "Delete"
 
           // ── Export: a lightbox in the middle of the window.
@@ -823,6 +854,19 @@ component ExactStudio
                         button press=reveal testId="reveal"
                           text "Show in Finder" font="-exact-footnote"
 
+          dialog id="confirm-clear" role="alertdialog" aria-label=`Clear all edits of “${currentName}”?`
+            text "Every cut, effect, text, image, sound, mask and move goes. The background and the frame stay. You can undo this with ⌘Z."
+            button press=editDo("clear") destructive=true commandfor="confirm-clear" command="close" testId="clear-confirm"
+              text "Clear Edits"
+            button commandfor="confirm-clear" command="close" testId="clear-cancel"
+              text "Cancel"
+          dialog id="confirm-delete" role="alertdialog" aria-label=`Delete “${removingName}”?`
+            text "The recording and all its edits are deleted. This can’t be undone."
+            button press=remove destructive=true commandfor="confirm-delete" command="close" testId="delete-confirm"
+              text "Delete"
+            button commandfor="confirm-delete" command="close" testId="delete-cancel"
+              text "Cancel"
+
 // The settings of what is selected: docked in the inspector, floating over the stage, a lightbox
 // over the video, or on the left; its header's menu moves it.
 component SettingsCard
@@ -851,6 +895,8 @@ component SettingsCard
     soundBool: action
     threeField: action
     threeNumber: action
+    fieldIn: action
+    fieldOut: action
   view
     column gap=18 padding=20 border-radius=16 background-color="-exact-tertiary-background" testId="segment"
       row align-items="center" gap=8
@@ -867,10 +913,10 @@ component SettingsCard
         row gap=8
           column gap=4 flex=1 min-width=0
             text "Start" font="-exact-caption1" color="-exact-secondary-label"
-            input value=sel.startText change=setStart disabled=(sel.kind == "clip" and sel.first) aria-label="Start" font-variant-numeric="tabular-nums" testId="start"
+            input value=sel.startText change=setStart focus=fieldIn blur=fieldOut disabled=(sel.kind == "clip" and sel.first) aria-label="Start" font-variant-numeric="tabular-nums" testId="start"
           column gap=4 flex=1 min-width=0
             text "End" font="-exact-caption1" color="-exact-secondary-label"
-            input value=sel.endText change=setEnd disabled=(sel.kind == "clip" and sel.last) aria-label="End" font-variant-numeric="tabular-nums" testId="end"
+            input value=sel.endText change=setEnd focus=fieldIn blur=fieldOut disabled=(sel.kind == "clip" and sel.last) aria-label="End" font-variant-numeric="tabular-nums" testId="end"
         text "Type a time like 1.25 or 0:01.25 and press Return." font="-exact-caption1" color="-exact-tertiary-label"
       if sel.kind == "recorded"
         row align-items="center" gap=8
@@ -979,7 +1025,7 @@ component SettingsCard
       if sel.kind == "text"
         column gap=4
           text "Words" font="-exact-caption1" color="-exact-secondary-label"
-          input value=sel.text change=textField("text") aria-label="Text" testId="text-words"
+          input value=sel.text change=textField("text") focus=fieldIn blur=fieldOut aria-label="Text" testId="text-words"
         column gap=4
           row
             text "Size" flex=1
