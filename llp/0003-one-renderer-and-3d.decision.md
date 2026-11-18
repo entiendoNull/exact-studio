@@ -17,14 +17,17 @@ one of them.
 
 ## The stack
 
-A frame is drawn as one list, back to front: background, video, images, texts (`Framing.stack`).
-Each reach of a blur or black and white is a cut after one layer (`Framing.cover(_:after:at:)`), so
-a new reach or a new layer is one entry, not a special case (LLP 0002#where-an-effect-applies).
+A frame is drawn as one list, back to front: background, behind, video, images, texts (`Framing.stack`).
+Each reach of a blur or black and white is a cut after one layer (`Framing.cover(_:after:at:)`, by
+`Framing.cuts`), so a new reach or a new layer is one entry, not a special case (LLP 0002#where-an-effect-applies).
 
 - The background and the video are drawn per source frame (`render`), so a crossfade blends them;
   the images and texts once over the result (`overlay`). A cut lands on the side its layer is drawn.
-- An item placed behind the video (planned) is one more layer between background and video, drawn
-  in `render` over the covered background, so the `background` cut stays under it and `scene` over it.
+- An item behind the video (LLP 0002#depth) is the layer between background and video, drawn in
+  `render` (`underlay`) over the covered background, so the `background` cut stays under it and `scene`
+  over it. The video's shadow falls on it; it does not zoom with the video.
+- It is drawn at the time the items in front are, so both frames of a crossfade show it alike.
+- With nothing behind, `underlay` returns the ground as it was: old files render byte for byte the same.
 
 ## Export
 

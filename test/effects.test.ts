@@ -65,6 +65,7 @@ describe('docs/effects.md has an entry for every name the code accepts', () => {
     ['3D turn styles (schema)', described('style', '3d'), subEntries('Effects on the video', '3d')],
     ['mask styles (Segment.maskStyles)', list(compositor, 'maskStyles'), subEntries('Effects on the video', 'mask')],
     ['reaches (schema scope)', segment.scope.enum, entries('Whole-frame reach')],
+    ['depth layers (Segment.layers, schema layer)', [...list(compositor, 'layers'), ...segment.layer.enum], entries('Depth')],
     ['transitions (schema)', schema.properties.transitions.additionalProperties.enum, entries('Transitions')],
     ['move styles (schema, video and image)', [...schema.properties.moves.items.properties.style.enum, ...segment.moves.items.properties.style.enum], entries('Move styles')],
     ['3D edges (schema)', schema.properties.three.properties.edge.enum, entries('3D edges')],

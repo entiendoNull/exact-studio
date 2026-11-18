@@ -78,6 +78,9 @@ for fx in blur mono; do
 done
 e='{ "id": "d", "kind": "3d", "start": 1, "end": 5, "style": "hold", "tilt": 12, "turn": -28, "roll": 0 }'
 strip 3d-hold 1 5 6 960 "$(seg "$e")"
+framed='{ "aspect": "16:9", "background": "custom", "customA": "#2B2D33", "customB": "#2B2D33", "shadow": true, "radius": 14, "padding": 8 }'
+i=$(image i 0.2 9.8 "\"x\": 0.27, \"y\": 0.5, \"size\": 0.32, \"layer\": \"behind\", $still")
+strip depth-behind 1.2 3.2 5 1120 "\"base\": { \"x\": 0.5, \"y\": 0.5, \"scale\": 0.9 }, \"moves\": [ { \"id\": \"m\", \"t\": 3, \"to\": { \"x\": 0.66, \"y\": 0.5, \"scale\": 0.6 }, \"style\": \"smooth\", \"duration\": 1.6 } ], $(seg "$i")" "$framed"
 e='{ "id": "d", "kind": "3d", "start": 1, "end": 5, "style": "orbit", "tilt": 8, "roll": 0 }'
 strip 3d-orbit 1 5 9 1152 "$(seg "$e")"
 r='"rect": { "x": 0.27, "y": 0.14, "w": 0.4, "h": 0.17 }'

@@ -68,9 +68,9 @@ an image's effect only that image, and a whole-frame effect everything. Nobody h
 Decided by Jacob on 2026-11-18 (option A of the "where an effect applies" review). Before, a blur
 or black and white reached the video, the frame under the texts, or everything.
 
-- A frame is a fixed stack, back to front: background, video, images, texts. A blur's or black and
-  white's `scope` is a cut in it and covers every layer under the cut: `background`, `scene`
-  (background and video), `frame` (and the images), `all`. No `scope` is the video alone, on its own
+- A frame is a fixed stack, back to front: background, behind the video, video, images, texts (see
+  Depth). A blur's or black and white's `scope` is a cut in it and covers every layer under the cut:
+  `background`, `scene` (background, the items behind and video), `frame` (and the images), `all`. No `scope` is the video alone, on its own
   pixels, as before. Old files do not change.
 - One item alone takes its own effect: a text has `effects` as an image does (blur, black and white,
   fade), on its own Effects row under its lane, with the same per-item rules. Its block shows a chip.
@@ -79,6 +79,29 @@ or black and white reached the video, the frame under the texts, or everything.
 - Spotlight and cursor highlight have no reach: they follow the cursor on the video.
 - Why the inspector and not the rows: rows from use and the fixed kind order stay, and a reach is
   one word an agent writes. Covering one image lane but not another is not possible; use the item's own effect.
+
+## Depth
+
+Asked for by Jacob on 2026-11-18: "the same z-index idea is good for pretty much any element", so
+texts and images can appear from behind the video. Approved model: one front-to-back stack.
+
+- The stack, front to back: texts, images, the video, behind the video, the background.
+- Depth is a property of the item, not of its row: a text or an image has `layer` (`"behind"`, or none:
+  in front) and `order`. The timeline rows keep their fixed kind order; a block behind the video shows a
+  calm "Behind video" chip.
+- `order` ranks the items of one kind in one layer, higher in front. A tie keeps the old rule: images by
+  lane, 0 in front; texts by their place in the list, a later one in front. So old files draw as before.
+- Texts stay over images in each layer, as before images could move. Mixing them is not asked for, and
+  it would make `order` count across two kinds.
+- Arrange is the familiar set: Bring Forward, Send Backward, Bring to Front, Send to Back, Send Behind
+  Video, Bring In Front of Video. Forward and backward step past the next item of its kind in its layer
+  that shows at the same time; one that never meets it does not count.
+- Across the video an item lands next to it: the front of the items behind, the back of those in front.
+- An arrange writes `order` to every item of that kind and layer, or drops it from all of them when the
+  items that meet are in the order they have without one. So a step taken back leaves no trace.
+- A split item moves with its halves. Each step is one undo step, named for it.
+- Why not lanes: an image's lane is its row; moving it to arrange it would change the timeline, and a
+  text's place in the list is not visible at all.
 
 ## Times
 

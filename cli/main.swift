@@ -231,6 +231,12 @@ func problems(_ r: Recording) -> [String] {
             if s.kind != "blur" && s.kind != "mono" { out.append("\(at): only a blur or a black and white (mono) has a scope") }
             else if !Segment.scopes.contains(scope) { out.append("\(at): no scope \(scope); one of \(Segment.scopes.joined(separator: ", "))") }
         }
+        // @ref LLP 0002#depth
+        if let layer = s.layer {
+            if !s.isOverlay { out.append("\(at): only a text or an image has a layer") }
+            else if !Segment.layers.contains(layer) { out.append("\(at): no layer \(layer); one of \(Segment.layers.joined(separator: ", "))") }
+        }
+        if s.order != nil, !s.isOverlay { out.append("\(at): only a text or an image has an order") }
         if s.kind == "mask" {
             out += maskProblems(s).map { "\(at): \($0)" }
         } else if s.rect != nil {
@@ -407,6 +413,8 @@ case "show":
             }
         default: if s.coversFrame { what += " (\(Segment.reach(s.scope)))" }
         }
+        if s.isOverlay, s.isBehind { what += "  behind the video" }
+        if s.isOverlay, let n = s.order { what += "  order \(n)" }
         print("  \(["e", "t", "i", "f"][s.space])\(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]\(joins(s, r.edits.segments))")
         // An image's own moves and effects, or a text's own effects, under it.
         for m in (s.moves ?? []).sorted(by: { $0.t < $1.t }) {

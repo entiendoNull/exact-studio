@@ -585,6 +585,17 @@
           "joinEnd": {
             "type": "boolean",
             "description": "true: the segment of the same kind on the same lane that starts where it ends, which has joinStart, continues it: a split's first half. Default: not joined"
+          },
+          "layer": {
+            "enum": [
+              "front",
+              "behind"
+            ],
+            "description": "text, image: where it sits in the stack (texts, images, video, behind the video, background, front to back). front: over the video (the default); behind: between the background and the video, so it shows around the video and where the video moves, shrinks, turns or is cropped away. Its lane, its row, stays"
+          },
+          "order": {
+            "type": "integer",
+            "description": "text, image: its place among the items of its kind in its layer; a higher one is in front. Default 0; a tie keeps the order without one: images by lane (0 in front), texts by their place in segments (a later one in front). Texts are always over images in the same layer"
           }
         },
         "additionalProperties": false,

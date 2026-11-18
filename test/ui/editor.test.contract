@@ -397,3 +397,30 @@ test "a text gets a blur and a black and white of its own from its inspector"
   expect state sel.fx == "blur"
   expect state sel.file == "“Hello”"
   expect text "segment-title" == "Text Effect"
+
+test "a text's Depth stack sends it behind the video and back; the ⋯ arrange command is one undo step"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 259 314 mouse
+  clock data
+  expect text "segment-title" == "Text"
+  expect state sel.layer == "front"
+  expect text "depth-line-label" == "This text"
+  tap "depth-row-3"
+  clock data
+  expect state sel.layer == "behind"
+  expect state summary.undoName == "Send Behind Video"
+  tap "depth-line" drag 0 -80
+  clock data
+  expect state sel.layer == "front"
+  expect state summary.undoName == "Bring In Front of Video"
+  tap "panel-place-button"
+  clock settle
+  tap "arrange-video"
+  clock data
+  expect state sel.layer == "behind"
+  tap "undo"
+  clock data
+  expect state sel.layer == "front"
+  expect disabled "menu-arrange-in-front"
+  expect enabled "menu-arrange-behind"

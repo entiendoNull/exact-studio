@@ -118,7 +118,8 @@ An effect on the video never touches a text or an image, and an image's or a tex
 (below) never touch anything else. Two segments on one lane must not overlap in time, and these never overlap
 anywhere: two `zoom`s, two `speed`s, two `3d`s, or two of the same visual effect with the same reach.
 Texts, images and masks on separate lanes overlap freely. Images are drawn over the video with the lowest
-`lane` in front, and texts over the images.
+`lane` in front, and texts over the images; a text or an image can go behind the video instead (see
+[Depth](#depth-layer-and-order)).
 
 A file with no `textLanes` is an old one, where texts and whole-frame effects shared the effect
 lanes: the app sorts them into lanes of their own kind when it reads it.
@@ -147,7 +148,8 @@ it. A count the file leaves out is derived from the lanes in use.
 `pink`, `blue`, `mint`); `weight` (`regular`, `bold`, the default, `heavy`, `rounded`); `style` (`plain`, the default, `pill`, `box`,
 `outline`, `shadow`); `animIn` (default `pop`; `letters`, `letters-pop`, `drop`, `typewriter`, `pop`, `spin`, `slide`, `rise`,
 `blur`, `fade`, `none`); `animOut` (`fade`, the default, `fall`, `letters`, `pop`, `sink`, `blur`, `none`); `loop` while
-shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees); `effects`, its own (below).
+shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees); `effects`, its own (below); `layer` and
+`order`, its depth (see [Depth](#depth-layer-and-order)).
 
 Keep a text clear of the video: put it beside the video when the frame is wide, above or below it
 when tall, and not where a zoom pulls the video under it.
@@ -164,20 +166,49 @@ when tall, and not where a zoom pulls the video under it.
 
 ### Where an effect applies
 
-A frame is a fixed stack, back to front: the **background**, the **video**, the **images**, the
-**texts**. A `blur` or `mono` segment's `scope` is a cut in that stack: it covers every layer under the cut.
+A frame is a fixed stack, back to front: the **background**, the items **behind the video**, the
+**video**, the **images**, the **texts**. A `blur` or `mono` segment's `scope` is a cut in that stack: it
+covers every layer under the cut.
 
 | `scope` | covers | stays as it is |
 |---|---|---|
 | none (or `"video"`) | the video only, on its own pixels, with its other effects | the background, images, texts |
-| `"background"` | the background | the video, images, texts |
-| `"scene"` | the background and the video | images, texts |
+| `"background"` | the background | the items behind the video, the video, images, texts |
+| `"scene"` | the background, the items behind the video and the video | images, texts |
 | `"frame"` | the background, the video and the images | texts |
 | `"all"` | everything | nothing |
 
 One image or one text alone: give that item its own `blur` or `mono` in its `effects`. Spotlight and
 cursor highlight have no `scope`: they follow the cursor on the video. Files from before have none
 of the new values, so they draw as they did.
+
+### Depth: `layer` and `order`
+
+A frame is one stack, front to back: **texts**, **images**, the **video**, **behind the video**, the
+**background**. A text or an image sits in front of the video unless its `layer` is `"behind"`. Its
+`lane`, its row on the timeline, stays the same either way.
+
+| field | values | |
+|---|---|---|
+| `layer` | `"front"` (the default), `"behind"` | behind: drawn on the background, under the video and its shadow |
+| `order` | an integer, default 0 | among the items of its kind in its layer, a higher one is in front |
+
+- A tie in `order` (as in every file from before) keeps the old order: images by lane, 0 in front; texts by
+  their place in `segments`, a later one in front. Texts are always over images in the same layer.
+- An item behind the video is hidden where the video covers it, and shows where the video moves, shrinks,
+  turns in 3D or is cropped away. It does not zoom with the video.
+- A `background` reach stays under it; `scene`, `frame` and `all` cover it (see [Where an effect applies](#where-an-effect-applies)).
+- Its own animations, moves and effects play as in front.
+- Use it for a logo or a title that a move of the video reveals. Never put a key point behind the video.
+
+```json
+{ "id": "logo", "kind": "image", "start": 1, "end": 8, "lane": 0, "file": "images/logo.png",
+  "x": 0.27, "y": 0.5, "size": 0.3, "layer": "behind" }
+```
+
+In the app, Edit ▸ Bring Forward, Send Backward, Bring to Front, Send to Back, Send Behind Video and
+Bring In Front of Video (also in the item's ⋯) write these fields: forward and backward step past the
+next item of its kind in its layer that shows at the same time.
 
 ### Splits and joins: `joinStart`, `joinEnd`
 
@@ -239,7 +270,8 @@ BMP; a PNG keeps its transparency); `x`, `y` (its centre, 0–1 of the frame, to
 (its height as a share of the frame's; its width follows the picture's shape); `rotation` (degrees);
 `opacity` (0–1); `radius` (rounded corners, as a share of its shorter side, 0–0.5); `shadow`;
 `animIn` (`pop`, `fade`, `rise`, `slide`, `spin`, `blur`, `none`; default `fade`, while `image` writes `pop`);
-`animOut` (`fade`, the default, `pop`, `sink`, `blur`, `none`).
+`animOut` (`fade`, the default, `pop`, `sink`, `blur`, `none`); `layer` and `order`, its depth (see
+[Depth](#depth-layer-and-order)).
 
 **Its own moves, `moves`:** an image moves the way the video does. Each move has an `id` and lands at
 time `t` (inside the image's span), having travelled for `duration` seconds before it (default 0.8),

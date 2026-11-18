@@ -1,0 +1,7 @@
+{
+  "textLanes": 1,
+  "segments": [
+    { "id": "t", "kind": "text", "start": 1, "end": 4, "lane": 0, "text": "Hi", "layer": "under" },
+    { "id": "z", "kind": "zoom", "start": 5, "end": 6, "lane": 0, "level": 2, "layer": "behind", "order": 1 }
+  ]
+}

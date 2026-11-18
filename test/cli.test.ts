@@ -195,6 +195,42 @@ describe('where an effect applies', () => {
   });
 });
 
+describe('depth: a text or an image behind the video', () => {
+  test('layer and order validate, follow the schema and show where each item sits', () => {
+    const edits = {
+      textLanes: 1,
+      imageLanes: 2,
+      segments: [
+        { id: 'logo', kind: 'image', start: 1, end: 6, lane: 0, file: 'images/logo.png', layer: 'behind' },
+        { id: 'badge', kind: 'image', start: 1, end: 6, lane: 1, file: 'images/logo.png', order: 2 },
+        { id: 'title', kind: 'text', start: 2, end: 5, text: 'Hello', layer: 'behind', order: 1 },
+        { id: 'note', kind: 'text', start: 6, end: 8, text: 'Front', layer: 'front' },
+      ],
+    };
+    expect(check(editsSchema, edits)).toEqual([]);
+    const dir = library('valid');
+    try {
+      writeFileSync(join(dir, 'empty/edits.json'), JSON.stringify(edits));
+      expect(run(dir, 'validate', 'empty').out).toBe('ok\n');
+      const shown = run(dir, 'show', 'empty').out;
+      expect(shown).toContain('in:fade out:fade  behind the video  [logo]');
+      expect(shown).toContain('in:fade out:fade  order 2  [badge]');
+      expect(shown).toContain('“Hello” plain in: out:  behind the video  order 1  [title]');
+      expect(shown).toMatch(/“Front” plain in: out:  \[note\]/);
+    } finally {
+      drop(dir);
+    }
+  });
+
+  test('the schema refuses an unknown layer; validate names the layers and keeps depth to texts and images', () => {
+    expect(check(editsSchema, json('invalid', 'depth-problems', 'edits.json')).join('\n')).toContain('/segments/0/layer: "under" is not one of front, behind');
+    const out = readFileSync(join(golden, 'validate/depth-problems.txt'), 'utf8');
+    expect(out).toContain('no layer under; one of front, behind');
+    expect(out).toContain('only a text or an image has a layer');
+    expect(out).toContain('only a text or an image has an order');
+  });
+});
+
 describe('a file that can\'t be read is never written over', () => {
   let dir = '';
   const broken = '{ "segments": [ { "id": "z", "kind": "zoom", "start": 1, "end": 2, "level": 2 }, ] ';
