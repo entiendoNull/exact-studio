@@ -100,7 +100,8 @@ second angle on the same value), **close** (result at rest, then the call to act
 
 - The hook: the first 2 s decide if anyone keeps watching. Open on the product doing something, or on
   the result, not on a login screen or an empty state. If the strongest moment is late, consider a
-  title over a blurred first beat, or cutting the setup short.
+  title over a blurred first beat, or cutting the setup short. Blur what the title sits on, not the
+  brand: `scope` `"scene"` blurs the background and the video and keeps a logo image crisp.
 - The close: end on the result at rest, held long enough to read (at least 1.5 s), not on a cursor
   drifting away. A call to action goes here and only here.
 

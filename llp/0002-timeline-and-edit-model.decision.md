@@ -24,9 +24,9 @@ The rows are in four groups, and a row holds one kind of thing:
   (LLP 0006).
 - **On top of the video.** **Text** lanes, then **Image** lanes (below).
 - **Sound.** Lanes for the sounds you add: music on one, short sounds on another (see Sound).
-- **The whole frame.** Lanes for a blur or black and white that covers the whole picture: the
-  video, the background and the images. Texts stay sharp on top, so a title reads over a blurred
-  picture; "Everything" covers the texts too.
+- **The whole frame.** Lanes for a blur or black and white that reaches past the video: the
+  background only, the background and the video, those and the images, or everything (see
+  Where an effect applies). So a title reads over a blurred picture.
 
 Why: an effect on a lane must say what it changes. A video effect only ever changes the video,
 an image's effect only that image, and a whole-frame effect everything. Nobody has to guess.
@@ -60,8 +60,25 @@ an image's effect only that image, and a whole-frame effect everything. Nobody h
 - Two segments on one lane never overlap.
 - Never two zooms, two speeds, two 3D turns, or two of the same visual effect with the same
   reach at one time, even on separate lanes. Texts, images and masks on separate lanes overlap freely.
-- On one image: never two of the same effect at one time, and its moves and effects stay inside
-  its span.
+- On one image or one text: never two of the same effect at one time, and its moves and effects
+  stay inside its span.
+
+## Where an effect applies
+
+Decided by Jacob on 2026-11-18 (option A of the "where an effect applies" review). Before, a blur
+or black and white reached the video, the frame under the texts, or everything.
+
+- A frame is a fixed stack, back to front: background, video, images, texts. A blur's or black and
+  white's `scope` is a cut in it and covers every layer under the cut: `background`, `scene`
+  (background and video), `frame` (and the images), `all`. No `scope` is the video alone, on its own
+  pixels, as before. Old files do not change.
+- One item alone takes its own effect: a text has `effects` as an image does (blur, black and white,
+  fade), on its own Effects row under its lane, with the same per-item rules. Its block shows a chip.
+- The inspector draws "Applies to" as that stack with a line to drag (LLP 0005). The timeline keeps
+  its fixed kind order; a block's caption says its reach ("Blur · video, background").
+- Spotlight and cursor highlight have no reach: they follow the cursor on the video.
+- Why the inspector and not the rows: rows from use and the fixed kind order stay, and a reach is
+  one word an agent writes. Covering one image lane but not another is not possible; use the item's own effect.
 
 ## Times
 

@@ -93,9 +93,13 @@ enum TimelineMenus {
         case let .imagePosition(id):
             return .direct { editor.select(id); editor.addImageMove() }
         case let .imageEffects(id, lane):
-            guard lane == 0 else { return nil }
-            let name = URL(fileURLWithPath: editor.edits.images.first { $0.id == id }?.file ?? "").lastPathComponent
-            let add = { (kind: String) in { editor.select(id); editor.addImageEffect(kind) } }
+            guard lane == 0, let item = editor.edits.segments.first(where: { $0.id == id && $0.isOverlay }) else { return nil }
+            let add = { (kind: String) in { editor.select(id); editor.addItemEffect(kind) } }
+            if item.kind == "text" {
+                return .menu([.title("Add to “\(item.text ?? "")” at \(at) · Changes this text only"), .line,
+                              .item("Blur", add("blur")), .item("Black & White", add("mono")), .item("Fade", add("fade"))])
+            }
+            let name = URL(fileURLWithPath: item.file ?? "").lastPathComponent
             return .menu([.title("Add to \(name) at \(at) · Changes this image only"), .line,
                           .item("Blur", add("blur")), .item("Black & White", add("mono")), .item("Fade", add("fade")), .line,
                           .item("Pulse", add("pulse")), .item("Float", add("float")), .item("Wiggle", add("wiggle"))])

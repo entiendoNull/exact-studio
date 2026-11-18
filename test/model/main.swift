@@ -912,6 +912,207 @@ test("a blur's reach moves it between the video's lanes and the whole frame's") 
     eq(e.selectedSegment?.space, 0)
 }
 
+test("every reach of a blur or black and white sits on its own lanes; no scope, or an unknown one, is the video's") {
+    for (scope, space) in [(nil, 0), ("video", 0), ("background", 3), ("scene", 3), ("frame", 3), ("all", 3), ("nonsense", 0)] as [(String?, Int)] {
+        for kind in ["blur", "mono"] {
+            var s = seg("b", kind, 1, 3)
+            s.scope = scope
+            eq(s.space, space, "\(kind) \(scope ?? "none")")
+            eq(s.coversFrame, space == 3, "\(kind) \(scope ?? "none")")
+        }
+    }
+    var spot = seg("s", "spotlight", 1, 3)
+    spot.scope = "scene"
+    eq(spot.space, 0, "a spotlight has no reach")
+    eq(Segment.scopes, ["video", "background", "scene", "frame", "all"])
+}
+
+test("the inspector's reach: each value lands on its lanes; a spotlight drops it; a text never takes one") {
+    let e = open("empty")
+    at(e, 1); e.add("mono")
+    for (scope, space) in [("background", 3), ("scene", 3), ("frame", 3), ("all", 3), ("video", 0)] {
+        e.setSegment("scope", scope)
+        eq(e.selectedSegment?.scope, scope == "video" ? nil : scope); eq(e.selectedSegment?.space, space, scope)
+    }
+    e.setSegment("scope", "nonsense")
+    eq(e.selectedSegment?.scope, nil, "an unknown reach is ignored")
+    e.setSegment("scope", "scene")
+    e.setValue(number: nil, kind: "spotlight")
+    eq(e.selectedSegment?.kind, "spotlight"); eq(e.selectedSegment?.scope, nil); eq(e.selectedSegment?.space, 0)
+    eq(e.selection["scope"] as? String, "video")
+}
+
+/// A picture of red and green squares, sharp and colourful, written to `url`.
+func checkerPicture(_ url: URL) throws {
+    let c = CIFilter.checkerboardGenerator()
+    c.width = 8; c.color0 = CIColor(red: 0.95, green: 0.1, blue: 0.1); c.color1 = CIColor(red: 0.1, green: 0.85, blue: 0.2)
+    let img = c.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+    let cg = CIContext().createCGImage(img, from: img.extent)!
+    let rep = NSBitmapImageRep(cgImage: cg)
+    try rep.representation(using: .png, properties: [:])!.write(to: url)
+}
+
+/// What one reach covers, rendered: the frame at 3 s with a blur or black and white of `scope` from 1 s to 5 s,
+/// and the same frame without it, in four regions: the background, the video, an image and a text.
+struct Reach {
+    let base: [UInt8], with: [UInt8], width: Int, height: Int
+    let regions: [String: CGRect]
+    /// Over a text, only its letters count: the picture shows between them. They are pink, which nothing else is.
+    func letter(_ o: Int) -> Bool { base[o] > 245 && abs(Int(base[o + 1]) - 69) < 6 && abs(Int(base[o + 2]) - 140) < 6 }
+    func change(_ name: String) -> (mean: Double, most: Int) {
+        let r = regions[name]!
+        var sum = 0, most = 0, n = 0
+        for y in Int(r.minY * Double(height))..<Int(r.maxY * Double(height)) { for x in Int(r.minX * Double(width))..<Int(r.maxX * Double(width)) {
+            if name == "text", !letter((y * width + x) * 4) { continue }
+            for k in 0..<3 { let o = (y * width + x) * 4 + k; let d = abs(Int(base[o]) - Int(with[o])); sum += d; most = max(most, d); n += 1 }
+        } }
+        return (Double(sum) / Double(max(n, 1)), most)
+    }
+    /// How sharp a region is: the mean step between neighbouring pixels.
+    func sharpness(_ name: String, effect: Bool) -> Double {
+        let px = effect ? with : base, r = regions[name]!
+        var sum = 0, n = 0
+        for y in Int(r.minY * Double(height))..<Int(r.maxY * Double(height)) { for x in Int(r.minX * Double(width))..<(Int(r.maxX * Double(width)) - 1) {
+            let o = (y * width + x) * 4
+            sum += abs(Int(px[o]) - Int(px[o + 4])) + abs(Int(px[o + 1]) - Int(px[o + 5])); n += 1
+        } }
+        return Double(sum) / Double(max(n, 1))
+    }
+}
+
+let reachFolder = scratch.appendingPathComponent("reach")
+func reach(_ kind: String, _ scope: String?, textEffect: String? = nil) throws -> Reach {
+    try FileManager.default.createDirectory(at: reachFolder, withIntermediateDirectories: true)
+    let pic = reachFolder.appendingPathComponent("pic.png")
+    if !FileManager.default.fileExists(atPath: pic.path) { try checkerPicture(pic) }
+    let meta = try JSONDecoder().decode(RecordingMeta.self, from: Data("""
+    {"id":"r","name":"r","kind":"area","created":0,"duration":10,"width":1600,"height":1000,
+     "crop":{"x":0,"y":0,"w":1,"h":1},"clicks":[],"cursorBaked":true}
+    """.utf8))
+    var look = Look()
+    look.shadow = false; look.radius = 0; look.background = "custom"; look.customA = "#E0302A"; look.customB = "#2A60E0"
+    var image = seg("i", "image", 0, 10)
+    image.file = "pic.png"; image.x = 0.3; image.y = 0.5; image.size = 0.25; image.animIn = "none"; image.animOut = "none"
+    var text = seg("t", "text", 0, 10)
+    text.text = "WORDS"; text.x = 0.7; text.y = 0.5; text.size = 0.12; text.color = "pink"; text.weight = "heavy"; text.style = "plain"
+    text.animIn = "none"; text.animOut = "none"
+    if let k = textEffect { text.effects = [Segment(id: "tx", kind: k, start: 1, end: 5)] }
+    var plain = Edits(segments: [image, text])
+    plain.textLanes = 1; plain.imageLanes = 1
+    var covered = plain
+    if textEffect == nil {
+        var fx = seg("fx", kind, 1, 5)
+        fx.scope = scope
+        covered.segments.append(fx)
+        covered.fitLanes()
+    } else {
+        plain.segments[1].effects = nil
+    }
+    let checker = CIFilter.checkerboardGenerator()
+    checker.width = 10; checker.color0 = CIColor(red: 0.95, green: 0.6, blue: 0.1); checker.color1 = CIColor(red: 0.1, green: 0.3, blue: 0.9)
+    let frame = checker.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: 1600, height: 1000))
+    let a = Framing(meta: meta, look: look, edits: plain, cursor: [], folder: reachFolder)
+    let b = Framing(meta: meta, look: look, edits: covered, cursor: [], folder: reachFolder)
+    let tf = a.textFrame(text)
+    let words = CGRect(x: tf.x + tf.w * 0.15, y: tf.y + tf.h * 0.25, width: tf.w * 0.7, height: tf.h * 0.5)
+    let context = CIContext(options: [.cacheIntermediates: false])
+    func pixels(_ f: Framing) -> [UInt8] {
+        let w = Int(f.canvas.width), h = Int(f.canvas.height)
+        var out = [UInt8](repeating: 0, count: w * h * 4)
+        context.render(f.render(frame, at: 3), toBitmap: &out, rowBytes: w * 4, bounds: CGRect(x: 0, y: 0, width: w, height: h),
+                       format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+        return out
+    }
+    return Reach(base: pixels(a), with: pixels(b), width: Int(a.canvas.width), height: Int(a.canvas.height),
+                 regions: ["background": CGRect(x: 0.01, y: 0.3, width: 0.08, height: 0.4), "video": CGRect(x: 0.45, y: 0.14, width: 0.1, height: 0.14),
+                           "image": CGRect(x: 0.25, y: 0.4, width: 0.1, height: 0.2), "text": words])
+}
+
+test("each reach covers what it says, front to back: background, video, images, texts") {
+    let layers = ["background", "video", "image", "text"]
+    let covers: [(String?, Set<String>)] = [(nil, ["video"]), ("background", ["background"]), ("scene", ["background", "video"]),
+                                           ("frame", ["background", "video", "image"]), ("all", ["background", "video", "image", "text"])]
+    for (scope, reached) in covers {
+        for kind in ["blur", "mono"] {
+            let r = try reach(kind, scope)
+            for layer in layers {
+                let c = r.change(layer)
+                let name = "\(kind) \(scope ?? "video only"), \(layer)"
+                // A gradient background barely changes under a blur; the black and white shows its reach.
+                if kind == "blur" && layer == "background" { if !reached.contains(layer) { expect(c.most <= 1, "\(name): changed by up to \(c.most)") }; continue }
+                if reached.contains(layer) { expect(c.mean > 3, "\(name): only \(c.mean) on average, so it is not covered") }
+                // A letter's soft edge keeps a trace of what is under it, so a text counts on average.
+                else if layer == "text" { expect(c.mean < 0.5, "\(name): changed by \(c.mean) on average, so it is covered") }
+                else { expect(c.most <= 2, "\(name): changed by up to \(c.most), so it is covered") }
+            }
+            if kind == "blur" {
+                for layer in ["image"] where reached.contains(layer) {
+                    expect(r.sharpness(layer, effect: true) < r.sharpness(layer, effect: false) * 0.8, "\(scope ?? "") blurs the \(layer)")
+                }
+            }
+        }
+    }
+}
+
+test("a text's own blur, black and white and fade change that text only") {
+    for kind in ["blur", "mono", "fade"] {
+        let r = try reach("", nil, textEffect: kind)
+        expect(r.change("text").mean > 3, "\(kind): the text did not change")
+        for layer in ["background", "video", "image"] { expect(r.change(layer).most <= 1, "\(kind) on the text changed the \(layer)") }
+    }
+}
+
+test("a text's own effects: added from its + and its inspector, saved, undone, split with it; the rules an image's follow") {
+    let e = open("full")
+    at(e, 1)
+    e.select("txt")
+    let plus = TimelineMenus.plus(.imageEffects("txt", 0), e)
+    guard case let .menu(entries)? = plus else { return expect(false, "the text's Effects row has no + menu") }
+    eq(entries.choices, ["Blur", "Black & White", "Fade"])
+    expect(entries.titles.first?.contains("Changes this text only") == true, "\(entries.titles)")
+    entries.run("Blur")
+    eq(e.edits.texts.first?.effects?.map(\.kind), ["blur"]); eq(onDisk(e).texts.first?.effects?.map(\.kind), ["blur"], "saved")
+    eq(e.undoName, "Add Text Effect")
+    expect(e.selected.hasPrefix("ie:txt:"), e.selected)
+    eq(e.selection["kind"] as? String, "ifx"); eq(e.selection["file"] as? String, "“Hello”")
+    eq(e.selectedImage?.id, nil, "a text's effect is not an image's"); eq(e.selectedItem?.id, "txt")
+    expect(e.isOpen(space: 1, lane: 0), "selecting it opens the text's lane")
+    e.select("txt")
+    e.setText("add-effect", "mono")
+    eq(e.edits.texts.first?.effects?.map(\.kind), ["blur", "mono"])
+    e.setText("add-effect", "pulse")
+    eq(e.edits.texts.first?.effects?.count, 2, "a text has no pulse")
+    e.undo(); e.undo()
+    eq(e.edits.texts.first?.effects, nil); eq(onDisk(e).texts.first?.effects, nil)
+    e.redo()
+    eq(e.edits.texts.first?.effects?.map(\.kind), ["blur"])
+    var t = e.edits.texts.first!
+    t.effects = [Segment(id: "a", kind: "blur", start: 0.6, end: 2), Segment(id: "b", kind: "blur", start: 1, end: 2.4, lane: 1)]
+    eq(Edits.conflict(in: t), "Two of the same effect can’t overlap on one text.")
+    t.effects = [Segment(id: "a", kind: "pulse", start: 0.6, end: 2)]
+    eq(Edits.conflict(in: t), "A text has no pulse effect.")
+    t.effects = [Segment(id: "a", kind: "fade", start: 0.1, end: 2)]
+    eq(Edits.conflict(in: t), "A text’s effect must stay inside the text’s time.")
+    e.select("txt")
+    at(e, 1.5)
+    e.split()
+    let halves = e.edits.texts.sorted { $0.start < $1.start }
+    eq(halves.count, 2); eq(halves.map { $0.effects?.count ?? 0 }.reduce(0, +), 2, "its effect is cut with it")
+    eq(TimelineView.chips(halves[0]), ["Blur"])
+}
+
+test("a blur's block says its reach") {
+    for (scope, words) in [(nil, "Blur · video"), ("background", "Blur · background"), ("scene", "Blur · video, background"),
+                           ("frame", "Blur · whole frame"), ("all", "Blur · everything")] as [(String?, String)] {
+        var s = seg("b", "blur", 1, 3)
+        s.scope = scope
+        eq(TimelineView.caption(s), words)
+    }
+    var m = seg("m", "mono", 1, 3)
+    m.scope = "scene"
+    eq(TimelineView.caption(m), "Black & white · video, background")
+}
+
 test("an image: added from a file, given effects of its own, a same effect twice refused") {
     let e = open("empty")
     at(e, 1)
@@ -919,7 +1120,7 @@ test("an image: added from a file, given effects of its own, a same effect twice
     let image = e.selectedSegment
     eq(image?.kind, "image"); eq(image?.lane, 0); eq(e.edits.imageLanes, 1)
     expect(FileManager.default.fileExists(atPath: e.folder.appendingPathComponent(image?.file ?? "x").path), "the picture was copied in")
-    e.addImageEffect("pulse")
+    e.addItemEffect("pulse")
     eq(e.edits.images.first?.effects?.map(\.kind), ["pulse"])
     e.select(image!.id)
     e.addImageMove()

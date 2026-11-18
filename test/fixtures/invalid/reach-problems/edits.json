@@ -1,0 +1,15 @@
+{
+  "frameLanes": 1,
+  "textLanes": 1,
+  "segments": [
+    { "id": "b", "kind": "blur", "start": 1, "end": 2, "lane": 0, "scope": "behind" },
+    { "id": "z", "kind": "zoom", "start": 5, "end": 6, "lane": 0, "level": 2, "scope": "frame" },
+    {
+      "id": "t", "kind": "text", "start": 1, "end": 4, "lane": 0, "text": "Hi",
+      "effects": [
+        { "id": "p", "kind": "pulse", "start": 1.5, "end": 2 },
+        { "id": "o", "kind": "blur", "start": 3, "end": 5 }
+      ]
+    }
+  ]
+}

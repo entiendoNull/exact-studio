@@ -64,7 +64,7 @@ enum Joins {
         var w = s
         w.start = first.id == s.id ? s.start : first.start
         w.end = last.id == s.id ? s.end : last.end
-        if s.kind == "image" {
+        if s.isOverlay {
             let members = run.map { $0.id == s.id ? s : $0 }
             let moves = members.flatMap { $0.moves ?? [] }, effects = members.flatMap { $0.effects ?? [] }
             w.moves = moves.isEmpty ? nil : moves
@@ -119,7 +119,7 @@ extension Edits {
         left.joinEnd = true
         right.start = t
         right.joinStart = true
-        if s.kind == "image" {
+        if s.isOverlay {
             let moves = s.moves ?? []
             left.moves = moves.filter { $0.t <= t }.nilIfEmpty
             right.moves = moves.filter { $0.t > t }.nilIfEmpty
@@ -149,8 +149,8 @@ extension Edits {
 
     @discardableResult
     mutating func splitImageEffect(image: String, effect: String, at t: Double) throws -> String {
-        guard let i = segments.firstIndex(where: { $0.id == image && $0.kind == "image" }),
-              let j = segments[i].effects?.firstIndex(where: { $0.id == effect }) else { throw SplitRefused(why: "There is no effect \(effect) on an image \(image).") }
+        guard let i = segments.firstIndex(where: { $0.id == image && $0.isOverlay }),
+              let j = segments[i].effects?.firstIndex(where: { $0.id == effect }) else { throw SplitRefused(why: "There is no effect \(effect) on an image or a text \(image).") }
         let fx = segments[i].effects![j]
         guard Edits.fits(t, in: fx) else { throw SplitRefused(why: Edits.inside) }
         var taken = takenIDs
@@ -211,7 +211,7 @@ extension Edits {
         }
         segments = all.map { s in
             var m = tidy(s, among: all)
-            if s.kind == "image", let fx = s.effects {
+            if s.isOverlay, let fx = s.effects {
                 let pool = Joins.whole(s, run: Joins.run(s, in: all)).effects ?? fx
                 m.effects = fx.map { tidy($0, among: pool) }
             }
@@ -236,7 +236,7 @@ extension Edits {
         for (a, b) in zip(segments, copy.segments) {
             for e in edges(a, b) { out.append("\(a.kind) \(a.id): \(e), but no \(a.kind) on its lane \(e == "joinEnd" ? "starts where it ends" : "ends where it starts") with \(e == "joinEnd" ? "joinStart" : "joinEnd")") }
             for (x, y) in zip(a.effects ?? [], b.effects ?? []) {
-                for e in edges(x, y) { out.append("\(a.kind) \(a.id): its \(x.kind) effect \(x.id): \(e), but no \(x.kind) effect on its row \(e == "joinEnd" ? "starts where it ends" : "ends where it starts") with \(e == "joinEnd" ? "joinStart" : "joinEnd") (in this image or one joined to it)") }
+                for e in edges(x, y) { out.append("\(a.kind) \(a.id): its \(x.kind) effect \(x.id): \(e), but no \(x.kind) effect on its row \(e == "joinEnd" ? "starts where it ends" : "ends where it starts") with \(e == "joinEnd" ? "joinStart" : "joinEnd") (in this \(a.kind) or one joined to it)") }
             }
         }
         for (a, b) in zip(sounds, copy.sounds) {

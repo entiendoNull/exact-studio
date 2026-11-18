@@ -273,10 +273,10 @@ final class Studio: ExactModule {
             let field = r["track"] as? String ?? "", value = r["kind"] as? String ?? ""
             switch field {
             case "replace": pickPicture(value) { e.replaceImage($0) }
-            case "add-effect": e.addImageEffect(value)
+            case "add-effect": e.addItemEffect(value)
             case "add-move": e.addImageMove()
             case "move-style", "move-duration", "move-scale": e.setImageMove(String(field.dropFirst(5)), value)
-            case "effect-level": e.setImageEffect("level", value)
+            case "effect-level": e.setItemEffect("level", value)
             default: e.setImage(field, value)
             }
         case "set": e.setValue(number: r["number"] as? Double, kind: r["kind"] as? String)

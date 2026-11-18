@@ -69,6 +69,13 @@ for fx in blur mono; do
     strip "$fx-$scope" 0.8 1.6 4 960 "$room, $(seg "$e, $t, $i")"
   done
 done
+colourful='{ "aspect": "16:9", "background": "sunset", "shadow": false, "padding": 8 }'
+for fx in blur mono; do
+  for scope in background scene; do
+    e="{ \"id\": \"e\", \"kind\": \"$fx\", \"scope\": \"$scope\", \"start\": 1, \"end\": 5 }"
+    strip "$fx-$scope" 0.8 1.6 4 960 "$room, $(seg "$e, $t, $i")" "$colourful"
+  done
+done
 e='{ "id": "d", "kind": "3d", "start": 1, "end": 5, "style": "hold", "tilt": 12, "turn": -28, "roll": 0 }'
 strip 3d-hold 1 5 6 960 "$(seg "$e")"
 e='{ "id": "d", "kind": "3d", "start": 1, "end": 5, "style": "orbit", "tilt": 8, "roll": 0 }'
@@ -127,6 +134,11 @@ for fx in blur mono fade pulse float wiggle; do
   case $fx in blur|mono|fade) from=1.9 to=2.4 n=4 ;; *) from=2.5 to=3.6 n=5 ;; esac
   i=$(image i 0.5 9.5 "$centre, $still, \"effects\": [ { \"id\": \"e\", \"kind\": \"$fx\", \"start\": 2, \"end\": 6 } ]")
   strip "image-effect-$fx" "$from" "$to" "$n" 960 "$(seg "$i")"
+done
+
+for fx in blur mono fade; do
+  t="{ \"id\": \"t\", \"kind\": \"text\", \"start\": 0.5, \"end\": 9.5, \"text\": \"Hello world\", \"x\": 0.5, \"y\": 0.5, \"size\": 0.14, \"weight\": \"heavy\", \"style\": \"pill\", \"color\": \"yellow\", $still, \"effects\": [ { \"id\": \"e\", \"kind\": \"$fx\", \"start\": 2, \"end\": 6 } ] }"
+  strip "text-effect-$fx" 1.9 2.4 4 960 "$(seg "$t")"
 done
 
 du -ch "$out"/*.png | tail -1

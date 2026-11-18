@@ -74,8 +74,10 @@ Rules that keep an edit looking good:
 - Prefer a few strong moments over many effects; leave the first second plain or blurred under a title.
 - Speed changes read as lag on screen recordings; use cuts instead.
 - An effect on the video (zoom, blur, spotlight…) never touches a text or an image. To change one
-  image, give it its own `moves` and `effects`. To blur or grey the whole picture at once, images included, use a `blur` or
-  `mono` segment with `scope` `"frame"` (texts stay sharp) or `"all"` (texts too). `docs/edits.md` has the table of which lanes each kind uses.
+  image, give it its own `moves` and `effects`; a text takes its own `effects` too (`blur`, `mono`, `fade`). To blur or grey more
+  than the video, give a `blur` or `mono` segment a `scope`: the cut in the stack background, video, images, texts. `"background"`
+  covers the background only, `"scene"` the background and the video, `"frame"` the images too (texts stay sharp), `"all"`
+  everything. To blur one image or one text alone, use its own `effects`. `docs/edits.md` has the table of which lanes each kind uses.
 - For music or a sound effect, run `./exact-studio sound <id> <audio file> --at <t> [--for <seconds>]`:
   it copies the file into `sounds/` and prints the new entry in `sounds`. An added sound is not cut
   by the video's cuts or speed changes: it starts at recording time `start` and plays straight

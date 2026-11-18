@@ -174,12 +174,36 @@ All three take `radius` (0–0.5 of the box's short side) for rounded corners.
 
 ## Whole-frame reach
 
-`blur` and `mono` take a `scope`. With `"frame"` or `"all"` they sit on the whole-frame lanes.
-Two with different reaches may overlap.
+`blur` and `mono` take a `scope`: a cut in the stack background, video, images, texts (back to
+front). It covers every layer under the cut. Any `scope` but `"video"` sits on the whole-frame lanes.
+Two with different reaches may overlap. To cover one image or one text alone, use its own effects
+([Image effects](#image-effects), [Text effects](#text-effects)).
 
 ### `video`
 
 The default (no `scope`): only the video, as above.
+
+### `background`
+
+![blur over the background](effects/blur-background.png)
+![black and white over the background](effects/mono-background.png)
+
+*Frames 0.8–1.6 s, on the `sunset` background. A gradient barely changes under a blur; a `"video"` background shows it.*
+
+- **Sees:** only the background blurs or goes grey; the video, the images and the texts stay as they are.
+- **Timing:** as `frame`.
+- **Use:** a grey background to make a colourful screen stand out. **Avoid:** a blur on a plain gradient: nothing shows.
+
+### `scene`
+
+![blur over the background and the video](effects/blur-scene.png)
+![black and white over the background and the video](effects/mono-scene.png)
+
+*Frames 0.8–1.6 s. The image and the text stay sharp and in colour.*
+
+- **Sees:** the background and the video blur or go grey; images and texts stay on top, sharp.
+- **Timing:** as `frame`.
+- **Use:** under a title and a logo in the first beat: the brand stays crisp. **Avoid:** on a key point.
 
 ### `frame`
 
@@ -677,3 +701,27 @@ The three motions: **use** on a call to action or a sticker; **avoid** on a logo
 
 Images move with the [move styles](#move-styles) above, in their own `moves`: no angles, and a `spin`
 turns them in the picture's plane.
+
+## Text effects
+
+A text's own `effects`: as an image's, each touches only that text and eases in and out over 0.3 s.
+Two of one kind never overlap on one text. Each strip: an effect from 2 s on a centred text.
+
+### `blur`
+
+![text blur](effects/text-effect-blur.png)
+
+- **Sees:** the words go soft, by 22% of their height: unreadable. **Use:** to hide a line until its moment, or
+  to push it back while another text speaks.
+
+### `mono`
+
+![text black and white](effects/text-effect-mono.png)
+
+- **Sees:** the text and its shape go black and white.
+
+### `fade`
+
+![text fade](effects/text-effect-fade.png)
+
+- **Sees:** the text fades to `level` (an opacity, 0–1, default 0.3) and back.
