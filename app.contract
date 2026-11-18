@@ -146,6 +146,9 @@ fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind 
 fn imageFxLabel(kind: string): string = kind == "blur" ? "Blur" : kind == "mono" ? "Black & White" : kind == "fade" ? "Fade" : kind == "pulse" ? "Pulse" : kind == "float" ? "Float" : "Wiggle"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
 fn poseLabel(p: string): string = p == "hero" ? "Hero" : p == "lean-left" ? "Lean Left" : p == "lean-right" ? "Lean Right" : p == "lay-back" ? "Lay Back" : p == "tumble" ? "Tumble" : "Face On"
+fn placeName(pl: string): string = pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner"
+fn templateName(t: string): string = t == "launch" ? "Clean Launch" : t == "hero" ? "Product Hero" : t == "tour" ? "Feature Tour" : "Social Teaser"
+fn templateLine(t: string): string = t == "launch" ? "Blurred title card, zooms on clicks, an end line" : t == "hero" ? "A 3D hero angle, a feature line, an orbit" : t == "tour" ? "Three captions, moving between sides" : "A blurred hook, pops, a 3D tumble, a call to action"
 fn panelLabel(m: string): string = m == "dock" ? "Docked on the Right" : m == "float" ? "Floating" : m == "overlay" ? "Lightbox over the Video" : "On the Left"
 
 routes nav
@@ -153,7 +156,6 @@ routes nav
 
 component ExactStudio
   state selected = ""
-  state openPlace = true persist
   state openBg = true persist
   state openFrame = true persist
   state openCursor = false persist
@@ -366,8 +368,6 @@ component ExactStudio
   action closePanel
     send edited = editClip(selected, "deselect", "", 0, "")
   action toggleSection(name: string)
-    if name == "place"
-      openPlace = not openPlace
     if name == "bg"
       openBg = not openBg
     if name == "frame"
@@ -454,7 +454,15 @@ component ExactStudio
             button press=toggleRight aria-label=(rightOpen ? "Hide the inspector" : "Show the inspector") testId="toggle-right"
               image "symbol:sf/sidebar.right"
             if current != none
-              button press=openExport buttonStyle="filled" margin-left=10 testId="export-open"
+              button popovertarget="template-menu" margin-left=10 testId="templates"
+                image "symbol:sf/wand.and.stars"
+                text "Templates"
+              column id="template-menu" popover="auto" role="menu" aria-label="Templates: replace the texts, effects and moves"
+                for t in ["launch", "hero", "tour", "teaser"] key=t
+                  button press=template(t) popovertarget="template-menu" popovertargetaction="hide" testId=`template-${t}`
+                    text templateName(t)
+                    text templateLine(t)
+              button press=openExport buttonStyle="filled" margin-left=6 testId="export-open"
                 image "symbol:sf/square.and.arrow.up"
                 text "Export"
           row flex=1 min-height=0
@@ -569,47 +577,47 @@ component ExactStudio
                         text "Reset"
                       button press=endCrop buttonStyle="filled" testId="crop-done"
                         text "Done"
+                  else
+                    // @ref LLP 0005#three-bars
+                    row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" testId="viewer-bar"
+                      row flex="1 0 0" gap=8 align-items="center"
+                        text "VIDEO" font="-exact-caption1" font-weight=700 letter-spacing=0.6 color="#EDA138" padding="3px 8px" border-radius=6 background-color="#EDA13829" testId="video-scope"
+                        button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
+                          image "symbol:sf/crop"
+                          text "Crop"
+                        button popovertarget="place-menu" buttonStyle="bordered" testId="place-open"
+                          image "symbol:sf/rectangle.center.inset.filled"
+                          text "Place"
+                        column id="place-menu" popover="auto" role="menu" aria-label="Place the video"
+                          column role="group" aria-label=(summary.moves == 0 ? "Where the video sits" : "Where it moves at the playhead")
+                            for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
+                              button press=placeAt(pl) popovertarget="place-menu" popovertargetaction="hide" testId=`place-${pl}`
+                                text placeName(pl)
+                      row gap=8 align-items="center"
+                        button press=editDo("play") aria-label=(summary.playing ? "Pause" : "Play") buttonStyle="filled" testId="play"
+                          image (summary.playing ? "symbol:pause-fill" : "symbol:play-fill")
+                        studio-clock clip=rec.id aria-label="Time" width=112 height=20 testId="clock"
+                      row flex="1 0 0" gap=8 align-items="center" justify-content="flex-end" testId="viewer-right"
+                        button press=toggleMotionPaths -exact-menu="view" aria-label="Show Motion Paths" aria-pressed=showMotionPaths aria-selected=showMotionPaths title="Show how the video and the selected image move" buttonStyle="bordered" testId="motion-paths"
+                          image "symbol:sf/point.topleft.down.to.point.bottomright.curvepath"
+                          text "Motion Paths"
                   // The handle: drag it to give the preview or the timeline more room.
                   button pan=resizeStage press=resetStage appearance="none" aria-label="Resize the preview; click to reset" cursor="row-resize" align-self="stretch" display="flex" align-items="center" justify-content="center" height=12 margin-top=-6 margin-bottom=-6 testId="stage-handle"
                     column width=56 height=5 border-radius=3 background-color="-exact-tertiary-label"
-                  row gap=8 align-items="center" flex-wrap="wrap"
-                    button press=editDo("play") aria-label=(summary.playing ? "Pause" : "Play") buttonStyle="filled" testId="play"
-                      image (summary.playing ? "symbol:pause-fill" : "symbol:play-fill")
-                    column width=1 height=22 background-color="-exact-separator"
-                    row gap=4 align-items="center"
+                  row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" testId="timeline-bar"
+                    row gap=8 align-items="center"
+                      button press=editDo("split-clip") buttonStyle="bordered" title="Split the Clip at the playhead (S)" testId="split-clip"
+                        image "symbol:sf/scissors"
+                        text "Split Clip"
+                      button press=editDo("split-all") disabled=true buttonStyle="bordered" title="Coming soon" testId="split-all"
+                        image "symbol:sf/rectangle.split.3x1"
+                        text "Split All Lanes"
+                      column width=1 height=22 background-color="-exact-separator"
                       button press=editDo("undo") disabled=(summary.undoName == "") aria-label=(summary.undoName == "" ? "Undo" : `Undo ${summary.undoName}`) aria-keyshortcuts=(typing ? "" : "Meta+Z") title=(summary.undoName == "" ? "Undo" : `Undo ${summary.undoName}`) buttonStyle="bordered" testId="undo"
                         image "symbol:sf/arrow.uturn.backward"
                       button press=editDo("redo") disabled=(summary.redoName == "") aria-label=(summary.redoName == "" ? "Redo" : `Redo ${summary.redoName}`) aria-keyshortcuts=(typing ? "" : "Meta+Shift+Z Meta+Y") title=(summary.redoName == "" ? "Redo" : `Redo ${summary.redoName}`) buttonStyle="bordered" testId="redo"
                         image "symbol:sf/arrow.uturn.forward"
-                    column width=1 height=22 background-color="-exact-separator"
-                    button press=editDo("split-clip") buttonStyle="bordered" testId="split-clip"
-                      image "symbol:sf/scissors"
-                      text "Split Clip"
-                    button popovertarget="template-menu" buttonStyle="bordered" testId="templates"
-                      image "symbol:sf/wand.and.stars"
-                      text "Templates"
-                    column id="template-menu" popover="auto" role="menu" aria-label="Templates: replace the texts, effects and moves"
-                      button press=template("launch") popovertarget="template-menu" popovertargetaction="hide" testId="template-launch"
-                        text "Clean Launch"
-                        text "Blurred title card, zooms on clicks, an end line"
-                      button press=template("hero") popovertarget="template-menu" popovertargetaction="hide" testId="template-hero"
-                        text "Product Hero"
-                        text "A 3D hero angle, a feature line, an orbit"
-                      button press=template("tour") popovertarget="template-menu" popovertargetaction="hide" testId="template-tour"
-                        text "Feature Tour"
-                        text "Three captions, moving between sides"
-                      button press=template("teaser") popovertarget="template-menu" popovertargetaction="hide" testId="template-teaser"
-                        text "Social Teaser"
-                        text "A blurred hook, pops, a 3D tumble, a call to action"
-                    button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
-                      image "symbol:sf/crop"
-                      text "Crop"
-                    button press=toggleMotionPaths -exact-menu="view" aria-label="Show Motion Paths" aria-pressed=showMotionPaths aria-selected=showMotionPaths title="Show how the video and the selected image move" buttonStyle="bordered" testId="motion-paths"
-                      image "symbol:sf/point.topleft.down.to.point.bottomright.curvepath"
-                      text "Motion Paths"
-                    // The zoom buttons and the length: one unit at the right end, wrapping together.
                     row flex-grow=1 flex-shrink=0 gap=8 align-items="center" justify-content="flex-end"
-                      // Zoom the timeline; the last button says whether the mouse wheel zooms it too.
                       row gap=4 align-items="center" testId="zoom-controls"
                         button press=zoomTimeline("zoom-out") aria-label="Zoom out" buttonStyle="bordered" testId="zoom-out"
                           image "symbol:sf/minus.magnifyingglass"
@@ -667,19 +675,6 @@ component ExactStudio
                       text "Clear Edits…"
                     button press=askRemove(selected) -exact-menu="file" aria-label="Delete Recording…" testId="menu-delete"
                       text "Delete Recording…"
-                  if sel.id == "" or panelMode != "dock"
-                    column gap=10
-                      button press=toggleSection("place") appearance="none" aria-expanded=openPlace testId="sec-place" padding-top=2 padding-bottom=2
-                        row align-items="center" gap=6 flex=1
-                          text "PLACEMENT" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
-                          image (openPlace ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
-                      if openPlace
-                        row gap=6 flex-wrap="wrap"
-                          for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
-                            button press=placeAt(pl) buttonStyle="bordered" testId=`place-${pl}`
-                              text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
-                        text (summary.moves == 0 ? "Drag the video in the preview, or scroll over it to resize. With no moves this places it for the whole video." : "Placing at the playhead adds a move there. The + on the Position row adds a move too; then drag the video where it should go.") font="-exact-caption1" color="-exact-tertiary-label"
-
                   column gap=16
                     button press=toggleSection("bg") appearance="none" aria-expanded=openBg testId="sec-bg" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
@@ -1182,7 +1177,7 @@ component SettingsCard
         row gap=6 flex-wrap="wrap"
           for pl in ["center", "left", "right", "top", "bottom", "large", "small"] key=pl
             button press=placeAt(pl) buttonStyle="bordered" testId=`move-place-${pl}`
-              text (pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner")
+              text placeName(pl)
         row align-items="center" gap=8
           text "Style" flex=1
           select value=sel.moveStyle change=moveField("style") aria-label="Move style" testId="move-style"

@@ -36,6 +36,7 @@ final class Studio: ExactModule {
             "studio-preview": ExactNativeFactory(for: Studio.self) { studio, props, events in Preview(studio, props, events) },
             "studio-timeline": ExactNativeFactory(for: Studio.self) { studio, props, events in Timeline(studio, props, events) },
             "studio-color": ExactNativeFactory(for: Studio.self) { _, props, events in ColorWell(props, events) },
+            "studio-clock": ExactNativeFactory(for: Studio.self) { studio, props, events in PlayClock(studio, props, events) },
         ]
     }
 

@@ -47,7 +47,7 @@ final class TimelineView: NSView {
     // Geometry, top-down (the view is flipped).
     private static let labelWidth: CGFloat = 170, pad: CGFloat = 14
     private static let rulerTop: CGFloat = 10, rulerHeight: CGFloat = 20
-    private static let clipTop: CGFloat = 34, clipHeight: CGFloat = 56
+    private static let videoTop: CGFloat = 34, clipTop: CGFloat = 68, clipHeight: CGFloat = 56
     private static let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
     private static let motionHeight: CGFloat = 26, headerHeight: CGFloat = 22
     /// How tall the rows are: 0 compact, 1 regular, 2 tall. The person's choice, kept between launches.
@@ -92,6 +92,7 @@ final class TimelineView: NSView {
         func add(_ kind: Kind, _ height: CGFloat) { out.append(Row(kind: kind, y: y, height: height)); y += height + Self.laneGap }
         guard let editor else { add(.lane(0, 0), laneH); return out }
         let e = editor.edits, dragged = draggedSpace
+        out.append(Row(kind: .header("video"), y: Self.videoTop, height: Self.headerHeight))
         if editor.videoOpen {
             // @ref LLP 0002#sound — the recorded sound is part of the clip, so it sits with it
             if editor.hasSound { add(.sound, laneH) }
@@ -167,7 +168,7 @@ final class TimelineView: NSView {
     private func local(_ e: NSEvent) -> CGPoint {
         let p = convert(e.locationInWindow, from: nil)
         // The ruler and the lane sizes do not scroll.
-        return CGPoint(x: p.x, y: p.y < Self.clipTop ? p.y : p.y + scrollY)
+        return CGPoint(x: p.x, y: p.y < Self.videoTop ? p.y : p.y + scrollY)
     }
 
     // @ref LLP 0005#zoom-the-timeline — a mouse wheel zooms, a trackpad scrolls
@@ -466,7 +467,7 @@ final class TimelineView: NSView {
         // Undone before the indicator above is drawn: it stays at the view's edge, not in the content.
         let scroller = NSGraphicsContext.current?.cgContext
         scroller?.saveGState()
-        scroller?.clip(to: CGRect(x: 0, y: Self.clipTop - max(0, 12 - scrollY), width: bounds.width, height: bounds.height))
+        scroller?.clip(to: CGRect(x: 0, y: Self.videoTop - max(0, 4 - scrollY), width: bounds.width, height: bounds.height))
         scroller?.translateBy(x: 0, y: -scrollY)
         var scrolling = true
         func pin() { if scrolling { scrolling = false; scroller?.restoreGState() } }
@@ -513,7 +514,7 @@ final class TimelineView: NSView {
             NSBezierPath(roundedRect: CGRect(x: b.minX + 5, y: b.midY - h / 2, width: b.width - 10, height: h), xRadius: 1.5, yRadius: 1.5).fill()
         }
         }
-        drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7), open: editor.videoOpen)
+        drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7))
         // From here to the playhead, labels and +s wait in `labelQueue` and are drawn after, unclipped.
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: trackClip).addClip()
@@ -646,12 +647,12 @@ final class TimelineView: NSView {
             switch r.kind {
             case let .header(group):
                 let isFolded = editor.folded.contains(group)
-                drawLabel(group == "top" ? "ON TOP" : group == "sound" ? "SOUND" : "WHOLE FRAME", symbol: "", y: r.y, height: r.height, attrs: caption, tint: .clear, open: !isFolded, plus: true)
+                drawLabel(group == "video" ? "VIDEO" : group == "top" ? "ON TOP" : group == "sound" ? "SOUND" : "WHOLE FRAME", symbol: "", y: r.y, height: r.height, attrs: caption, tint: .clear, open: !isFolded, plus: true)
                 // What the group holds, as spans in recording time, in row order.
                 typealias Item = (start: Double, end: Double, order: Int, color: NSColor)
                 let items: [Item] = group == "sound"
                     ? editor.edits.sounds.map { ($0.start, $0.end(editor.map), $0.lane, Self.soundColor) }
-                    : segments.filter({ group == "top" ? $0.isOverlay : $0.space == 3 }).map { ($0.start, $0.end, $0.kind == "image" ? 1000 + $0.lane : $0.lane, Self.color($0)) }
+                    : segments.filter({ group == "top" ? $0.isOverlay : group == "video" ? $0.space == 0 : $0.space == 3 }).map { ($0.start, $0.end, $0.kind == "image" ? 1000 + $0.lane : $0.lane, Self.color($0)) }
                 if isFolded {
                     // Folded, the group still shows where its things are: slim bars in the track, in row
                     // order, each on the first of up to three sub-lines where it overlaps nothing, so
@@ -676,7 +677,7 @@ final class TimelineView: NSView {
                             NSBezierPath(roundedRect: CGRect(x: run.from, y: top + CGFloat(i) * step, width: run.to - run.from, height: bar), xRadius: 1.5, yRadius: 1.5).fill()
                         }
                     }
-                } else if items.isEmpty, (group == "top" ? editor.edits.textLanes + editor.edits.imageLanes : editor.edits.laneCount(space: group == "sound" ? Edits.soundSpace : 3)) == 0 {
+                } else if group != "video", items.isEmpty, (group == "top" ? editor.edits.textLanes + editor.edits.imageLanes : editor.edits.laneCount(space: group == "sound" ? Edits.soundSpace : 3)) == 0 {
                     drawHint(group == "top" ? "Press + to put a text or an image on top of the video."
                         : group == "sound" ? "Press + to add music or another sound."
                         : "Press + to blur the whole picture, or make it black and white.", in: r)
@@ -1074,7 +1075,7 @@ final class TimelineView: NSView {
             return mouseDragged(with: e)
         }
         // The lane sizes, in the corner.
-        if p.y < Self.clipTop, p.x < Self.labelWidth {
+        if p.y < Self.videoTop, p.x < Self.labelWidth {
             if let i = (0..<3).first(where: { sizeRect($0).insetBy(dx: -1, dy: -3).contains(p) }) {
                 size = i
                 UserDefaults.standard.set(i, forKey: "ExactStudio.laneSize")
@@ -1084,7 +1085,7 @@ final class TimelineView: NSView {
         }
         // The clip: its label folds the video's rows; a part of it is selected, and the playhead goes there.
         if p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight {
-            if p.x < Self.labelWidth { return editor.toggle(group: "video") }
+            if p.x < Self.labelWidth { return }
             if let piece = editor.pieces.first(where: { t(p.x) >= $0.start && t(p.x) <= $0.end }) { editor.select(piece.id) }
             return scrub()
         }
@@ -1264,6 +1265,54 @@ final class TimelineView: NSView {
         default: super.keyDown(with: e)
         }
     }
+}
+
+final class PlayClock: ExactNativeInstance {
+    private let label = NSTextField(labelWithString: "")
+    private let studio: Studio
+    private var clip = ""
+    private weak var editor: Editor?
+    private weak var player: AVPlayer?
+    private var observer: Any?
+
+    init(_ studio: Studio, _ props: [String: String], _ events: ExactNativeEvents) {
+        self.studio = studio
+        super.init(events: events)
+        label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .center
+        events.intrinsicSize(CGSize(width: 112, height: 20))
+        try? setProps(props)
+    }
+
+    override var view: ExactNativeView { label }
+
+    override func setProps(_ props: [String: String]) throws {
+        let next = props["clip"] ?? ""
+        guard next != clip else { return }
+        clip = next
+        attach(studio.editor(next))
+    }
+
+    private func attach(_ next: Editor?) {
+        editor?.unlisten(self)
+        if let player, let observer { player.removeTimeObserver(observer) }
+        observer = nil
+        editor = next
+        player = next?.player
+        guard let next else { label.stringValue = ""; return }
+        next.listen(self) { [weak self] in self?.show() }
+        observer = next.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] _ in self?.show() }
+        show()
+    }
+
+    private func show() {
+        guard let editor else { return }
+        let map = editor.map, total = map.outputDuration
+        label.stringValue = "\(TimelineMenus.clock(min(map.output(editor.playhead), total))) / \(TimelineView.clock(total, tenths: false))"
+    }
+
+    override func destroy() { attach(nil) }
 }
 
 /// The view Exact places; its height follows the lanes.

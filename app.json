@@ -30,7 +30,8 @@
   "modules": [
     "studio-preview",
     "studio-timeline",
-    "studio-color"
+    "studio-color",
+    "studio-clock"
   ],
   "userInterfaceStyle": "dark",
   "icons": [
