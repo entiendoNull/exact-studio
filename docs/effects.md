@@ -732,7 +732,7 @@ turns them in the picture's plane.
 ## Text effects
 
 A text's own `effects`: as an image's, each touches only that text and eases in and out over 0.3 s.
-Two of one kind never overlap on one text. Each strip: an effect from 2 s on a centred text.
+Two of one kind never overlap on one text (`text-one-each`), and each stays inside the text (`text-inside`). Each strip: an effect from 2 s on a centred text.
 
 ### `blur`
 

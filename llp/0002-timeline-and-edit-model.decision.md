@@ -85,6 +85,9 @@ Decided by Jacob on 2026-11-18, with the rules table (docs/edits.md, "What may o
   breaks a rule anew is refused. A break is new when its pair (rule, item, other) was not broken
   before the change. So a file with a video blur under a whole-frame blur keeps both, either may
   still be moved or changed, and a third blur over them is refused.
+- A text's own effects follow the image's rules under their own ids: `text-one-each`,
+  `text-inside`, `text-effect-kind` ("One of each per text.", "Keep it inside the text.").
+- Depth (`layer`, `order`) breaks no rule: arranging changes no time or lane.
 - Taste (a spotlight with a zoom, zooms back to back) stays advice in docs/effects.md and the
   directing skill; the app never refuses it.
 

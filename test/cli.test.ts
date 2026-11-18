@@ -219,6 +219,21 @@ describe('every rule: validate prints its id and the same two lines as the app',
     });
   }
 
+  test('export renders an old file that breaks a rule, with the rule as a warning; validate still fails it', () => {
+    const old = cases.find((c: any) => c.rule === 'no-zoom-in-orbit').after;
+    recording('rule-export', old);
+    const out = join(good, 'rule-export.mp4');
+    const r = run(good, 'export', 'rule-export', '--out', out, '--quality', 'small');
+    expect(r.code).toBe(0);
+    expect(r.err).toContain('warning: zoom z (0:03.00–0:06.00), with 3d o: no-zoom-in-orbit: No zoom during an orbit.\n  3D orbit runs to 0:05.0. Start it at 0:05.0 or later.\n');
+    expect(existsSync(out)).toBe(true);
+    expect(run(good, 'validate', 'rule-export').code).toBe(1);
+    writeFileSync(join(good, 'rule-export', 'edits.json'), JSON.stringify({ ...old, segments: [...old.segments, { id: 'z', kind: 'zoom', start: 3, end: 3.05, level: 2 }] }));
+    const short = run(good, 'export', 'rule-export', '--out', join(good, 'short.mp4'), '--quality', 'small');
+    expect(short.code).toBe(1);
+    expect(short.out).toContain('another segment has the same id');
+  }, 120_000);
+
   test('--since: a rule the old file broke too is a note, not a failure; a new one still fails', () => {
     const old = cases.find((c: any) => c.rule === 'one-blur').after;
     const dir = recording('rule-old', old);

@@ -1740,6 +1740,19 @@ test("a + menu item that would be refused is off, its reason the rule's two line
     eq(menu(.position, e).reason("Add Move Here"), nil)
 }
 
+test("a text's own effect + menu: an effect with no room left is off, with the rule's two lines") {
+    let e = open("empty", edits: """
+    { "lanes": 1, "textLanes": 1, "segments": [{ "id": "t", "kind": "text", "start": 1, "end": 3, "text": "Hi",
+      "effects": [{ "id": "b", "kind": "blur", "start": 1, "end": 3 }] }] }
+    """)
+    at(e, 2)
+    let entries = menu(.imageEffects("t", 0), e)
+    eq(entries.reason("Blur"), "One of each per text.\nIts blur leaves no 0.3 s free. Shorten or remove it.")
+    eq(entries.reason("Fade"), nil)
+    expect(!entries.run("Blur"), "an off item does not run")
+    eq(e.edits.texts.first?.effects?.count, 1)
+}
+
 test("a typed time that clashes says why under its field, and nothing changes until Return") {
     let e = open("empty", edits: """
     { "lanes": 2, "textLanes": 0, "segments": [{ "id": "a", "kind": "zoom", "start": 1, "end": 4, "level": 2 }, { "id": "b", "kind": "zoom", "start": 6, "end": 8, "level": 0.7, "lane": 1 }] }

@@ -390,7 +390,7 @@ way: "start at" later, "end by" earlier.
 | `one-3d` | One `3d` at a time, hold or orbit. | One 3D turn at once. | 3D orbit runs to 0:05.0. Start it at 0:05.0 or later. |
 | `one-spotlight` | One spotlight at a time. | One spotlight at a time. | Spotlight runs to 0:04.0. Start it at 0:04.0 or later. |
 | `one-highlight` | One cursor highlight at a time. | One highlight at a time. | Cursor highlight runs to 0:04.0. Start it at 0:04.0 or later. |
-| `one-blur` | One `blur` at a time, whatever its `scope`. | One blur at a time. | Blur · whole frame runs to 0:35.0. Start it at 0:35.0 or later. |
+| `one-blur` | One `blur` at a time, whatever its `scope` (video, background, scene, frame or all). | One blur at a time. | Blur · whole frame runs to 0:35.0. Start it at 0:35.0 or later. |
 | `one-mono` | One `mono` at a time, whatever its `scope`. | One black & white at once. | Black & white runs to 0:12.0. Start it at 0:12.0 or later. |
 | `no-zoom-in-orbit` | No `zoom` during a `3d` with `style` `"orbit"`: half way the screen faces away. | No zoom during an orbit. | 3D orbit runs to 0:05.0. Start it at 0:05.0 or later. |
 | `move-after-move` | A move starts travelling (`t - duration`) only after the move before it lands: for `moves` and for each image's own. | One move at a time. | The move before lands at 0:09.0. Land this one at 0:09.8 or later. |
@@ -398,6 +398,9 @@ way: "start at" later, "end by" earlier.
 | `image-one-each` | On one image, one of each effect kind at a time. | One of each per image. | Its pulse runs to 0:06.0. Start it at 0:06.0 or later. |
 | `image-inside` | An image's own effects and moves stay inside its time. | Keep it inside the image. | logo.png shows 0:30.0–0:36.0. Start and end it there. |
 | `image-effect-kind` | An image's own effect is one of its six kinds. | No such image effect. | An image takes blur, mono, fade, pulse, float or wiggle. |
+| `text-one-each` | On one text, one of each effect kind at a time. | One of each per text. | Its blur runs to 0:04.0. Start it at 0:04.0 or later. |
+| `text-inside` | A text's own effects stay inside its time. | Keep it inside the text. | “Hi” shows 0:01.0–0:06.0. Start and end it there. |
+| `text-effect-kind` | A text's own effect is blur, mono or fade. | No such text effect. | A text takes blur, mono or fade. |
 | `min-length` | Every item lasts 0.1 s or more. | Too short. | An item lasts at least 0.1 s, inside 0:00–0:42.0. |
 | `keep-a-part` | At least one clip part is kept. | Keep one clip part. | The video needs at least one kept part. |
 | `room-at-playhead` | The app only: an add needs 0.3 s free of its kind at the playhead. | (its kind's line 1) | A zoom runs here until 0:16.0. Move the playhead past it. |
@@ -415,7 +418,9 @@ kind, or a new one.
 covered both reaches (a video blur under a whole-frame blur), still opens and keeps every edit; it
 plays and exports as it always did. `validate` reports it, and the app marks the items and shows the
 reason when one is selected. Only a change that breaks a rule anew is refused: `write_edits` lists
-the old breaks as notes and saves, and `validate --since <old edits.json>` does the same.
+the old breaks as notes and saves, and `validate --since <old edits.json>` does the same. `export`
+renders such a file as the app does and prints each broken rule as a warning; it refuses only an
+unreadable file, an unfilled `[line]` or a broken field. `validate` still exits 1 on a broken rule.
 
 ### Placement and moves: `base`, `moves`
 

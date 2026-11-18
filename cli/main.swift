@@ -29,7 +29,9 @@ exact-studio — edit Exact Studio recordings from the command line
                                             of the recording) side by side in one PNG, to see a motion at a glance;
                                             default .exact/strip.png
   exact-studio export <id> [--out f.mp4] [--quality best|1080p|720p|small]
-                                            renders the video; default ~/Movies/Exact Studio/<name>.mp4
+                                            renders the video; default ~/Movies/Exact Studio/<name>.mp4. Refuses an
+                                            unreadable file, an unfilled [line] or a broken field; a broken rule
+                                            (validate's id and two lines) is a warning on stderr, as the app plays it
   exact-studio template <id> <name>         replaces texts, effects, zooms and moves with a template fitted to the
                                             recording's length, clicks and look.json's frame; prints the lines to
                                             fill: a [bracketed] text is unfilled, and validate and export refuse it
@@ -271,10 +273,10 @@ func findings(_ r: Recording) -> [Problem] {
         }
         // @ref LLP 0002#depth
         if let layer = s.layer {
-            if !s.isOverlay { out.append("\(at): only a text or an image has a layer") }
-            else if !Segment.layers.contains(layer) { out.append("\(at): no layer \(layer); one of \(Segment.layers.joined(separator: ", "))") }
+            if !s.isOverlay { say("\(at): only a text or an image has a layer") }
+            else if !Segment.layers.contains(layer) { say("\(at): no layer \(layer); one of \(Segment.layers.joined(separator: ", "))") }
         }
-        if s.order != nil, !s.isOverlay { out.append("\(at): only a text or an image has an order") }
+        if s.order != nil, !s.isOverlay { say("\(at): only a text or an image has an order") }
         if s.kind == "mask" {
             maskProblems(s).forEach { say("\(at): \($0)") }
         } else if s.rect != nil {
@@ -575,7 +577,10 @@ case "strip":
 case "export":
     guard let ref = args.first else { fail(usage) }
     let r = open(ref)
-    if case let found = problems(r), !found.isEmpty { found.forEach { print($0) }; fail("fix these first (exact-studio validate \(r.id))", code: 1) }
+    // @ref LLP 0005#refusals — the app exports a file that breaks a rule it tolerates; so does the CLI, saying so
+    let found = findings(r), blocking = found.filter { $0.key == nil }
+    if !blocking.isEmpty { blocking.forEach { print($0.text) }; fail("fix these first (exact-studio validate \(r.id))", code: 1) }
+    for w in found where w.key != nil { FileHandle.standardError.write(Data("warning: \(w.text)\n".utf8)) }
     let safe = r.meta.name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
     let out = URL(fileURLWithPath: option("--out") ?? library.deletingLastPathComponent().appendingPathComponent("\(safe) \(r.id).mp4").path)
     try? FileManager.default.removeItem(at: out)

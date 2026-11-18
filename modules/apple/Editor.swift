@@ -914,7 +914,9 @@ final class Editor {
         let first = here >= image.start - 0.001 && here < image.end - 0.3 ? here : image.start
         guard let t = ([first, image.start] + same.map(\.end).sorted()).first(where: { $0 >= image.start - 0.001 && (until($0) ?? $0) - $0 >= 0.3 }),
               let after = until(t) else {
-            return refuse("This \(image.kind) has no free spot for that effect. Shorten or remove the one it has.")
+            let rule = image.kind == "text" ? "text-one-each" : "image-one-each"
+            return refuse(Conflict(rule: rule, item: nil, other: same.first.map { .effect($0, image: image.id) }, Rules.line1(rule),
+                                   "Its \(Segment.imageNoun(kind)) leaves no 0.3 s free. Shorten or remove it."))
         }
         if abs(t - here) > 0.001 { seek(source: t) }
         var fx = Segment(id: Editor.newID("x"), kind: kind, start: max(t, image.start), end: min(after, t + 2))
