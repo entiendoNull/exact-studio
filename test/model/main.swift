@@ -620,14 +620,14 @@ test("each recording has its own history") {
     b.undo(); eq(a.edits.zooms.count, 1)
 }
 
-test("lanes: add one, remove an empty one, never the last effect lane or one in use") {
+test("lanes: add one, delete one with what it holds, never the last effect lane") {
     let e = open("empty")
     e.addLane(); eq(e.edits.lanes, 2)
     e.addLane(space: 1); eq(e.edits.textLanes, 1)
-    e.removeLane(1); eq(e.edits.lanes, 1)
-    e.removeLane(0); eq(e.edits.lanes, 1, "the last effect lane")
+    e.deleteLane(1, space: 0); eq(e.edits.lanes, 1)
+    e.deleteLane(0, space: 0); eq(e.edits.lanes, 1, "the last effect lane")
     at(e, 1); e.add("text")
-    e.removeLane(0, space: 1); eq(e.edits.textLanes, 1, "a lane in use")
+    e.deleteLane(0, space: 1); eq(e.edits.textLanes, 0); eq(e.edits.texts.count, 0, "its text went with it")
 }
 
 func menu(_ row: TimelineRow, _ e: Editor) -> [MenuEntry] {
@@ -669,6 +669,50 @@ test("a lane's + adds on that lane; with no room there, on the first free lane o
     eq(e.edits.texts.count, 2)
     eq(e.edits.textLanes, 2, "the text lane was taken, so a new lane")
     eq(e.undoName, "Add Text")
+}
+
+test("a lane's ⋯ makes lanes above and below and moves it up and down; each is one undo step") {
+    let e = open("empty")
+    at(e, 1)
+    menu(.header("top"), e).run("Text")
+    let lanes = { TimelineMenus.lane(1, $0, e) { _, _, run in run() } }
+    eq(lanes(0).titles, ["Text 1 · Sits on top of the video"])
+    eq(lanes(0).choices, ["New Text Lane Above", "New Text Lane Below", "Move Lane Up", "Move Lane Down", "Delete Lane and Its 1 Text…"])
+    expect(!lanes(0).run("Move Lane Up"), "the top lane can't move up")
+    lanes(0).run("New Text Lane Above")
+    eq(e.edits.textLanes, 2); eq(e.edits.texts.first?.lane, 1, "the text moved down with its lane")
+    eq(e.undoName, "New Text Lane")
+    lanes(1).run("Move Lane Up")
+    eq(e.edits.texts.first?.lane, 0, "lane order is draw order, so the text moves with its lane")
+    eq(e.undoName, "Move Lane Up")
+    lanes(0).run("New Text Lane Below")
+    eq(e.edits.textLanes, 3); eq(e.edits.texts.first?.lane, 0)
+    e.undo(); e.undo()
+    eq(e.edits.texts.first?.lane, 1); eq(e.edits.textLanes, 2)
+    eq(TimelineMenus.group("top", e).choices, ["New Text Lane", "New Image Lane"])
+    eq(TimelineMenus.group("sound", e).choices, ["New Sound Lane"])
+    TimelineMenus.group("frame", e).run("New Whole Frame Lane")
+    eq(e.edits.frameLanes, 1)
+}
+
+test("Delete Lane says what goes with it, asks when it holds items, and never takes the last Effects lane") {
+    let e = open("empty")
+    eq(TimelineMenus.lane(0, 0, e) { _, _, run in run() }.reason("Delete Lane"), "One Effects lane always stays.")
+    at(e, 1); e.add("zoom-in")
+    e.addLane()
+    eq(TimelineMenus.lane(0, 1, e) { _, _, _ in }.choices.last, "Delete Lane", "an empty lane goes at once")
+    var question = ""
+    let first = TimelineMenus.lane(0, 0, e) { title, _, run in question = title; run() }
+    eq(first.choices.last, "Delete Lane and Its 1 Effect…")
+    first.run("Delete Lane and Its 1 Effect…")
+    eq(question, "Delete Effects 1 and its 1 effect?")
+    eq(e.edits.lanes, 1); eq(e.edits.zooms.count, 0)
+    eq(e.undoName, "Delete Lane")
+    e.undo()
+    eq(e.edits.lanes, 2); eq(e.edits.zooms.first?.lane, 0)
+    let declined = TimelineMenus.lane(0, 0, e) { _, _, _ in }
+    declined.run("Delete Lane and Its 1 Effect…")
+    eq(e.edits.zooms.count, 1, "Cancel keeps it")
 }
 
 test("a blur's reach moves it between the video's lanes and the whole frame's") {

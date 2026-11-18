@@ -34,7 +34,7 @@ an image's effect only that image, and a whole-frame effect everything. Nobody h
 - The video's Sound, Position and Effects rows fold away under the Clip. An image's own rows fold
   away under its lane. So the timeline stays short however much is in it.
 - Each row has a + that adds its own kind of thing (LLP 0005).
-- An empty lane can be removed; one Effects lane always stays.
+- A lane can be deleted with what it holds, after asking; one Effects lane always stays (LLP 0005).
 
 ## Images
 

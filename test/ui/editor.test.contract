@@ -29,7 +29,7 @@ test "an empty recording has one clip part and nothing on it"
 test "a click on a zoom selects it; the inspector sets its level and deletes it"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 257 142 mouse
+  tap "timeline" drag 0 0 from 275 142 mouse
   clock data
   expect text "segment-title" == "Zoom In"
   expect text "start" == "0:01.00"
@@ -49,7 +49,7 @@ test "a click on a zoom selects it; the inspector sets its level and deletes it"
 test "a click on a mask selects it and shows its style"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 200 178 mouse
+  tap "timeline" drag 0 0 from 220 178 mouse
   clock data
   expect text "segment-title" == "Mask"
   expect state sel.style == "solid"
@@ -60,7 +60,7 @@ test "a click on a mask selects it and shows its style"
 test "a clip part is removed and put back from the inspector"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 200 57 mouse
+  tap "timeline" drag 0 0 from 220 57 mouse
   clock data
   expect text "segment-title" == "Clip Part"
   expect state sel.transition == "crossfade"
@@ -128,7 +128,7 @@ test "⌘Z undoes and ⇧⌘Z and ⌘Y redo; a slider scrub is one step"
 test "while a text field has the focus, ⌘Z is the field's"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 240 280 mouse
+  tap "timeline" drag 0 0 from 259 280 mouse
   clock data
   tap "text-words"
   expect state typing == true
@@ -197,7 +197,7 @@ test "the floating settings panel stays on the stage"
   tap "panel-menu-button"
   tap "menu-panel-float"
   clock settle
-  tap "timeline" drag 0 0 from 240 280 mouse
+  tap "timeline" drag 0 0 from 259 280 mouse
   clock data
   expect tree has "float-panel"
   expect text "segment-title" == "Text"
@@ -226,7 +226,7 @@ test "the inspector's sections fold, and the look's controls change look.json"
 test "a click on a text selects it; its words show in the inspector"
   tap "recording-full"
   clock settle
-  tap "timeline" drag 0 0 from 240 280 mouse
+  tap "timeline" drag 0 0 from 259 280 mouse
   clock data
   expect text "segment-title" == "Text"
   expect state sel.text == "Hello"

@@ -45,7 +45,7 @@ final class TimelineView: NSView {
     private var moved = false
 
     // Geometry, top-down (the view is flipped).
-    private static let labelWidth: CGFloat = 148, pad: CGFloat = 14
+    private static let labelWidth: CGFloat = 170, pad: CGFloat = 14
     private static let rulerTop: CGFloat = 10, rulerHeight: CGFloat = 20
     private static let clipTop: CGFloat = 34, clipHeight: CGFloat = 56
     private static let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
@@ -378,18 +378,20 @@ final class TimelineView: NSView {
     }
     /// At the end of the row's label, every row's in one column just left of the track.
     private func plusRect(_ r: Row) -> CGRect {
-        return CGRect(x: Self.labelWidth - 28, y: r.y + r.height / 2 - 9, width: 18, height: 18)
+        return CGRect(x: Self.labelWidth - 50, y: r.y + r.height / 2 - 9, width: 18, height: 18)
     }
+    // @ref LLP 0005#the-lane-menu
+    private func hasMore(_ r: Row) -> Bool {
+        switch r.kind {
+        case let .lane(space, lane): return real(space, lane)
+        case .header: return true
+        default: return false
+        }
+    }
+    private func moreRect(_ r: Row) -> CGRect { CGRect(x: Self.labelWidth - 28, y: r.y + r.height / 2 - 9, width: 18, height: 18) }
     /// The three lane sizes, in the corner above the labels.
     private func sizeRect(_ i: Int) -> CGRect { CGRect(x: Self.pad + CGFloat(i) * 24, y: Self.rulerTop, width: 22, height: 18) }
 
-    private func removeRect(_ r: Row) -> CGRect { CGRect(x: trackRect.maxX - 22, y: r.y + 7, width: 14, height: 14) }
-    /// An empty lane can go, but one effect lane always stays.
-    private func removable(_ r: Row) -> Bool {
-        guard let e = editor?.edits, case let .lane(space, lane) = r.kind, real(space, lane) else { return false }
-        if space == Edits.soundSpace { return !e.sounds.contains { $0.lane == lane } }
-        return !e.segments.contains { $0.space == space && $0.lane == lane } && (space != 0 || e.lanes > 1)
-    }
     private func diamond(_ t: Double, in r: Row) -> CGRect { CGRect(x: x(t) - 7, y: r.y + r.height / 2 - 7, width: 14, height: 14) }
 
     /// The lane of a space a dragged block would drop on at `y`, or one past the last.
@@ -607,7 +609,7 @@ final class TimelineView: NSView {
         let fit = NSMutableParagraphStyle()
         fit.lineBreakMode = .byTruncatingTail
         func drawHint(_ words: String, in r: Row) {
-            let room = trackRect.width - 24 - (removable(r) ? 26 : 0)
+            let room = trackRect.width - 24
             (words as NSString).draw(in: CGRect(x: trackRect.minX + 12, y: r.y + r.height / 2 - 7, width: max(0, room), height: 16), withAttributes: hint.merging([.paragraphStyle: fit]) { $1 })
         }
         // An image's own rows are lit only across that image's time, so it is plain whose they are.
@@ -708,13 +710,6 @@ final class TimelineView: NSView {
                 drawLabel("\(name) \(lane + 1)", symbol: symbol, y: r.y, height: r.height, attrs: label, tint: NSColor(white: 1, alpha: 0.5),
                           open: folds ? editor.openImageLanes.contains(lane) : nil, indent: space == 2 && !folds ? 14 : 0, plus: hasPlus(r))
                 bed(r, alpha: real(space, lane) ? 0.05 : 0.025)
-                if removable(r) {
-                    // An empty lane's ×, which removes it.
-                    let xr = removeRect(r)
-                    NSColor(white: 1, alpha: 0.12).setFill()
-                    NSBezierPath(ovalIn: xr).fill()
-                    ("×" as NSString).draw(at: CGPoint(x: xr.minX + 3.5, y: xr.minY - 1), withAttributes: [.font: NSFont.systemFont(ofSize: 11, weight: .bold), .foregroundColor: NSColor(white: 1, alpha: 0.7)])
-                }
                 let empty = space == Edits.soundSpace ? editor.edits.sounds.isEmpty : !segments.contains(where: { $0.space == space })
                 if lane == 0, real(space, lane), empty {
                     let words = space == 1 ? "Texts go here. They sit on top of the video."
@@ -754,6 +749,15 @@ final class TimelineView: NSView {
                 NSColor.controlAccentColor.setFill()
                 CGRect(x: b.midX - 4.5, y: b.midY - 0.75, width: 9, height: 1.5).fill()
                 CGRect(x: b.midX - 0.75, y: b.midY - 4.5, width: 1.5, height: 9).fill()
+                }
+            }
+            if hasMore(r) {
+                let b = moreRect(r)
+                labelQueue?.append {
+                NSColor(white: 1, alpha: 0.06).setFill()
+                NSBezierPath(roundedRect: b, xRadius: 5, yRadius: 5).fill()
+                NSColor(white: 1, alpha: 0.6).setFill()
+                for i in -1...1 { NSBezierPath(ovalIn: CGRect(x: b.midX + CGFloat(i) * 4 - 1.25, y: b.midY - 1.25, width: 2.5, height: 2.5)).fill() }
                 }
             }
         }
@@ -855,7 +859,7 @@ final class TimelineView: NSView {
         var cut = attrs
         cut[.paragraphStyle] = style
         // The name stops before the row's +.
-        let room = Self.labelWidth - at - (plus ? 32 : 8)
+        let room = Self.labelWidth - at - (plus ? 54 : 8)
         (text as NSString).draw(in: CGRect(x: at, y: y + height / 2 - 7, width: max(10, room), height: 16), withAttributes: cut)
     }
 
@@ -985,6 +989,10 @@ final class TimelineView: NSView {
         for entry in entries {
             switch entry {
             case .line: menu.addItem(.separator())
+            case let .dim(title):
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
             case let .title(text):
                 let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
                 item.isEnabled = false
@@ -1015,6 +1023,34 @@ final class TimelineView: NSView {
 
     private func popUp(_ entries: [MenuEntry], under r: CGRect) {
         nsMenu(entries).popUp(positioning: nil, at: CGPoint(x: r.minX, y: r.maxY - scrollY + 4), in: self)
+    }
+
+    private func laneMenu(for r: Row) -> [MenuEntry] {
+        guard let editor else { return [] }
+        switch r.kind {
+        case let .lane(space, lane):
+            return TimelineMenus.lane(space, lane, editor) { [weak self] title, detail, run in self?.confirm(title, detail, run) }
+        case let .header(key): return TimelineMenus.group(key, editor)
+        default: return []
+        }
+    }
+
+    private func confirm(_ title: String, _ detail: String, _ run: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        let delete = alert.addButton(withTitle: "Delete")
+        delete.hasDestructiveAction = true
+        delete.keyEquivalent = ""
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\r"
+        guard let window else { if alert.runModal() == .alertFirstButtonReturn { run() }; return }
+        alert.beginSheetModal(for: window) { if $0 == .alertFirstButtonReturn { run() } }
+    }
+
+    override func rightMouseDown(with e: NSEvent) {
+        let p = local(e)
+        guard p.x < Self.labelWidth, let r = row(at: p.y), hasMore(r) else { return super.rightMouseDown(with: e) }
+        nsMenu(laneMenu(for: r)).popUp(positioning: nil, at: CGPoint(x: p.x, y: p.y - scrollY), in: self)
     }
 
     private func showAdd(for r: Row) {
@@ -1056,7 +1092,8 @@ final class TimelineView: NSView {
             if p.y > Self.clipTop + Self.clipHeight { editor.select("") }
             return scrub()
         }
-        if hasPlus(r), plusRect(r).insetBy(dx: -4, dy: -4).contains(p) { return showAdd(for: r) }
+        if hasMore(r), moreRect(r).insetBy(dx: -2, dy: -4).contains(p) { return popUp(laneMenu(for: r), under: moreRect(r)) }
+        if hasPlus(r), plusRect(r).insetBy(dx: -2, dy: -4).contains(p) { return showAdd(for: r) }
         // Only a label that folds or selects its row acts; a click on any other label does nothing.
         // Up to 8 points left of the track still reaches a block or a move that starts at its edge.
         if p.x < trackRect.minX - 8 {
@@ -1094,9 +1131,6 @@ final class TimelineView: NSView {
             let mode = wide && p.x - x(fx.start) < edge ? -1 : wide && x(fx.end) - p.x < edge ? 1 : 0
             drag = .fx(id, fx.id, mode, fx.start, fx.end, fx.lane, t(p.x))
         case .lane:
-            if removable(r), removeRect(r).insetBy(dx: -3, dy: -3).contains(p), case let .lane(space, lane) = r.kind {
-                return editor.removeLane(lane, space: space)
-            }
             // An image lane's label folds its current image's rows.
             if case let .lane(2, lane) = r.kind, p.x < Self.labelWidth {
                 if editor.edits.images.contains(where: { $0.lane == lane }) { editor.toggleImageLane(lane) }

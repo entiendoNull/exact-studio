@@ -415,10 +415,11 @@ final class Editor {
         if undone.count > History.limit { undone.removeFirst(undone.count - History.limit) }
     }
 
-    private func named(_ name: String, _ body: () -> Void) {
+    @discardableResult
+    private func named<T>(_ name: String, _ body: () -> T) -> T {
         naming = name
         defer { naming = nil }
-        body()
+        return body()
     }
 
     func undo() {
@@ -1028,25 +1029,73 @@ final class Editor {
         apply(next)
     }
 
-    /// Remove an empty lane; the lanes of its kind below it move up. One effect lane always stays.
-    func removeLane(_ lane: Int, space: Int = 0) {
-        guard edits.laneCount(space: space) > (space == 0 ? 1 : 0),
-              !edits.segments.contains(where: { $0.space == space && $0.lane == lane }),
-              space != Edits.soundSpace || !edits.sounds.contains(where: { $0.lane == lane }) else { return }
-        var next = edits
+    // @ref LLP 0005#the-lane-menu
+    private static func setLaneCount(_ e: inout Edits, space: Int, _ n: Int) {
         switch space {
-        case 1: next.textLanes -= 1
-        case 2: next.imageLanes -= 1
-        case 3: next.frameLanes -= 1
-        case Edits.soundSpace: next.soundLanes -= 1
-        default: next.lanes -= 1
+        case 1: e.textLanes = n
+        case 2: e.imageLanes = n
+        case 3: e.frameLanes = n
+        case Edits.soundSpace: e.soundLanes = n
+        default: e.lanes = n
         }
-        next.segments = next.segments.map { var s = $0; if s.space == space, s.lane > lane { s.lane -= 1 }; return s }
-        if space == Edits.soundSpace { next.sounds = next.sounds.map { var s = $0; if s.lane > lane { s.lane -= 1 }; return s } }
-        if apply(next), space == 2 {
-            // The open lanes below it move up with it.
-            openImageLanes = Set(openImageLanes.compactMap { $0 == lane ? nil : $0 > lane ? $0 - 1 : $0 })
-            redrawViews()
+    }
+
+    private static func relane(_ e: inout Edits, space: Int, _ map: (Int) -> Int?) {
+        e.segments = e.segments.compactMap { s in
+            guard s.space == space else { return s }
+            guard let l = map(s.lane) else { return nil }
+            var t = s; t.lane = l; return t
+        }
+        if space == Edits.soundSpace {
+            e.sounds = e.sounds.compactMap { s in
+                guard let l = map(s.lane) else { return nil }
+                var t = s; t.lane = l; return t
+            }
+        }
+    }
+
+    private func relaneOpen(space: Int, _ map: (Int) -> Int?) {
+        guard space == 2 else { return }
+        openImageLanes = Set(openImageLanes.compactMap(map))
+        redrawViews()
+    }
+
+    func insertLane(space: Int, at index: Int) {
+        let count = edits.laneCount(space: space)
+        let at = min(max(index, 0), count)
+        var next = edits
+        Editor.setLaneCount(&next, space: space, count + 1)
+        let shift = { (l: Int) -> Int? in l >= at ? l + 1 : l }
+        Editor.relane(&next, space: space, shift)
+        reveal(space: space)
+        if named("New \(TimelineMenus.kindName(space)) Lane", { apply(next) }) { relaneOpen(space: space, shift) }
+    }
+
+    func moveLane(_ lane: Int, space: Int, by step: Int) {
+        let other = lane + step
+        guard lane >= 0, other >= 0, lane < edits.laneCount(space: space), other < edits.laneCount(space: space), lane != other else { return }
+        var next = edits
+        let swap = { (l: Int) -> Int? in l == lane ? other : l == other ? lane : l }
+        Editor.relane(&next, space: space, swap)
+        if named(step < 0 ? "Move Lane Up" : "Move Lane Down", { apply(next) }) { relaneOpen(space: space, swap) }
+    }
+
+    func laneItems(_ lane: Int, space: Int) -> Int {
+        space == Edits.soundSpace ? edits.sounds.filter { $0.lane == lane }.count
+            : edits.segments.filter { $0.space == space && $0.lane == lane }.count
+    }
+
+    func deleteLane(_ lane: Int, space: Int) {
+        let count = edits.laneCount(space: space)
+        guard lane >= 0, lane < count, space != 0 || count > 1 else { return }
+        var next = edits
+        Editor.setLaneCount(&next, space: space, count - 1)
+        let drop = { (l: Int) -> Int? in l == lane ? nil : l > lane ? l - 1 : l }
+        Editor.relane(&next, space: space, drop)
+        if named("Delete Lane", { apply(next) }) {
+            relaneOpen(space: space, drop)
+            dropGoneSelection()
+            notify()
         }
     }
 

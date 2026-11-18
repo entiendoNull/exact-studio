@@ -6,6 +6,7 @@ enum MenuEntry {
     case title(String)
     case item(String, () -> Void)
     case off(String, String)
+    case dim(String)
     case sub(String, [MenuEntry])
     case line
 }
@@ -102,11 +103,47 @@ enum TimelineMenus {
     }
 }
 
+extension TimelineMenus {
+    static func noun(_ space: Int, _ n: Int) -> String {
+        let one = space == 1 ? "Text" : space == 2 ? "Image" : space == Edits.soundSpace ? "Sound" : "Effect"
+        return n == 1 ? "1 \(one)" : "\(n) \(one)s"
+    }
+
+    // @ref LLP 0005#the-lane-menu
+    static func lane(_ space: Int, _ lane: Int, _ editor: Editor, confirm: @escaping (String, String, @escaping () -> Void) -> Void) -> [MenuEntry] {
+        let count = editor.edits.laneCount(space: space)
+        guard lane < count else { return [] }
+        let kind = kindName(space), name = laneName(space, lane), items = editor.laneItems(lane, space: space)
+        var out: [MenuEntry] = [.title("\(name) · \(scope(space))"), .line,
+                                .item("New \(kind) Lane Above") { editor.insertLane(space: space, at: lane) },
+                                .item("New \(kind) Lane Below") { editor.insertLane(space: space, at: lane + 1) }, .line]
+        out.append(lane > 0 ? .item("Move Lane Up") { editor.moveLane(lane, space: space, by: -1) } : .dim("Move Lane Up"))
+        out.append(lane < count - 1 ? .item("Move Lane Down") { editor.moveLane(lane, space: space, by: 1) } : .dim("Move Lane Down"))
+        out.append(.line)
+        if space == 0 && count == 1 {
+            out.append(.off("Delete Lane", "One Effects lane always stays."))
+        } else if items == 0 {
+            out.append(.item("Delete Lane") { editor.deleteLane(lane, space: space) })
+        } else {
+            let what = noun(space, items)
+            out.append(.item("Delete Lane and Its \(what)…") {
+                confirm("Delete \(name) and its \(what.lowercased())?", "You can undo this with ⌘Z.") { editor.deleteLane(lane, space: space) }
+            })
+        }
+        return out
+    }
+
+    static func group(_ key: String, _ editor: Editor) -> [MenuEntry] {
+        let spaces = key == "video" ? [0] : key == "top" ? [1, 2] : key == "sound" ? [Edits.soundSpace] : key == "frame" ? [3] : []
+        return spaces.map { space in .item("New \(kindName(space)) Lane") { editor.insertLane(space: space, at: editor.edits.laneCount(space: space)) } }
+    }
+}
+
 extension Array where Element == MenuEntry {
     var choices: [String] {
         flatMap { entry -> [String] in
             switch entry {
-            case let .item(title, _), let .off(title, _): return [title]
+            case let .item(title, _), let .off(title, _), let .dim(title): return [title]
             case let .sub(title, inner): return inner.choices.map { "\(title) › \($0)" }
             default: return []
             }
