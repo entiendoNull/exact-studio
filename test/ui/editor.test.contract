@@ -96,6 +96,39 @@ test "the floating settings panel stays on the stage"
   expect state floatX <= 460
   expect state floatY <= 160
 
+test "Clear Edits asks first, names the recording, and can be undone"
+  tap "recording-full"
+  clock data
+  tap "clear"
+  clock settle
+  tap "clear-cancel"
+  clock settle
+  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  tap "clear"
+  clock settle
+  tap "clear-confirm"
+  clock settle
+  clock data
+  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+
+test "Delete asks first and names the recording; Cancel keeps it"
+  tap "recording-empty"
+  clock data
+  tap "delete"
+  clock settle
+  expect state removingName == "Empty window"
+  tap "delete-cancel"
+  clock settle
+  clock data
+  expect tree has "recording-empty"
+  tap "delete"
+  clock settle
+  tap "delete-confirm"
+  clock settle
+  clock data
+  expect tree missing "recording-empty"
+  expect state selected == ""
+
 test "the inspector's sections fold, and the look's controls change look.json"
   tap "recording-empty"
   clock data

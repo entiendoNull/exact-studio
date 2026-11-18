@@ -181,6 +181,7 @@ component ExactStudio
   state startedAt = 0
   state now = 0
   state listed = 0
+  state removing = ""
   resource status = recorderStatus() as shape Status else empty()
   resource sources = captureSources(listed) as shape SourceList else empty()
   resource library = recordings() as shape RecordingList else empty()
@@ -204,6 +205,8 @@ component ExactStudio
   // @ref LLP 0005#calm-by-default
   derive floatX = stageW == 0 ? panelX : min(panelX, max(0, stageW - floatW - 16))
   derive floatY = stageH == 0 ? panelY : min(panelY, max(0, stageH - floatH - 16))
+  derive currentName = match current { case some(r) => r.name, case none => "" }
+  derive removingName = match first(library.items.filter(r => r.id == removing)) { case some(r) => r.name, case none => "" }
   derive leftShown = leftOpen or cardLeft
   derive gradients = ["ocean", "sunset", "mint", "midnight", "graphite", "paper", "peach", "lagoon", "berry", "aurora", "ember", "lavender", "citrus", "forest", "sky", "rose", "dusk", "steel", "candy", "deepsea", "sand", "neon", "glow", "noir"]
   derive background = lk.background
@@ -296,9 +299,16 @@ component ExactStudio
     exportOpen = false
   action reveal
     send revealed = revealFile(exportPath)
+  action askRemove(id: string)
+    removing = id
+    showModal("confirm-delete")
+  action askClear
+    showModal("confirm-clear")
   action remove
-    send deleted = deleteRecording(selected)
-    selected = ""
+    send deleted = deleteRecording(removing)
+    if removing == selected
+      selected = ""
+    removing = ""
   action trim(edge: string, by: number)
     send nudged = nudgeCrop(selected, edge, by)
   action add(track: string)
@@ -793,9 +803,9 @@ component ExactStudio
                       text (isDevice ? "Cut to the phone’s own outline, side buttons included. Crop, under the preview, trims it further." : "Cuts the video to a phone’s own outline when the recording shows a Simulator in its window.") font="-exact-caption1" color="-exact-tertiary-label"
 
                   row gap=8
-                    button press=editDo("clear") buttonStyle="bordered" flex=1 testId="clear"
+                    button press=askClear buttonStyle="bordered" flex=1 testId="clear"
                       text "Clear Edits"
-                    button press=remove buttonStyle="bordered" flex=1 testId="delete"
+                    button press=askRemove(selected) buttonStyle="bordered" flex=1 testId="delete"
                       text "Delete"
 
           // ── Export: a lightbox in the middle of the window.
@@ -835,6 +845,18 @@ component ExactStudio
                       if exportPath != ""
                         button press=reveal testId="reveal"
                           text "Show in Finder" font="-exact-footnote"
+          dialog id="confirm-clear" role="alertdialog" aria-label=`Clear all edits of “${currentName}”?`
+            text "Every cut, effect, text, image, sound, mask and move goes. The background and the frame stay."
+            button press=editDo("clear") destructive=true commandfor="confirm-clear" command="close" testId="clear-confirm"
+              text "Clear Edits"
+            button commandfor="confirm-clear" command="close" testId="clear-cancel"
+              text "Cancel"
+          dialog id="confirm-delete" role="alertdialog" aria-label=`Delete “${removingName}”?`
+            text "The recording and all its edits are deleted. This can’t be undone."
+            button press=remove destructive=true commandfor="confirm-delete" command="close" testId="delete-confirm"
+              text "Delete"
+            button commandfor="confirm-delete" command="close" testId="delete-cancel"
+              text "Cancel"
 
 // The settings of what is selected: docked in the inspector, floating over the stage, a lightbox
 // over the video, or on the left; its header's menu moves it.
