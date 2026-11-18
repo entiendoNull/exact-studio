@@ -1,0 +1,3 @@
+empty  window     0:10.00  Empty window
+full  simulator  0:10.00  Everything
+old-format  window     0:10.00  Before text lanes

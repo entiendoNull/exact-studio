@@ -1,0 +1,3 @@
+spotlight a:b (0:01.00–0:02.00): an id can't contain a colon
+highlight x (0:01.00–0:02.00): another segment has the same id
+blur x (0:03.00–0:04.00): another segment has the same id

@@ -1,0 +1,2 @@
+zoom z (0:01.00–0:02.00): only an image has moves and effects of its own
+zoom z (0:01.00–0:02.00): only a mask has a rect

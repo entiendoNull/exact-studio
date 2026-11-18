@@ -1,0 +1,22 @@
+{
+  "imageLanes": 1,
+  "segments": [
+    {
+      "effects": [
+        {
+          "end": 5,
+          "id": "e",
+          "kind": "blur",
+          "lane": 0,
+          "start": 3
+        }
+      ],
+      "end": 4,
+      "file": "images/logo.png",
+      "id": "i",
+      "kind": "image",
+      "lane": 0,
+      "start": 2
+    }
+  ]
+}

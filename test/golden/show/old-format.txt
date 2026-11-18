@@ -1,0 +1,13 @@
+Before text lanes  (window, old-format)
+recorded 0:10.00, plays as 0:09.00; 2 clicks; folder <library>/old-format
+look: ocean background, 16:9, padding 8%, 3D off
+clip parts:
+  0:00.00–0:04.00
+  0:04.00–0:05.00  removed
+  0:05.00–0:10.00
+segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front), f a whole-frame lane):
+  e0: 0:01.00–0:03.00  zoom 1.5×  [z]
+  t0: 0:01.00–0:03.00  text “Old” plain in: out:  [t]
+  i0: 0:06.00–0:08.00  image images/logo.png at x 0.5 y 0.5 size 0.25 in:fade out:fade  [i2]
+  i1: 0:06.00–0:08.00  image images/logo.png at x 0.5 y 0.5 size 0.25 in:fade out:fade  [i1]
+  f0: 0:06.00–0:07.00  mono (whole frame)  [m]

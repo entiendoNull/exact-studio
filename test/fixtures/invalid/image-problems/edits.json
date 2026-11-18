@@ -1,0 +1,51 @@
+{
+  "imageLanes": 2,
+  "segments": [
+    {
+      "end": 2,
+      "id": "nofile",
+      "kind": "image",
+      "lane": 0,
+      "start": 1
+    },
+    {
+      "end": 4,
+      "file": "images/gone.png",
+      "id": "missing",
+      "kind": "image",
+      "lane": 0,
+      "size": 0,
+      "start": 3
+    },
+    {
+      "effects": [
+        {
+          "end": 5.05,
+          "id": "d",
+          "kind": "pulse",
+          "lane": 0,
+          "start": 5
+        }
+      ],
+      "end": 7,
+      "file": "images/logo.png",
+      "id": "kids",
+      "kind": "image",
+      "lane": 1,
+      "moves": [
+        {
+          "duration": 0.8,
+          "id": "d",
+          "style": "smooth",
+          "t": 6,
+          "to": {
+            "scale": 0,
+            "x": 0.5,
+            "y": 0.5
+          }
+        }
+      ],
+      "start": 5
+    }
+  ]
+}

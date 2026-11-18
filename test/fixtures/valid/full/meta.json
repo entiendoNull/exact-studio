@@ -1,0 +1,28 @@
+{
+  "clicks": [
+    {
+      "t": 2.0,
+      "x": 0.5,
+      "y": 0.5
+    },
+    {
+      "t": 6.5,
+      "x": 0.3,
+      "y": 0.6
+    }
+  ],
+  "created": 1700000200,
+  "crop": {
+    "h": 1,
+    "w": 0.5,
+    "x": 0.25,
+    "y": 0
+  },
+  "cursorBaked": false,
+  "duration": 10,
+  "height": 180,
+  "id": "full",
+  "kind": "simulator",
+  "name": "Everything",
+  "width": 320
+}

@@ -1,0 +1,1 @@
+spotlight a (0:01.00–0:01.05): shorter than 0.1 s, or ends before it starts

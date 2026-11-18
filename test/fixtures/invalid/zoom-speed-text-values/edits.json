@@ -1,0 +1,28 @@
+{
+  "segments": [
+    {
+      "end": 2,
+      "id": "z",
+      "kind": "zoom",
+      "lane": 0,
+      "level": 0,
+      "start": 1
+    },
+    {
+      "end": 4,
+      "id": "s",
+      "kind": "speed",
+      "lane": 0,
+      "start": 3
+    },
+    {
+      "end": 2,
+      "id": "t",
+      "kind": "text",
+      "lane": 0,
+      "start": 1,
+      "text": ""
+    }
+  ],
+  "textLanes": 1
+}

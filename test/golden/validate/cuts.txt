@@ -1,0 +1,2 @@
+removed 0:03.00: not the start of a clip part (0 or a split)
+transition at 1234 ms: not the end of a clip part

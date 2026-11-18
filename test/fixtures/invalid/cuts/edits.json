@@ -1,0 +1,12 @@
+{
+  "removed": [
+    3
+  ],
+  "splits": [
+    2,
+    5
+  ],
+  "transitions": {
+    "1234": "fade"
+  }
+}

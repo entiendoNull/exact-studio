@@ -1,0 +1,3 @@
+zoom z (0:01.00–0:02.00): a zoom needs a level above 0 (below 1 zooms out)
+speed s (0:03.00–0:04.00): a speed change needs a rate above 0
+text t (0:01.00–0:02.00): a text needs its words

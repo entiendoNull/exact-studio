@@ -1,0 +1,11 @@
+{
+  "segments": [
+    {
+      "end": 1.05,
+      "id": "a",
+      "kind": "spotlight",
+      "lane": 0,
+      "start": 1
+    }
+  ]
+}

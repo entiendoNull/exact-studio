@@ -1,0 +1,27 @@
+{
+  "moves": [
+    {
+      "duration": 0.8,
+      "id": "m",
+      "style": "smooth",
+      "t": 11,
+      "to": {
+        "scale": 1,
+        "x": 0.5,
+        "y": 0.5
+      }
+    }
+  ],
+  "segments": [
+    {
+      "end": 12,
+      "id": "a",
+      "kind": "spotlight",
+      "lane": 0,
+      "start": 8
+    }
+  ],
+  "splits": [
+    10.5
+  ]
+}
