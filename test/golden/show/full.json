@@ -1,0 +1,34 @@
+{
+  "clicks" : [
+    2,
+    6.5
+  ],
+  "folder" : "<library>/full",
+  "id" : "full",
+  "kind" : "simulator",
+  "length" : 9.4000000000000004,
+  "name" : "Everything",
+  "parts" : [
+    {
+      "end" : 3,
+      "removed" : false,
+      "start" : 0
+    },
+    {
+      "end" : 4.5,
+      "removed" : true,
+      "start" : 3
+    },
+    {
+      "end" : 7,
+      "removed" : false,
+      "start" : 4.5
+    },
+    {
+      "end" : 10,
+      "removed" : false,
+      "start" : 7
+    }
+  ],
+  "recorded" : 10
+}

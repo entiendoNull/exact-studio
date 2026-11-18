@@ -1,0 +1,2 @@
+zoom a (0:01.00–0:03.00): lane 2, but lanes is 1
+text t (0:01.00–0:02.00): lane 1, but textLanes is 1

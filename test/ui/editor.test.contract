@@ -1,0 +1,108 @@
+size 1440x900
+
+test "a recording opens with its preview, timeline, inspector and look"
+  tap "recording-full"
+  clock data
+  expect tree has "preview"
+  expect tree has "timeline"
+  expect tree has "inspector"
+  expect tree missing "empty"
+  expect text "length" == "Video 0:09 · recorded 0:10"
+  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+  expect state background == "custom"
+  expect state aspect == "9:16"
+
+test "an empty recording has one clip part and nothing on it"
+  tap "recording-empty"
+  clock data
+  expect text "length" == "Video 0:10 · recorded 0:10"
+  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+
+test "a click on a zoom selects it; the inspector sets its level and deletes it"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 257 142 mouse
+  clock data
+  expect text "segment-title" == "Zoom In"
+  expect text "start" == "0:01.00"
+  expect text "end" == "0:02.50"
+  tap "level-3"
+  clock data
+  expect state sel.level == 3
+  tap "segment-delete"
+  clock data
+  expect tree missing "segment"
+  expect text "summary" == "4 clip parts (1 removed) · 9 effects on 6 lanes · 1 move"
+
+test "a click on a mask selects it and shows its style"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 200 178 mouse
+  clock data
+  expect text "segment-title" == "Mask"
+  expect state sel.style == "solid"
+  tap "mask-pixels"
+  clock data
+  expect state sel.style == "pixels"
+
+test "a clip part is removed and put back from the inspector"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 200 57 mouse
+  clock data
+  expect text "segment-title" == "Clip Part"
+  expect state sel.transition == "crossfade"
+  tap "piece-remove"
+  clock data
+  expect state summary.removed == 2
+  expect state sel.removed == true
+  tap "piece-remove"
+  clock data
+  expect state summary.removed == 1
+
+test "Split Clip with the playhead at the start says why it can't"
+  tap "recording-empty"
+  clock data
+  tap "split-clip"
+  clock data
+  expect text "problem" == "Move the playhead into the clip to split it."
+  expect text "summary" == "1 clip part (0 removed) · 0 effects on 1 lane · 0 moves"
+
+test "a template replaces the edit, and Undo Template puts it back"
+  tap "recording-full"
+  clock data
+  tap "templates"
+  tap "template-tour"
+  clock data
+  expect state summary.canUndoTemplate == true
+  tap "templates"
+  tap "template-undo"
+  clock data
+  expect state summary.canUndoTemplate == false
+  expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
+
+test "the inspector's sections fold, and the look's controls change look.json"
+  tap "recording-empty"
+  clock data
+  expect tree has "bg-ocean"
+  tap "bg-sunset"
+  clock data
+  expect state background == "sunset"
+  tap "aspect-1:1"
+  clock data
+  expect state aspect == "1:1"
+  tap "sec-bg"
+  expect tree missing "bg-ocean"
+  tap "sec-bg"
+  expect tree has "bg-ocean"
+  tap "sec-frame"
+  expect tree missing "aspect-1:1"
+
+test "a click on a text selects it; its words show in the inspector"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 240 280 mouse
+  clock data
+  expect text "segment-title" == "Text"
+  expect state sel.text == "Hello"
+  expect state sel.style == "pill"

@@ -1,0 +1,1 @@
+image i (0:02.00–0:04.00): An image’s effect must stay inside the image’s time.

@@ -1,0 +1,3 @@
+spotlight a (0:08.00–0:12.00): outside the recording, 0:00–0:10.00
+move m at 0:11.00: outside the recording
+split at 0:10.50: outside the recording

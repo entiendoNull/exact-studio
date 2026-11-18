@@ -50,7 +50,13 @@ it takes ops (`edit`, `look`, `export`, …) and hosts the native preview and ti
 
 ## Checking your work
 
-- `bun exact.mjs mac` builds. `bun exact.mjs test macos` runs the UI test.
+- `./check` runs every test and check; it passes before every pull request.
+- Every bug fix and every feature adds a test that fails without it, at the lowest level that shows it:
+  the edit model or the Editor (`test/model/main.swift`), a fixture for `validate` or `show`
+  (`test/fixtures/`), or the window (`test/ui/`).
+- The UI tests open fixture recordings from `EXACT_STUDIO_FIXTURES`. Under the agent the timeline's
+  folds, lane size and zoom and the last look are fixed, so a drive starts the same way each time.
+- `bun exact.mjs mac` builds.
 - Drive the app with `bun exact.mjs agent macos` on a copy of a recording. The agent uses a
   scratch library, so your real recordings are safe.
 - `./exact-studio frame <id> <t>` renders one frame with the real renderer.

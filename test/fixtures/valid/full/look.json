@@ -1,0 +1,15 @@
+{
+  "aspect": "9:16",
+  "background": "custom",
+  "clickEffect": false,
+  "cursor": true,
+  "cursorSize": 2,
+  "customA": "#112233",
+  "customAngle": 90,
+  "customB": "#445566",
+  "customRadial": true,
+  "padding": 10,
+  "radius": 20,
+  "shadow": false,
+  "smoothCursor": true
+}

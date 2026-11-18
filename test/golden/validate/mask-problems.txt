@@ -1,0 +1,6 @@
+mask norect (0:01.00–0:02.00): a mask needs its rect, {"x", "y", "w", "h"} in 0–1 of the full recorded frame (before the crop)
+mask outside (0:01.00–0:02.00): its rect needs a width and a height above 0
+mask outside (0:01.00–0:02.00): its rect must lie inside the frame: x, y, w, h are 0–1 of the full recorded frame (before the crop), with x + w and y + h at most 1
+mask outside (0:01.00–0:02.00): no mask style glow; one of blur, pixels, solid
+mask outside (0:01.00–0:02.00): color teal is not "#RRGGBB" or a text colour (black, white, yellow, pink, blue, mint)
+mask outside (0:01.00–0:02.00): radius must be 0–0.5

@@ -1,0 +1,6 @@
+image nofile (0:01.00–0:02.00): an image needs its file, a path inside the recording's folder
+image missing (0:03.00–0:04.00): images/gone.png is not a picture in image-problems/ (png, jpg, jpeg, heic, tiff, tif, gif, webp, bmp)
+image missing (0:03.00–0:04.00): an image's size must be above 0
+image kids (0:05.00–0:07.00): its pulse effect d is shorter than 0.1 s, or ends before it starts
+image kids (0:05.00–0:07.00): its move d needs a scale above 0 (1 keeps the image's size)
+image kids (0:05.00–0:07.00): two of its moves or effects share an id

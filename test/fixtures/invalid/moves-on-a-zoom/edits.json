@@ -1,0 +1,19 @@
+{
+  "segments": [
+    {
+      "end": 2,
+      "id": "z",
+      "kind": "zoom",
+      "lane": 0,
+      "level": 2,
+      "moves": [],
+      "rect": {
+        "h": 0.1,
+        "w": 0.1,
+        "x": 0,
+        "y": 0
+      },
+      "start": 1
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "clicks" : [
+    2,
+    6.5
+  ],
+  "folder" : "<library>/empty",
+  "id" : "empty",
+  "kind" : "window",
+  "length" : 10,
+  "name" : "Empty window",
+  "parts" : [
+    {
+      "end" : 10,
+      "removed" : false,
+      "start" : 0
+    }
+  ],
+  "recorded" : 10
+}

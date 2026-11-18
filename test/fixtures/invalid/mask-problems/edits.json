@@ -1,0 +1,28 @@
+{
+  "lanes": 3,
+  "segments": [
+    {
+      "end": 2,
+      "id": "norect",
+      "kind": "mask",
+      "lane": 0,
+      "start": 1
+    },
+    {
+      "color": "teal",
+      "end": 2,
+      "id": "outside",
+      "kind": "mask",
+      "lane": 1,
+      "radius": 0.8,
+      "rect": {
+        "h": 0,
+        "w": 0.2,
+        "x": 0.9,
+        "y": 0.5
+      },
+      "start": 1,
+      "style": "glow"
+    }
+  ]
+}

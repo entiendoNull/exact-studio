@@ -1,0 +1,52 @@
+{
+  "lanes": 3,
+  "segments": [
+    {
+      "end": 5,
+      "id": "c1",
+      "kind": "cut",
+      "lane": 0,
+      "start": 4
+    },
+    {
+      "end": 3,
+      "id": "z",
+      "kind": "zoom",
+      "lane": 0,
+      "level": 1.5,
+      "start": 1
+    },
+    {
+      "end": 3,
+      "id": "t",
+      "kind": "text",
+      "lane": 2,
+      "start": 1,
+      "text": "Old"
+    },
+    {
+      "end": 8,
+      "file": "images/logo.png",
+      "id": "i1",
+      "kind": "image",
+      "lane": 1,
+      "start": 6
+    },
+    {
+      "end": 8,
+      "file": "images/logo.png",
+      "id": "i2",
+      "kind": "image",
+      "lane": 0,
+      "start": 6
+    },
+    {
+      "end": 7,
+      "id": "m",
+      "kind": "mono",
+      "lane": 1,
+      "scope": "frame",
+      "start": 6
+    }
+  ]
+}

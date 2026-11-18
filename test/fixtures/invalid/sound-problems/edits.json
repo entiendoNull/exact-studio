@@ -1,0 +1,30 @@
+{
+  "soundLanes": 1,
+  "sounds": [
+    {
+      "fadeIn": -1,
+      "file": "sounds/beep.wav",
+      "id": "long",
+      "lane": 0,
+      "length": 3,
+      "offset": 0.5,
+      "start": 1,
+      "volume": 2
+    },
+    {
+      "file": "sounds/beep.wav",
+      "id": "clash",
+      "lane": 0,
+      "length": 1,
+      "start": 2
+    },
+    {
+      "file": "sounds/none.wav",
+      "id": "gone",
+      "lane": 1,
+      "length": 0,
+      "offset": -1,
+      "start": 12
+    }
+  ]
+}

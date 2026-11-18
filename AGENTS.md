@@ -39,6 +39,15 @@ sound, mask) to check and render with the app's own renderer. `./exact-studio so
 craft of a promo or demo, and `send-feedback` how to report a bug or idea (only after the owner
 says yes). The app reloads changed files within a second.
 
+## Checks and tests
+
+`./check` runs every check: the design notes, the view's compile, the edit model and Editor tests,
+the CLI's fixtures and goldens, the MCP server and the macOS UI tests. Run it before every pull
+request; `./check --fast` skips the UI tests while you work. CONTRIBUTING.md ("Run the checks")
+says what each part covers and where a new test goes.
+
+Every bug fix and every feature adds a test that fails without it (LLP 0000#checking-your-work).
+
 ## Design notes (LLP)
 
 Decisions we already made live in `llp/`, as short Linked Literate Programming docs

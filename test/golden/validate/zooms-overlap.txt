@@ -1,0 +1,2 @@
+zoom a (0:01.00–0:03.00): Two zooms can’t overlap.
+zoom b (0:02.00–0:04.00): Two zooms can’t overlap.

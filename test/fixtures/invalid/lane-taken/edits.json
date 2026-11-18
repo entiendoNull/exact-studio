@@ -1,0 +1,18 @@
+{
+  "segments": [
+    {
+      "end": 3,
+      "id": "a",
+      "kind": "spotlight",
+      "lane": 0,
+      "start": 1
+    },
+    {
+      "end": 4,
+      "id": "b",
+      "kind": "highlight",
+      "lane": 0,
+      "start": 2
+    }
+  ]
+}

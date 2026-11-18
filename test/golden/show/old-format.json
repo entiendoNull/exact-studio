@@ -1,0 +1,29 @@
+{
+  "clicks" : [
+    2,
+    6.5
+  ],
+  "folder" : "<library>/old-format",
+  "id" : "old-format",
+  "kind" : "window",
+  "length" : 9,
+  "name" : "Before text lanes",
+  "parts" : [
+    {
+      "end" : 4,
+      "removed" : false,
+      "start" : 0
+    },
+    {
+      "end" : 5,
+      "removed" : true,
+      "start" : 4
+    },
+    {
+      "end" : 10,
+      "removed" : false,
+      "start" : 5
+    }
+  ],
+  "recorded" : 10
+}

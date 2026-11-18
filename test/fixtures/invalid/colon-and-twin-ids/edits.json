@@ -1,0 +1,26 @@
+{
+  "lanes": 2,
+  "segments": [
+    {
+      "end": 2,
+      "id": "a:b",
+      "kind": "spotlight",
+      "lane": 0,
+      "start": 1
+    },
+    {
+      "end": 2,
+      "id": "x",
+      "kind": "highlight",
+      "lane": 1,
+      "start": 1
+    },
+    {
+      "end": 4,
+      "id": "x",
+      "kind": "blur",
+      "lane": 1,
+      "start": 3
+    }
+  ]
+}
