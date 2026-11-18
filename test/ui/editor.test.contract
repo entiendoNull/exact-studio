@@ -194,3 +194,18 @@ test "a click on a text selects it; its words show in the inspector"
   expect text "segment-title" == "Text"
   expect state sel.text == "Hello"
   expect state sel.style == "pill"
+
+test "Motion Paths is on by default, turns off, and stays off after a relaunch"
+  tap "recording-full"
+  clock data
+  expect state showMotionPaths == true
+  tap "motion-paths"
+  clock data
+  expect state showMotionPaths == false
+  reload
+  clock data
+  expect state showMotionPaths == false
+  tap "recording-full"
+  clock data
+  tap "motion-paths"
+  expect state showMotionPaths == true

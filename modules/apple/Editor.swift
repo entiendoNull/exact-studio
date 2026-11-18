@@ -1860,4 +1860,24 @@ enum History {
         return "Edit " + kind
     }
 }
+
+// @ref LLP 0005#show-what-moves
+extension Editor {
+    func setLanding(_ id: String, image: String? = nil, x: Double, y: Double, live: Bool) {
+        let x = min(max(x, 0), 1), y = min(max(y, 0), 1)
+        var next = edits
+        if let image {
+            next.segments = next.segments.map { s in
+                guard s.id == image, s.kind == "image" else { return s }
+                var s = s
+                s.moves = s.moves?.map { $0.id == id ? Move(id: $0.id, t: $0.t, to: Placement(x: x, y: y, scale: $0.to.scale), style: $0.style, duration: $0.duration, angles: $0.angles) : $0 }
+                return s
+            }
+        } else {
+            next.moves = next.moves.map { $0.id == id ? Move(id: $0.id, t: $0.t, to: Placement(x: x, y: y, scale: $0.to.scale), style: $0.style, duration: $0.duration, angles: $0.angles) : $0 }
+        }
+        if live { edits = next; redraw(); return }
+        named("Move Landing") { apply(next) }
+    }
+}
 #endif

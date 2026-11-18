@@ -772,6 +772,7 @@ final class Preview: ExactNativeInstance {
         }
         studio.active = next
         host.cropping = props["cropping"] == "true"
+        host.showsPaths = props["paths"] != "false"
         // The look is the recording's own (look.json); the view only shows and sets it.
     }
 
@@ -786,11 +787,15 @@ final class PlayerHost: NSView {
     private let outline = CAShapeLayer()
     private let guides = CAShapeLayer()
     private weak var editor: Editor?
-    private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint), turn(CGPoint, Double, Double) }
+    private enum Drag { case subject(CGPoint, Placement), text(String, CGPoint, CGPoint), turn(CGPoint, Double, Double), landing(String, String?, CGPoint, CGPoint) }
     private var drag: Drag?
     /// Whether the pointer moved since the press: a plain click places nothing.
     private var dragged = false
     private var ticking: Any?
+    private let motion = MotionPathLayer()
+    var showsPaths = true {
+        didSet { if showsPaths != oldValue { drawOverlay() } }
+    }
     private weak var watched: AVPlayer?
 
     // MARK: Crop mode
@@ -831,6 +836,7 @@ final class PlayerHost: NSView {
         still.contentsGravity = .resizeAspect
         still.isHidden = true
         layer?.addSublayer(still)
+        layer?.addSublayer(motion)
         for l in [outline, guides] {
             l.fillColor = nil
             l.lineWidth = 1.5
@@ -1075,7 +1081,7 @@ final class PlayerHost: NSView {
         watched = editor?.player
         ticking = editor?.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in
             // A mask's box follows the video as it moves.
-            guard let self, self.editor?.selectedImage != nil || self.editor?.selectedSegment?.kind == "mask", self.drag == nil, self.maskDrag == nil else { return }
+            guard let self, self.editor?.selectedImage != nil || self.editor?.selectedSegment?.kind == "mask" || self.showsPaths, self.drag == nil, self.maskDrag == nil else { return }
             self.drawOverlay()
         }
         editor?.freeze = { [weak self] image in
@@ -1103,6 +1109,7 @@ final class PlayerHost: NSView {
         player.frame = bounds
         outline.frame = bounds
         guides.frame = bounds
+        motion.frame = bounds
         for l in [cropShade, cropGrid, cropLines, cropHandles] { l.frame = bounds }
         CATransaction.commit()
         layoutCrop()
@@ -1110,6 +1117,31 @@ final class PlayerHost: NSView {
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    // MARK: Motion paths
+    // @ref LLP 0005#show-what-moves
+
+    private var motionShown: (path: MotionPath, image: String?)? {
+        guard showsPaths, !cropping, let editor, !editor.isPlaying else { return nil }
+        let f = editor.framing, t = editor.playhead
+        if let s = editor.selectedImage { return f.motionPath(image: s, at: t).map { ($0, s.id) } }
+        return f.motionPath(at: t).map { ($0, nil) }
+    }
+
+    private func drawMotion() {
+        let shown = motionShown
+        let selected = shown?.image == nil ? editor?.selectedMove?.id : editor?.selectedImageMove?.move.id
+        motion.show(shown?.path, selected: selected, video: video, canvas: editor?.framing.canvas ?? .zero, scale: window?.backingScaleFactor ?? 2)
+    }
+
+    private func landingDown(_ p: CGPoint) -> Bool {
+        guard let editor, let shown = motionShown, let id = motion.landing(at: p) else { return false }
+        let moves = shown.image.flatMap { i in editor.edits.segments.first { $0.id == i }?.moves } ?? editor.edits.moves
+        guard let m = moves.first(where: { $0.id == id }) else { return false }
+        editor.select(shown.image.map { Editor.childID("im", image: $0, id) } ?? "m:" + id)
+        drag = .landing(id, shown.image, unit(p), CGPoint(x: m.to.x, y: m.to.y))
+        return true
+    }
 
     /// The video's rectangle in this view (AppKit, origin bottom-left).
     private var video: CGRect {
@@ -1131,6 +1163,7 @@ final class PlayerHost: NSView {
         CATransaction.setDisableActions(true)
         defer { CATransaction.commit() }
         drawMask()
+        drawMotion()
         guard let editor else { outline.path = nil; guides.path = nil; return }
         if cropping { layoutCrop(); return }
         let f = editor.framing
@@ -1153,6 +1186,7 @@ final class PlayerHost: NSView {
         dragged = false
         // The selected mask's box first: its handles reach a little outside it.
         if case let p = convert(e.locationInWindow, from: nil), editor.selectedSegment?.kind == "mask", maskDown(p) { drag = nil; return drawOverlay() }
+        if landingDown(convert(e.locationInWindow, from: nil)) { return drawOverlay() }
         let u = unit(convert(e.locationInWindow, from: nil))
         let f = editor.framing
         let t = editor.playhead
@@ -1214,6 +1248,9 @@ final class PlayerHost: NSView {
             let x = snapped(start.x + u.x - from.x, &lines), y = snapped(start.y + u.y - from.y, &rows)
             if editor.edits.segments.first(where: { $0.id == id })?.kind == "image" { editor.placeImage(id, x: x, y: y, live: true) }
             else { editor.dragText(id, x: x, y: y, live: true) }
+        case let .landing(id, image, from, start):
+            let x = snapped(start.x + u.x - from.x, &lines), y = snapped(start.y + u.y - from.y, &rows)
+            editor.setLanding(id, image: image, x: x, y: y, live: true)
         case let .turn(from, tilt, turn):
             // Like turning an object in the hand: drag right and the right side comes toward you; drag down and the top leans away.
             var nt = turn - Double(u.x - from.x) * 160, nl = tilt + Double(u.y - from.y) * 160
@@ -1239,6 +1276,9 @@ final class PlayerHost: NSView {
         guard let editor, let drag else { return }
         switch drag {
         case .subject: editor.endPlace()
+        case let .landing(id, image, _, _):
+            let moves = image.flatMap { i in editor.edits.segments.first { $0.id == i }?.moves } ?? editor.edits.moves
+            if dragged, let m = moves.first(where: { $0.id == id }) { editor.setLanding(id, image: image, x: m.to.x, y: m.to.y, live: false) }
         case .turn:
             let a = editor.framing.pose(at: editor.selectedMove?.t ?? editor.playhead).angles
             editor.setThree("turn", String(a.turn))
