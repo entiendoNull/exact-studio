@@ -174,6 +174,10 @@ component ExactStudio
   // The timeline's height, set by dragging the handle under the preview; the preview takes the rest.
   state timelineH = 330 persist
   state panelY = 24 persist
+  state stageW = 0
+  state stageH = 0
+  state floatW = 0
+  state floatH = 0
   state startedAt = 0
   state now = 0
   state listed = 0
@@ -197,6 +201,9 @@ component ExactStudio
   derive isDevice = summary.device or (match current { case some(r) => r.kind == "simulator" or r.kind == "emulator", case none => false })
   derive devices = sources.items.filter(s => s.kind == "simulator" or s.kind == "emulator")
   derive cardLeft = panelMode == "left" and sel.id != ""
+  // @ref LLP 0005#calm-by-default
+  derive floatX = stageW == 0 ? panelX : min(panelX, max(0, stageW - floatW - 16))
+  derive floatY = stageH == 0 ? panelY : min(panelY, max(0, stageH - floatH - 16))
   derive leftShown = leftOpen or cardLeft
   derive gradients = ["ocean", "sunset", "mint", "midnight", "graphite", "paper", "peach", "lagoon", "berry", "aurora", "ember", "lavender", "citrus", "forest", "sky", "rose", "dusk", "steel", "candy", "deepsea", "sand", "neon", "glow", "noir"]
   derive background = lk.background
@@ -323,11 +330,17 @@ component ExactStudio
   action resetStage
     timelineH = 330
   action dragPanel(dx: number, dy: number)
-    panelX = max(0, panelX + dx)
-    panelY = max(0, panelY + dy)
+    panelX = max(0, floatX + dx)
+    panelY = max(0, floatY + dy)
   action dropPanel(vx: number, vy: number)
-    panelX = round(panelX)
-    panelY = round(panelY)
+    panelX = round(floatX)
+    panelY = round(floatY)
+  action stageSized(w: number, h: number)
+    stageW = w
+    stageH = h
+  action floatSized(w: number, h: number)
+    floatW = w
+    floatH = h
   action closePanel
     send edited = editClip(selected, "deselect", "", 0, "")
   action toggleSection(name: string)
@@ -529,7 +542,7 @@ component ExactStudio
                   text "Record something to start" font="-exact-title2" font-weight=600
                   text "Pick a display, a window, an area or a Simulator in the sidebar. A Simulator or an emulator is cropped to its bezel, nothing more." color="-exact-secondary-label" text-align="center" max-width="28rem"
               case some(rec)
-                column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease"
+                column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease" resize=stageSized
                   studio-preview clip=rec.id look=look cropping=(cropping ? "true" : "") aria-label="Preview" flex=1 min-height=200 testId="preview"
                   if cropping
                     row gap=10 align-items="center" padding="8px 12px" border-radius=12 background-color="-exact-tertiary-background" testId="crop-bar"
@@ -594,7 +607,7 @@ component ExactStudio
                         column padding=12
                           SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber)
                   if sel.id != "" and panelMode == "float"
-                    column position="absolute" left=panelX top=panelY width="24rem" max-height="80%" border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
+                    column position="absolute" left=floatX top=floatY width="24rem" max-height="80%" resize=floatSized border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0

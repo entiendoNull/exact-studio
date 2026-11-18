@@ -81,6 +81,21 @@ test "a template replaces the edit, and Undo Template puts it back"
   expect state summary.canUndoTemplate == false
   expect text "summary" == "4 clip parts (1 removed) · 10 effects on 6 lanes · 1 move"
 
+test "the floating settings panel stays on the stage"
+  tap "recording-full"
+  clock settle
+  tap "panel-menu-button"
+  tap "menu-panel-float"
+  clock settle
+  tap "timeline" drag 0 0 from 240 280 mouse
+  clock data
+  expect tree has "float-panel"
+  expect text "segment-title" == "Text"
+  tap "float-grip" drag 950 820
+  clock data
+  expect state floatX <= 460
+  expect state floatY <= 160
+
 test "the inspector's sections fold, and the look's controls change look.json"
   tap "recording-empty"
   clock data
