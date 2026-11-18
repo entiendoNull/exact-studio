@@ -170,34 +170,72 @@ test("splits make parts; a part is removed by its start") {
     eq(e.pieces(10).count, 1, "splits at the ends or past them make no parts")
 }
 
-test("two zooms, speeds or 3D turns never overlap, on any lane") {
-    for kind in ["zoom", "speed", "3d"] {
+test("two zooms, speeds or 3D turns never overlap, on any lane; the reason names the other and a way out") {
+    for (kind, rule) in [("zoom", "one-zoom"), ("speed", "one-speed"), ("3d", "one-3d")] {
         let e = Edits(segments: [seg("a", kind, 1, 3, lane: 0), seg("b", kind, 2, 4, lane: 1)])
-        eq(e.conflict(e.segments[1]), "Two \(Segment.noun(kind)) can’t overlap.", kind)
+        eq(e.conflict(e.segments[1])?.rule, rule, kind)
+        eq(e.conflict(e.segments[1])?.other, ItemRef(kind: kind, id: "a"), kind)
     }
+    let e = Edits(segments: [seg("a", "zoom", 1, 3.04, lane: 0), seg("b", "zoom", 2, 4, lane: 1)])
+    eq(e.conflict(e.segments[1])?.line1, "One zoom at a time.")
+    eq(e.conflict(e.segments[1])?.line2, "Zoom in 2× runs to 0:03.1. Start it at 0:03.1 or later.", "rounded later, so the advice is right")
+    eq(e.conflict(e.segments[0])?.line2, "Zoom in 2× starts at 0:02.0. End it by 0:02.0.")
     let touching = Edits(segments: [seg("a", "zoom", 1, 3), seg("b", "zoom", 3, 4)])
     eq(touching.conflict(touching.segments[1]), nil, "touching zooms")
 }
 
-test("two of one visual effect with the same reach never overlap; another reach may") {
+test("P2: one blur and one black & white at a time, whatever each covers") {
     let e = Edits(segments: [seg("a", "blur", 1, 3, lane: 0), seg("b", "blur", 2, 4, lane: 1)])
-    eq(e.conflict(e.segments[1]), "Two blurs can’t overlap.")
+    eq(e.conflict(e.segments[1])?.rule, "one-blur")
     var frame = seg("b", "blur", 2, 4)
     frame.scope = "frame"
     let mixed = Edits(segments: [seg("a", "blur", 1, 3), frame])
-    eq(mixed.conflict(frame), nil, "a video blur under a whole-frame blur")
+    eq(mixed.conflict(frame)?.rule, "one-blur", "a video blur under a whole-frame blur")
+    eq(mixed.conflict(frame)?.text, "One blur at a time. Blur · video runs to 0:03.0. Start it at 0:03.0 or later.")
+    var all = seg("c", "mono", 2, 4)
+    all.scope = "all"
+    let mono = Edits(segments: [seg("a", "mono", 1, 3), all])
+    eq(mono.conflict(all)?.rule, "one-mono")
     let different = Edits(segments: [seg("a", "spotlight", 1, 3, lane: 0), seg("b", "highlight", 2, 4, lane: 1)])
     eq(different.conflict(different.segments[1]), nil)
 }
 
+test("P4: no zoom during a 3D orbit; a 3D hold may have one") {
+    var orbit = seg("o", "3d", 1, 5)
+    orbit.style = "orbit"
+    let e = Edits(segments: [orbit, seg("z", "zoom", 3, 6, lane: 1)])
+    eq(e.conflict(e.segments[1])?.rule, "no-zoom-in-orbit")
+    eq(e.conflict(e.segments[1])?.text, "No zoom during an orbit. 3D orbit runs to 0:05.0. Start it at 0:05.0 or later.")
+    eq(e.conflict(orbit)?.rule, "no-zoom-in-orbit", "told from the orbit too")
+    var hold = orbit
+    hold.style = "hold"
+    eq(Edits(segments: [hold, seg("z", "zoom", 3, 6, lane: 1)]).conflict(seg("z", "zoom", 3, 6, lane: 1)), nil)
+}
+
+test("P1: a move starts travelling only after the move before it lands, for the video and each image") {
+    var e = Edits()
+    e.moves = [Move(id: "a", t: 9, to: Placement()), Move(id: "b", t: 9.5, to: Placement(), duration: 0.8)]
+    let c = e.conflicts(ofMove: e.moves[1])
+    eq(c.map(\.rule), ["move-after-move"])
+    eq(c.first?.text, "One move at a time. The move before lands at 0:09.0. Land this one at 0:09.8 or later.")
+    eq(e.conflicts(ofMove: e.moves[0]).first?.line2, "The next move starts at 0:08.7. Land this one by 0:08.7.")
+    eq(e.conflicts(map: TimeMap(duration: 20, edits: e)).count, 1, "one per pair")
+    e.moves[1].t = 9.8
+    eq(e.conflicts(ofMove: e.moves[1]), [], "travels from the landing on")
+    var image = seg("i", "image", 0, 10)
+    image.moves = [Move(id: "a", t: 3, to: Placement()), Move(id: "b", t: 3.2, to: Placement())]
+    eq(Edits.conflict(in: image)?.rule, "move-after-move")
+    eq(Edits.conflict(in: image)?.item, ItemRef(kind: "image-move", id: "b", image: "i"))
+}
+
 test("one lane holds one thing at a time; texts, images and masks overlap on separate lanes") {
     let e = Edits(segments: [seg("a", "spotlight", 1, 3), seg("b", "highlight", 2, 4)])
-    eq(e.conflict(e.segments[1]), "That lane is taken there; drop it on another lane.")
+    eq(e.conflict(e.segments[1])?.text, "That lane is taken. Spotlight is on this lane then. Put it on another lane.")
     for kind in ["text", "mask"] {
         let two = Edits(segments: [seg("a", kind, 1, 3, lane: 0), seg("b", kind, 2, 4, lane: 1)])
         eq(two.conflict(two.segments[1]), nil, kind)
         let one = Edits(segments: [seg("a", kind, 1, 3), seg("b", kind, 2, 4)])
-        eq(one.conflict(one.segments[1]), "That lane is taken there; drop it on another lane.", kind)
+        eq(one.conflict(one.segments[1])?.rule, "lane-taken", kind)
     }
     let spaces = Edits(segments: [seg("a", "zoom", 1, 3), seg("b", "text", 1, 3)])
     eq(spaces.conflict(spaces.segments[1]), nil, "a text and a zoom on lane 0 of their own spaces")
@@ -205,19 +243,28 @@ test("one lane holds one thing at a time; texts, images and masks overlap on sep
 
 test("an image's own effects and moves stay inside it and never clash") {
     var image = seg("i", "image", 2, 6)
+    image.file = "images/logo.png"
     image.effects = [seg("e1", "pulse", 2, 4), seg("e2", "fade", 3, 5, lane: 1)]
     eq(Edits.conflict(in: image), nil)
     image.effects = [seg("e1", "pulse", 2, 4), seg("e2", "pulse", 3, 5, lane: 1)]
-    eq(Edits.conflict(in: image), "Two of the same effect can’t overlap on one image.")
+    eq(Edits.conflict(in: image)?.text, "One of each per image. Its pulse runs to 0:04.0. Start it at 0:04.0 or later.")
     image.effects = [seg("e1", "pulse", 2, 4), seg("e2", "fade", 3, 5)]
-    eq(Edits.conflict(in: image), "That row is taken there; drop it on another row.")
+    eq(Edits.conflict(in: image)?.text, "That row is taken. Its pulse is on this row then. Put it on another row.")
     image.effects = [seg("e1", "pulse", 5, 7)]
-    eq(Edits.conflict(in: image), "An image’s effect must stay inside the image’s time.")
+    eq(Edits.conflict(in: image)?.text, "Keep it inside the image. logo.png shows 0:02.0–0:06.0. Start and end it there.")
     image.effects = [seg("e1", "sparkle", 2, 3)]
-    eq(Edits.conflict(in: image), "An image has no sparkle effect.")
+    eq(Edits.conflict(in: image)?.rule, "image-effect-kind")
     image.effects = []
     image.moves = [Move(id: "m", t: 7, to: Placement())]
-    eq(Edits.conflict(in: image), "An image’s move must land inside the image’s time.")
+    eq(Edits.conflict(in: image)?.text, "Keep it inside the image. logo.png shows 0:02.0–0:06.0. Land the move there.")
+}
+
+test("every rule's line 1 is short: five words or fewer") {
+    for (id, line) in Rules.all {
+        let words = line.split(separator: " ").filter { $0 != "&" }.count
+        expect(words <= 5, "\(id): “\(line)” has \(words) words")
+        expect(line.hasSuffix("."), "\(id): ends with a full stop")
+    }
 }
 
 test("a new segment takes the first lane free then, else one past the last") {
@@ -260,7 +307,7 @@ test("sounds on one lane never play at once; a free lane is found for a new one"
     e.soundLanes = 1
     let map = TimeMap(duration: 10, edits: e)
     let b = Sound(id: "b", file: "sounds/beep.wav", start: 2, length: 1)
-    eq(e.conflict(b, map: map), "That sound lane is taken there; drop it on another lane.")
+    eq(e.conflict(b, map: map)?.text, "That lane is taken. beep.wav is on this lane then. Put it on another lane.")
     eq(e.freeLane(for: b, map: map), 1)
     eq(e.conflict(Sound(id: "c", file: "sounds/beep.wav", start: 3, length: 1), map: map), nil)
 }
@@ -304,8 +351,9 @@ test("every template, on every frame shape, length, click pattern and cut, is cl
             var e = Templates.apply(m, to: edits)
             e.pack(e.segments)
             expect(!e.segments.isEmpty, "\(at): nothing in it")
+            e.moves = m.moves
+            for c in e.conflicts(map: TimeMap(duration: length, edits: e)) { expect(false, "\(at): \(c.rule) \(c.item?.key ?? ""): \(c.text)") }
             for s in e.segments {
-                if let why = e.conflict(s) { expect(false, "\(at): \(s.kind) \(s.id): \(why)") }
                 expect(s.start >= 0 && s.end <= length + 0.001 && s.end - s.start >= 0.1, "\(at): \(s.kind) \(s.id) at \(s.start)–\(s.end)")
             }
             for mv in m.moves { expect(mv.t >= 0 && mv.t <= length + 0.001, "\(at): move at \(mv.t)") }
@@ -641,7 +689,7 @@ test("removed parts: the last kept part stays, and the video gets shorter") {
     eq(e.edits.removed, [5]); near(e.summary["length"] as? Double ?? 0, 8, within: 0.11)
     e.select("p:7000"); e.toggleRemoved()
     e.select("p:0"); e.toggleRemoved()
-    eq(e.problem, "Keep at least one part of the clip.")
+    eq(e.problem, "Keep one clip part. The video needs at least one kept part.")
     eq(e.edits.removed.sorted(), [5, 7])
     e.select("p:5000"); e.join(1)
     eq(e.edits.splits, [5]); eq(e.edits.removed, [5], "joining two removed parts keeps the whole removed")
@@ -666,7 +714,8 @@ test("add a zoom at the playhead; a second zoom there is refused; one before it 
     let z = e.selectedSegment
     eq(z?.kind, "zoom"); eq(z?.level, 2); near(z?.start ?? -1, 1); near(z?.end ?? -1, 4)
     at(e, 2); e.add("zoom-out")
-    eq(e.problem, "There’s already a zoom at the playhead. Move the playhead to a free spot.")
+    eq(e.refusal?.rule, "room-at-playhead")
+    eq(e.problem, "One zoom at a time. Zoom in 2× runs here until 0:04.0. Move the playhead past it.")
     eq(e.edits.zooms.count, 1)
     at(e, 0.5); e.add("zoom-out")
     eq(e.edits.zooms.count, 2); near(e.selectedSegment?.end ?? -1, 1, "it stops at the next zoom"); eq(e.selectedSegment?.level, 0.7)
@@ -674,12 +723,15 @@ test("add a zoom at the playhead; a second zoom there is refused; one before it 
     eq(e.edits.speeds.count, 1); eq(e.selectedSegment?.lane, 1, "a speed under a zoom takes the next lane"); eq(e.edits.lanes, 2)
 }
 
-test("texts stack on new text lanes; blurs on the video and on the whole frame go to their own rows") {
+test("texts stack on new text lanes; a whole-frame blur goes to its own row, and never over a video blur (P2)") {
     let e = open("empty")
     at(e, 2); e.add("text"); e.add("text")
     eq(e.edits.texts.map(\.lane), [0, 1]); eq(e.edits.textLanes, 2)
     eq(e.selectedSegment?.text, "Your text here")
     e.add("blur"); e.add("blur-frame")
+    eq(e.edits.segments.filter { $0.kind == "blur" }.map(\.space), [0], "refused: one blur at a time")
+    eq(e.refusal?.rule, "room-at-playhead")
+    at(e, 6); e.add("blur-frame")
     eq(e.edits.segments.filter { $0.kind == "blur" }.map(\.space), [0, 3]); eq(e.edits.frameLanes, 1)
     e.add("mask")
     let m = e.selectedSegment
@@ -693,7 +745,7 @@ test("a drag that makes two zooms overlap is put back, and says why") {
     let id = e.selected
     e.drag(id, start: 3, end: 6, lane: 1)
     e.endDrag()
-    eq(e.problem, "Two zooms can’t overlap.")
+    eq(e.problem, "One zoom at a time. Zoom in 2× runs to 0:04.0. Start it at 0:04.0 or later.")
     near(e.selectedSegment?.start ?? -1, 6, "back where it was"); eq(e.edits.lanes, 1)
     e.drag(id, start: 4.5, end: 7.5, lane: 1)
     e.endDrag()
@@ -704,7 +756,8 @@ test("typed times are checked; delete removes the selection") {
     let e = open("empty")
     at(e, 1); e.add("spotlight")
     e.setTimes(start: 3, end: 3.05)
-    eq(e.problem, "Start must come at least 0.1 s before end, inside 0:00–\(Editor.stamp(e.duration)).")
+    eq(e.refusal?.rule, "min-length")
+    eq(e.problem, "Too short. An item lasts at least 0.1 s, inside 0:00–\(Rules.clock(e.duration, up: false)).")
     e.setTimes(start: 2, end: 5)
     near(e.selectedSegment?.start ?? -1, 2); near(e.selectedSegment?.end ?? -1, 5)
     at(e, 3); e.split()
@@ -885,7 +938,7 @@ test("a lane's ⋯ makes lanes above and below and moves it up and down; each is
 
 test("Delete Lane says what goes with it, asks when it holds items, and never takes the last Effects lane") {
     let e = open("empty")
-    eq(TimelineMenus.lane(0, 0, e) { _, _, run in run() }.reason("Delete Lane"), "One Effects lane always stays.")
+    eq(TimelineMenus.lane(0, 0, e) { _, _, run in run() }.reason("Delete Lane"), "One Effects lane stays.\nIt is the last one.")
     at(e, 1); e.add("zoom-in")
     e.addLane()
     eq(TimelineMenus.lane(0, 1, e) { _, _, _ in }.choices.last, "Delete Lane", "an empty lane goes at once")
@@ -1088,11 +1141,11 @@ test("a text's own effects: added from its + and its inspector, saved, undone, s
     eq(e.edits.texts.first?.effects?.map(\.kind), ["blur"])
     var t = e.edits.texts.first!
     t.effects = [Segment(id: "a", kind: "blur", start: 0.6, end: 2), Segment(id: "b", kind: "blur", start: 1, end: 2.4, lane: 1)]
-    eq(Edits.conflict(in: t), "Two of the same effect can’t overlap on one text.")
+    eq(Edits.conflict(in: t)?.rule, "text-one-each")
     t.effects = [Segment(id: "a", kind: "pulse", start: 0.6, end: 2)]
-    eq(Edits.conflict(in: t), "A text has no pulse effect.")
+    eq(Edits.conflict(in: t)?.text, "No such text effect. A text takes blur, mono or fade.")
     t.effects = [Segment(id: "a", kind: "fade", start: 0.1, end: 2)]
-    eq(Edits.conflict(in: t), "A text’s effect must stay inside the text’s time.")
+    eq(Edits.conflict(in: t)?.rule, "text-inside")
     e.select("txt")
     at(e, 1.5)
     e.split()
@@ -1576,6 +1629,231 @@ test("a fold or unfold keeps the header clicked where it was, however far the ro
     expect(e.videoOpen, "selecting a clip part opens VIDEO")
     eq(screen(.header("sound")), sound, "VIDEO opened out of sight leaves the rows in sight where they were")
     view.detach()
+}
+
+// MARK: Refusals: the same rules, in the same words, everywhere
+// @ref LLP 0005#refusals
+
+struct RuleCase: Decodable { var rule, app, item, line1, line2: String; var before, after: Edits }
+let ruleCases = try JSONDecoder().decode([RuleCase].self, from: Data(contentsOf: repo.appendingPathComponent("test/rules.json")))
+
+func json(_ e: Edits) -> String { String(data: try! JSONEncoder().encode(e), encoding: .utf8)! }
+
+test("test/rules.json covers every rule a file can break") {
+    let covered = Set(ruleCases.map(\.rule))
+    for (id, _) in Rules.all where !["room-at-playhead", "last-effects-lane"].contains(id) { expect(covered.contains(id), "no case for \(id)") }
+    for c in ruleCases { eq(Rules.line1(c.rule), c.line1, c.rule) }
+}
+
+for c in ruleCases {
+    test("\(c.rule): the app says “\(c.line1) \(c.line2)”, the words validate and MCP print") {
+        let e = open("empty", edits: json(c.before))
+        eq(e.standing, [], "the case's before breaks nothing")
+        let steps = e.undoName
+        switch c.app {
+        case "refuses":
+            expect(!e.apply(c.after), "refused")
+            eq(e.refusal?.rule, c.rule); eq(e.refusal?.line1, c.line1); eq(e.refusal?.line2, c.line2)
+            eq(onDisk(e), c.before, "nothing saved"); eq(e.undoName, steps, "no undo step")
+        case "relanes":
+            expect(e.apply(c.after), "a taken lane is no refusal in the app")
+            eq(e.edits.conflicts(map: e.map), [], "it went to the first free lane")
+            eq(Editor.newConflict(c.after, since: c.before, duration: 10)?.text, "\(c.line1) \(c.line2)", "the words validate prints for the file")
+        case "setTimes":
+            e.select("a"); e.setTimes(start: 1, end: 1.05)
+            eq(e.refusal?.rule, c.rule); eq(e.refusal?.line1, c.line1); eq(e.refusal?.line2, c.line2)
+        case "toggleRemoved":
+            e.select("p:5000"); e.toggleRemoved()
+            eq(e.refusal?.rule, c.rule); eq(e.refusal?.line1, c.line1); eq(e.refusal?.line2, c.line2)
+        default: expect(false, "unknown app case \(c.app)")
+        }
+    }
+}
+
+test("an old file that breaks the new rules opens, keeps every edit, marks the items, and refuses only new breaks") {
+    let old = """
+    { "lanes": 2, "textLanes": 0, "frameLanes": 1,
+      "segments": [{ "id": "b1", "kind": "blur", "start": 1, "end": 4 }, { "id": "b2", "kind": "blur", "start": 2, "end": 5, "scope": "frame" },
+                   { "id": "o", "kind": "3d", "start": 5, "end": 8, "style": "orbit" }, { "id": "z", "kind": "zoom", "start": 6, "end": 9, "lane": 1, "level": 2 }],
+      "moves": [{ "id": "m1", "t": 3, "to": { "x": 0.3 } }, { "id": "m2", "t": 3.4, "to": { "x": 0.7 }, "duration": 0.8 }] }
+    """
+    let e = open("empty", edits: old)
+    eq(e.edits.segments.count, 4, "every segment kept"); eq(e.edits.moves.count, 2, "every move kept")
+    eq(Set(e.standing.map(\.rule)), ["one-blur", "no-zoom-in-orbit", "move-after-move"])
+    e.select("z")
+    eq(e.selection["problem"] as? String, "No zoom during an orbit. 3D orbit runs to 0:08.0. Start it at 0:08.0 or later.", "the reason shows on the item")
+    eq(e.refusal, nil, "shown, not refused")
+    e.setValue(number: 2.5, kind: nil)
+    eq(e.selectedSegment?.level, 2.5, "a change that leaves the old break alone lands")
+    eq(onDisk(e).segments.count, 4, "saved with the old break in it")
+    e.select("b1"); e.setTimes(start: 1, end: 6)
+    eq(e.refusal, nil, "the same pair, so not new")
+    at(e, 8.5); e.add("blur")
+    eq(e.refusal?.rule, nil)
+    let late = e.selectedSegment!
+    e.select(late.id); e.setTimes(start: 4.5, end: 9)
+    eq(e.refusal?.rule, "one-blur", "a new pair is refused")
+}
+
+test("a refused drag: checked on every step, the clash named, nothing saved and no undo step on release") {
+    let e = open("empty", edits: """
+    { "lanes": 2, "textLanes": 2, "segments": [{ "id": "a", "kind": "zoom", "start": 1, "end": 4, "level": 2 }, { "id": "b", "kind": "zoom", "start": 6, "end": 8, "level": 0.7 },
+      { "id": "t1", "kind": "text", "start": 1, "end": 3, "text": "One" }, { "id": "t2", "kind": "text", "start": 5, "end": 7, "text": "Two" }] }
+    """)
+    let steps = e.undoName, disk = onDisk(e)
+    e.select("b")
+    e.drag("b", start: 3, end: 5, lane: 1)
+    eq(e.dragCheck?.item, ItemRef(kind: "zoom", id: "b"))
+    eq(e.dragCheck?.conflict?.rule, "one-zoom"); eq(e.dragCheck?.conflict?.other, ItemRef(kind: "zoom", id: "a"))
+    eq(e.dragCheck?.conflict?.text, "One zoom at a time. Zoom in 2× runs to 0:04.0. Start it at 0:04.0 or later.")
+    e.drag("b", start: 4.5, end: 6.5, lane: 1)
+    eq(e.dragCheck?.conflict, nil, "the next step is fine again")
+    e.drag("b", start: 2, end: 4, lane: 1)
+    expect(!e.endDrag(), "refused")
+    near(e.selectedSegment?.start ?? -1, 6, "back where it was"); eq(e.selected, "b", "still selected")
+    eq(onDisk(e), disk, "nothing saved"); eq(e.undoName, steps, "no undo step"); eq(e.dragCheck, nil)
+    eq(e.problem, "One zoom at a time. Zoom in 2× runs to 0:04.0. Start it at 0:04.0 or later.", "the inspector keeps the reason")
+    e.select("t2")
+    e.drag("t2", start: 2, end: 4, lane: 0)
+    eq(e.dragCheck?.conflict, nil, "a text over a text is no refusal"); eq(e.dragCheck?.landing, 1, "it shows where it will land")
+    expect(e.endDrag(), "dropped")
+    eq(e.selectedSegment?.lane, 1); near(e.selectedSegment?.start ?? -1, 2)
+}
+
+test("a + menu item that would be refused is off, its reason the rule's two lines; asking changes nothing") {
+    let e = open("empty")
+    at(e, 1); e.add("zoom-in")
+    let before = e.edits, chosen = e.selected
+    at(e, 2)
+    let effects = menu(.lane(0, 0), e)
+    let zoom: [MenuEntry] = { if case let .sub(_, inner) = effects.first(where: { if case .sub("Zoom", _) = $0 { return true }; return false })! { return inner }; return [] }()
+    eq(zoom.reason("Zoom In"), "One zoom at a time.\nZoom in 2× runs here until 0:04.0. Move the playhead past it.")
+    eq(zoom.reason("Zoom Out"), zoom.reason("Zoom In"))
+    expect(!effects.run("Zoom › Zoom In"), "an off item does not run")
+    eq(zoom.reason("Zoom on Clicks"), nil)
+    expect(effects.choices.contains("Look › Blur") && !effects.run("Zoom › Zoom Out"), "the menu keeps its shape")
+    eq(e.edits, before, "asking changed nothing"); eq(e.selected, chosen); eq(e.problem, "")
+    e.addMove()
+    at(e, 2.3)
+    eq(menu(.position, e).reason("Add Move Here"), "One move at a time.\nThe move before lands at 0:02.0. Land this one at 0:02.8 or later.")
+    at(e, 5)
+    eq(menu(.position, e).reason("Add Move Here"), nil)
+}
+
+test("a typed time that clashes says why under its field, and nothing changes until Return") {
+    let e = open("empty", edits: """
+    { "lanes": 2, "textLanes": 0, "segments": [{ "id": "a", "kind": "zoom", "start": 1, "end": 4, "level": 2 }, { "id": "b", "kind": "zoom", "start": 6, "end": 8, "level": 0.7, "lane": 1 }] }
+    """)
+    e.select("b")
+    e.checkTime("start", 3)
+    eq(e.selection["startWhy"] as? String, "One zoom at a time. Zoom in 2× runs to 0:04.0. Start it at 0:04.0 or later.")
+    eq(e.selection["endWhy"] as? String, "")
+    near(e.selectedSegment?.start ?? -1, 6, "not applied while typing"); eq(e.problem, "")
+    e.checkTime("start", 4.5)
+    eq(e.selection["startWhy"] as? String, "", "a fine value clears it")
+    e.checkTime("start", 3)
+    e.setTimes(start: 3, end: nil)
+    near(e.selectedSegment?.start ?? -1, 6, "Return: refused, it stays"); eq(e.selection["startWhy"] as? String, "")
+    eq(e.refusal?.rule, "one-zoom")
+}
+
+test("P1 fixes the jump: a move that waits for the last landing moves smoothly; one that does not jumps") {
+    func pose(_ moves: String) throws -> Framing { try pathFraming("{ \"moves\": [\(moves)] }") }
+    let a = "{ \"id\": \"a\", \"t\": 3, \"to\": { \"x\": 0.2, \"y\": 0.5, \"scale\": 0.6 }, \"duration\": 1 }"
+    let jumps = try pose(a + ", { \"id\": \"b\", \"t\": 3.6, \"to\": { \"x\": 0.8, \"y\": 0.5, \"scale\": 0.6 }, \"duration\": 1.2 }")
+    let fine = try pose(a + ", { \"id\": \"b\", \"t\": 4.2, \"to\": { \"x\": 0.8, \"y\": 0.5, \"scale\": 0.6 }, \"duration\": 1.2 }")
+    func biggestStep(_ f: Framing) -> Double {
+        stride(from: 1.5, to: 5.5, by: 0.01).map { t in abs(f.pose(at: t + 0.01).x - f.pose(at: t).x) }.max() ?? 0
+    }
+    expect(biggestStep(jumps) > 0.1, "the old overlap jumps (\(biggestStep(jumps)))")
+    expect(biggestStep(fine) < 0.03, "after the landing it glides (\(biggestStep(fine)))")
+    var e = Edits()
+    e.moves = try decode("{ \"moves\": [\(a), { \"id\": \"b\", \"t\": 3.6, \"to\": { \"x\": 0.8 }, \"duration\": 1.2 }] }").moves
+    eq(e.conflicts(map: TimeMap(duration: 10, edits: e)).map(\.rule), ["move-after-move"], "and the rule refuses it")
+}
+
+if let shots = ProcessInfo.processInfo.environment["EXACT_STUDIO_SHOTS"] {
+    test("pictures of a refused drag and an off menu item (EXACT_STUDIO_SHOTS)") {
+        let out = URL(fileURLWithPath: shots)
+        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        let e = open("empty", edits: """
+        { "lanes": 3, "textLanes": 1, "segments": [
+          { "id": "zin", "kind": "zoom", "start": 1, "end": 4.4, "level": 2 },
+          { "id": "zout", "kind": "zoom", "start": 6.4, "end": 8.6, "level": 0.7, "lane": 1 },
+          { "id": "mask", "kind": "mask", "start": 1.6, "end": 6.2, "lane": 2, "style": "solid", "rect": { "x": 0.1, "y": 0.1, "w": 0.2, "h": 0.1 } },
+          { "id": "t", "kind": "text", "start": 0.5, "end": 3, "text": "New in 2.0" },
+          { "id": "t2", "kind": "text", "start": 4.6, "end": 7, "text": "Notification controls" } ],
+          "moves": [{ "id": "m", "t": 2, "to": { "x": 0.4 } }] }
+        """)
+        let w = NSWindow(contentRect: CGRect(x: 80, y: 120, width: 1100, height: 470), styleMask: [.titled], backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false
+        let view = TimelineView(frame: CGRect(x: 0, y: 0, width: 1100, height: 470))
+        w.contentView = view
+        view.attach(e)
+        func event(_ type: NSEvent.EventType, _ p: CGPoint) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: CGPoint(x: p.x, y: view.bounds.height - p.y), modifierFlags: [], timestamp: 0,
+                               windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        func save(_ name: String) {
+            let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try! rep.representation(using: .png, properties: [:])!.write(to: out.appendingPathComponent(name))
+        }
+        let row = view.rows.first { $0.kind == .lane(0, 1) }!
+        let x = { (t: Double) in CGFloat(170 + 14) + CGFloat(t / e.duration) * (view.bounds.width - 170 - 14 - 22) }
+        let grab = CGPoint(x: x(7.4), y: row.y + row.height / 2)
+        view.mouseDown(with: event(.leftMouseDown, grab))
+        for step in 1...8 { view.mouseDragged(with: event(.leftMouseDragged, CGPoint(x: grab.x - CGFloat(step) * (x(7.4) - x(3.6)) / 8, y: grab.y))) }
+        eq(e.dragCheck?.conflict?.rule, "one-zoom")
+        view.display()
+        save("refused-drag.png")
+        view.mouseUp(with: event(.leftMouseUp, CGPoint(x: x(3.6), y: grab.y)))
+        _ = wait(0.4) { false }
+        view.display()
+        save("refused-drag-after.png")
+
+        let text = view.rows.first { $0.kind == .lane(1, 0) }!
+        let t0 = CGPoint(x: x(5.5), y: text.y + text.height / 2)
+        view.mouseDown(with: event(.leftMouseDown, t0))
+        view.mouseDragged(with: event(.leftMouseDragged, CGPoint(x: x(2.2), y: t0.y)))
+        expect(e.dragCheck?.landing == 1, "lands on a new text lane")
+        view.display()
+        save("taken-lane-lands.png")
+        view.mouseUp(with: event(.leftMouseUp, CGPoint(x: x(2.2), y: t0.y)))
+
+        NSApp.setActivationPolicy(.accessory)
+        NSApp.activate(ignoringOtherApps: true)
+        w.orderFront(nil)
+        _ = wait(0.8) { false }
+        at(e, 2.4)
+        let effects = menu(.lane(0, 0), e)
+        guard case let .sub(_, zoom)? = effects.first(where: { if case .sub("Zoom", _) = $0 { return true }; return false }) else { return }
+        for (name, entries) in [("off-menu-zoom.png", zoom), ("off-menu-move.png", menu(.position, e))] {
+            let m = view.nsMenu(entries)
+            let shot = out.appendingPathComponent(name)
+            try? FileManager.default.removeItem(at: shot)
+            for _ in 0..<3 where !FileManager.default.fileExists(atPath: shot.path) {
+                _ = wait(0.6) { false }
+                let timer = Timer(timeInterval: 0.7, repeats: false) { _ in
+                    let windows = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? [])
+                        .filter { ($0[kCGWindowOwnerPID as String] as? Int32) == getpid() && ($0[kCGWindowLayer as String] as? Int) == 101 }
+                    if let id = windows.last?[kCGWindowNumber as String] as? Int {
+                        let p = Process()
+                        p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                        p.arguments = ["-x", "-l", "\(id)", shot.path]
+                        try? p.run(); p.waitUntilExit()
+                    }
+                    m.cancelTracking()
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                m.popUp(positioning: nil, at: CGPoint(x: 220, y: 100), in: view)
+                timer.invalidate()
+            }
+            expect(FileManager.default.fileExists(atPath: shot.path), "\(name) written")
+        }
+        w.orderOut(nil)
+        view.detach()
+    }
 }
 
 // MARK: The curtain: the app's own windows out of the way while picking and recording

@@ -55,7 +55,11 @@ The loop, from this repository's root:
    it copies the file into the recording and prints the new `image` segment, on the first image
    lane free at that time. Then edit that segment's place, size, moves and effects in `edits.json`. Never point `file` outside the
    recording's folder.
-3. `./exact-studio validate <id>` until it prints `ok`. When it says `edits.json` or `look.json` can't
+3. `./exact-studio validate <id>` until it prints `ok`. When validate names a rule (`one-zoom`,
+   `move-after-move`… the table is in docs/edits.md), do what its second line says: it names the
+   other item or time and one way out, in the words the app shows a person. A rule the file broke
+   before you changed it is not refused (`write_edits` lists it as a note); fix it when it is yours to fix.
+   When it says `edits.json` or `look.json` can't
    be read (broken JSON, a wrong type), every other verb and the app refuse the recording and never
    write over that file. Fix the file itself; do not delete or replace it, since it is the only copy of the edit.
 4. `./exact-studio frame <id> <seconds>` and look at `.exact/frame.png` at the moments that matter
@@ -73,6 +77,8 @@ Rules that keep an edit looking good:
   not over a stretch where a zoom pulls the video under the text.
 - Prefer a few strong moments over many effects; leave the first second plain or blurred under a title.
 - Speed changes read as lag on screen recordings; use cuts instead.
+- One blur and one black and white at a time, whatever each covers; no zoom during a 3D orbit; a
+  move starts travelling only after the one before it lands. `validate` refuses these.
 - An effect on the video (zoom, blur, spotlight…) never touches a text or an image. To change one
   image, give it its own `moves` and `effects`; a text takes its own `effects` too (`blur`, `mono`, `fade`). To blur or grey more
   than the video, give a `blur` or `mono` segment a `scope`: the cut in the stack background, video, images, texts. `"background"`

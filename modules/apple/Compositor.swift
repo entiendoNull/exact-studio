@@ -146,9 +146,10 @@ struct Segment: Codable, Equatable {
     static func ownEffects(_ kind: String) -> [String] { kind == "image" ? imageEffects : kind == "text" ? textEffects : [] }
 
     /// Two segments may overlap in time unless they share a group: one zoom at
-    /// a time, one speed at a time, one of each visual effect at a time.
+    /// a time, one speed at a time, one of each visual effect at a time, whatever it covers.
     /// Texts, images and masks never clash.
-    var group: String { isOverlay || kind == "mask" ? kind + ":" + id : coversFrame ? kind + ":frame" : kind }
+    // @ref LLP 0002#what-may-overlap — one blur is one blur, whatever its reach
+    var group: String { isOverlay || kind == "mask" ? kind + ":" + id : kind }
     /// A blur or black and white that reaches past the video: the background, the scene, the frame or all.
     var coversFrame: Bool { (kind == "blur" || kind == "mono") && Segment.scopes.dropFirst().contains(scope ?? "video") }
     /// Drawn over the finished picture: a text or an image.
@@ -495,47 +496,12 @@ struct Edits: Codable, Equatable {
     }
     var turns: [Segment] { segments.filter { $0.kind == "3d" } }
 
-    /// Why `s` cannot sit where it is, or nil when it can.
-    func conflict(_ s: Segment) -> String? {
-        for o in segments where o.id != s.id && o.overlaps(s) {
-            if o.group == s.group { return "Two \(Segment.noun(s.kind)) can’t overlap." }
-            if o.lane == s.lane, o.space == s.space { return "That lane is taken there; drop it on another lane." }
-        }
-        if s.isOverlay { return Edits.conflict(in: s) }
-        return nil
-    }
-
-    /// Why a sound cannot sit where it is, or nil when it can: two sounds on one lane never play at once.
-    func conflict(_ s: Sound, map: TimeMap) -> String? {
-        let a = s.playing(map)
-        for o in sounds where o.id != s.id && o.lane == s.lane {
-            let b = o.playing(map)
-            if a.start < b.end - 0.0001 && b.start < a.end - 0.0001 { return "That sound lane is taken there; drop it on another lane." }
-        }
-        return nil
-    }
-
     /// The first sound lane where `s` plays alone; one past the last when none has room.
     func freeLane(for s: Sound, map: TimeMap) -> Int {
         var probe = s
         probe.lane = 0
         while probe.lane < soundLanes, conflict(probe, map: map) != nil { probe.lane += 1 }
         return probe.lane
-    }
-
-    /// Why an image's (or a text's) own moves and effects cannot sit where they are, or nil when they can.
-    static func conflict(in image: Segment) -> String? {
-        let fx = image.effects ?? [], noun = image.kind == "text" ? "text" : "image"
-        for e in fx {
-            if !Segment.ownEffects(image.kind).contains(e.kind) { return "A\(noun == "image" ? "n" : "") \(noun) has no \(e.kind) effect." }
-            if e.start < image.start - 0.001 || e.end > image.end + 0.001 { return "A\(noun == "image" ? "n" : "") \(noun)’s effect must stay inside the \(noun)’s time." }
-            for o in fx where o.id != e.id && o.overlaps(e) {
-                if o.kind == e.kind { return "Two of the same effect can’t overlap on one \(noun)." }
-                if o.lane == e.lane { return "That row is taken there; drop it on another row." }
-            }
-        }
-        for m in image.moves ?? [] where m.t < image.start - 0.001 || m.t > image.end + 0.001 { return "An image’s move must land inside the image’s time." }
-        return nil
     }
 
     /// Zooms where the clicks are: clicks less than 3 s apart share one,

@@ -1,2 +1,2 @@
-spotlight a (0:01.00–0:03.00): That lane is taken there; drop it on another lane.
-highlight b (0:02.00–0:04.00): That lane is taken there; drop it on another lane.
+highlight b (0:02.00–0:04.00), with spotlight a: lane-taken: That lane is taken.
+  Spotlight is on this lane then. Put it on another lane.

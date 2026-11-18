@@ -14,7 +14,10 @@ exact-studio — edit Exact Studio recordings from the command line
 
   exact-studio list                         the recordings, newest first
   exact-studio show <id> [--json]           its length, clip parts, segments, sounds, moves and look
-  exact-studio validate <id>                checks edits.json and look.json; exit 1 on a problem
+  exact-studio validate <id> [--since <old edits.json>]
+                                            checks edits.json and look.json; exit 1 on a problem. A broken rule
+                                            prints its id and two lines: what the rule is, then the other item and
+                                            one way out. --since: a rule the old file broke too is a note, not a failure
   exact-studio frame <id> <time> [--out f.png] [--source] [--raw]
                                             renders one frame at <time> seconds of the video
                                             (--source: of the recording); default .exact/frame.png
@@ -186,50 +189,85 @@ func joins(_ s: Segment, _ pool: [Segment]) -> String {
     joinWords(pool.first { $0.joins(s) }?.id, pool.first { s.joins($0) }?.id)
 }
 
-/// Problems with a recording's edits, each a line; empty when it is fine.
-func problems(_ r: Recording) -> [String] {
-    var out = r.unreadable
+func describe(_ ref: ItemRef, _ e: Edits, map: TimeMap, short: Bool = false) -> String {
+    switch ref.kind {
+    case "move":
+        let t = e.moves.first { $0.id == ref.id }.map { " at \(stamp($0.t))" } ?? ""
+        return "move \(ref.id)" + (short ? "" : t)
+    case "sound":
+        guard !short, let s = e.sounds.first(where: { $0.id == ref.id }) else { return "sound \(ref.id)" }
+        return "sound \(s.id) (\(stamp(s.start)), \(s.length)s of \(s.file))"
+    case "image-move", "image-effect":
+        let image = e.segments.first { $0.id == ref.image }
+        let child = ref.kind == "image-move" ? "its move \(ref.id)" : "its \(image?.effects?.first { $0.id == ref.id }?.kind ?? "") effect \(ref.id)"
+        guard !short, let image else { return child }
+        return "\(image.kind) \(image.id) (\(stamp(image.start))–\(stamp(image.end))): \(child)"
+    default:
+        guard !short, let s = e.segments.first(where: { $0.id == ref.id }) else { return "\(ref.kind) \(ref.id)" }
+        return "\(s.kind) \(s.id) (\(stamp(s.start))–\(stamp(s.end)))"
+    }
+}
+
+// @ref LLP 0005#refusals — the same two lines as the app, with the rule's id and the items' ids
+func report(_ c: Conflict, _ e: Edits, map: TimeMap) -> String {
+    let with = c.other.map { ", with \(describe($0, e, map: map, short: true))" } ?? ""
+    return "\(c.item.map { describe($0, e, map: map) } ?? "edit")\(with): \(c.rule): \(c.line1)\n  \(c.line2)"
+}
+
+struct Problem { var text: String; var key: String? }
+
+func problems(_ r: Recording) -> [String] { findings(r).map(\.text) }
+
+/// Problems with a recording's edits, each a line (a broken rule, two); empty when it is fine.
+func findings(_ r: Recording) -> [Problem] {
+    var out = r.unreadable.map { Problem(text: $0, key: nil) }
+    func say(_ text: String) { out.append(Problem(text: text, key: nil)) }
     let folder = r.folder
     let d = r.meta.duration, e = r.edits
+    let map = TimeMap(duration: d, edits: e)
+    let broken = e.conflicts(map: map)
+    func rules(_ ref: ItemRef) {
+        for c in broken where c.item == ref || ((ref.kind == "image" || ref.kind == "text") && c.item?.image == ref.id) { out.append(Problem(text: report(c, e, map: map), key: c.key)) }
+    }
     // Opening a file raises each lane count to fit, so the counts are checked as the file declares them.
     // A missing count is derived, as is `lanes` in an old file without `textLanes`: its lanes are renumbered.
     let raw = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("edits.json")))) as? [String: Any]) ?? [:]
     func count(_ key: String, _ fitted: Int) -> Int { key == "lanes" && raw["textLanes"] == nil ? fitted : (raw[key] as? Int) ?? fitted }
     for s in e.segments {
         let at = "\(s.kind) \(s.id) (\(stamp(s.start))–\(stamp(s.end)))"
-        if !Segment.kinds.contains(s.kind) { out.append("\(at): unknown kind; one of \(Segment.kinds.joined(separator: ", "))") }
-        if s.end - s.start < 0.1 { out.append("\(at): shorter than 0.1 s, or ends before it starts") }
-        if s.start < 0 || s.end > d + 0.01 { out.append("\(at): outside the recording, 0:00–\(stamp(d))") }
+        if !Segment.kinds.contains(s.kind) { say("\(at): unknown kind; one of \(Segment.kinds.joined(separator: ", "))") }
+        if s.end - s.start < 0.1 { say(report(Rules.minLength(.of(s), duration: d), e, map: map)) }
+        if s.start < 0 || s.end > d + 0.01 { say("\(at): outside the recording, 0:00–\(stamp(d))") }
         if case let key = ["lanes", "textLanes", "imageLanes", "frameLanes"][s.space], s.lane < 0 || s.lane >= count(key, e.laneCount(space: s.space)) {
-            out.append("\(at): lane \(s.lane), but \(key) is \(count(key, e.laneCount(space: s.space)))")
+            say("\(at): lane \(s.lane), but \(key) is \(count(key, e.laneCount(space: s.space)))")
         }
-        if s.id.contains(":") { out.append("\(at): an id can't contain a colon") }
-        if e.segments.filter({ $0.id == s.id }).count > 1 { out.append("\(at): another segment has the same id") }
-        if let why = e.conflict(s) { out.append("\(at): \(why)") }
-        if s.kind == "zoom", (s.level ?? 0) <= 0 { out.append("\(at): a zoom needs a level above 0 (below 1 zooms out)") }
-        if s.kind == "speed", (s.rate ?? 0) <= 0 { out.append("\(at): a speed change needs a rate above 0") }
-        if s.kind == "text", (s.text ?? "").isEmpty { out.append("\(at): a text needs its words") }
+        if s.id.contains(":") { say("\(at): an id can't contain a colon") }
+        if e.segments.filter({ $0.id == s.id }).count > 1 { say("\(at): another segment has the same id") }
+        rules(.of(s))
+        if s.kind == "zoom", (s.level ?? 0) <= 0 { say("\(at): a zoom needs a level above 0 (below 1 zooms out)") }
+        if s.kind == "speed", (s.rate ?? 0) <= 0 { say("\(at): a speed change needs a rate above 0") }
+        if s.kind == "text", (s.text ?? "").isEmpty { say("\(at): a text needs its words") }
         // @ref LLP 0003#templates
-        if s.isPlaceholder { out.append("\(at): unfilled “\(s.text ?? "")”; write the line or delete the text") }
+        if s.isPlaceholder { say("\(at): unfilled “\(s.text ?? "")”; write the line or delete the text") }
         if s.kind == "image" {
-            if (s.file ?? "").isEmpty { out.append("\(at): an image needs its file, a path inside the recording's folder") }
-            else if Pictures.image(s.file, in: folder) == nil { out.append("\(at): \(s.file!) is not a picture in \(folder.lastPathComponent)/ (\(Pictures.types.joined(separator: ", ")))") }
-            if (s.size ?? 0.25) <= 0 { out.append("\(at): an image's size must be above 0") }
+            if (s.file ?? "").isEmpty { say("\(at): an image needs its file, a path inside the recording's folder") }
+            else if Pictures.image(s.file, in: folder) == nil { say("\(at): \(s.file!) is not a picture in \(folder.lastPathComponent)/ (\(Pictures.types.joined(separator: ", ")))") }
+            if (s.size ?? 0.25) <= 0 { say("\(at): an image's size must be above 0") }
         } else if s.kind == "text", s.moves != nil {
-            out.append("\(at): only an image has moves of its own")
+            say("\(at): only an image has moves of its own")
         } else if !s.isOverlay, s.moves != nil || s.effects != nil {
-            out.append("\(at): only an image has moves and effects of its own")
+            say("\(at): only an image has moves and effects of its own")
         }
         if s.isOverlay {
-            for fx in s.effects ?? [] where fx.end - fx.start < 0.1 { out.append("\(at): its \(fx.kind) effect \(fx.id) is shorter than 0.1 s, or ends before it starts") }
-            for m in s.moves ?? [] where m.to.scale <= 0 { out.append("\(at): its move \(m.id) needs a scale above 0 (1 keeps the image's size)") }
+            for fx in s.effects ?? [] where fx.end - fx.start < 0.1 { say("\(at): its \(fx.kind) effect \(fx.id) is shorter than 0.1 s, or ends before it starts") }
+            for m in s.moves ?? [] where m.to.scale <= 0 { say("\(at): its move \(m.id) needs a scale above 0 (1 keeps the image's size)") }
             let ids = (s.effects ?? []).map(\.id) + (s.moves ?? []).map(\.id)
-            if Set(ids).count != ids.count { out.append("\(at): two of its moves or effects share an id") }
+            if Set(ids).count != ids.count { say("\(at): two of its moves or effects share an id") }
         }
         // @ref LLP 0002#where-an-effect-applies
         if let scope = s.scope {
-            if s.kind != "blur" && s.kind != "mono" { out.append("\(at): only a blur or a black and white (mono) has a scope") }
-            else if !Segment.scopes.contains(scope) { out.append("\(at): no scope \(scope); one of \(Segment.scopes.joined(separator: ", "))") }
+            if s.kind != "blur" && s.kind != "mono" { say("\(at): only a blur or a black and white (mono) has a scope") }
+            else if !Segment.scopes.contains(scope) { say("\(at): no scope \(scope); one of \(Segment.scopes.joined(separator: ", "))") }
         }
         // @ref LLP 0002#depth
         if let layer = s.layer {
@@ -238,39 +276,42 @@ func problems(_ r: Recording) -> [String] {
         }
         if s.order != nil, !s.isOverlay { out.append("\(at): only a text or an image has an order") }
         if s.kind == "mask" {
-            out += maskProblems(s).map { "\(at): \($0)" }
+            maskProblems(s).forEach { say("\(at): \($0)") }
         } else if s.rect != nil {
-            out.append("\(at): only a mask has a rect")
+            say("\(at): only a mask has a rect")
         }
     }
-    let map = TimeMap(duration: d, edits: e)
     for s in e.sounds {
         let at = "sound \(s.id) (\(stamp(s.start)), \(s.length)s of \(s.file))"
-        if s.id.isEmpty || s.id.contains(":") { out.append("\(at): an id must be non-empty and can't contain a colon") }
-        if e.sounds.filter({ $0.id == s.id }).count > 1 { out.append("\(at): another sound has the same id") }
+        if s.id.isEmpty || s.id.contains(":") { say("\(at): an id must be non-empty and can't contain a colon") }
+        if e.sounds.filter({ $0.id == s.id }).count > 1 { say("\(at): another sound has the same id") }
         if let whole = Sounds.length(s.file, in: folder) {
-            if s.offset + s.length > whole + 0.01 { out.append("\(at): offset + length is \(s.offset + s.length)s, but the file holds \(String(format: "%.3f", whole))s") }
+            if s.offset + s.length > whole + 0.01 { say("\(at): offset + length is \(s.offset + s.length)s, but the file holds \(String(format: "%.3f", whole))s") }
         } else {
-            out.append("\(at): \(s.file) is not a readable sound file in \(folder.lastPathComponent)/ (\(Sounds.types.joined(separator: ", ")))")
+            say("\(at): \(s.file) is not a readable sound file in \(folder.lastPathComponent)/ (\(Sounds.types.joined(separator: ", ")))")
         }
-        if s.length <= 0 { out.append("\(at): length must be above 0") }
-        if s.offset < 0 { out.append("\(at): offset can't be below 0") }
-        if s.start < 0 || s.start >= d { out.append("\(at): starts outside the recording, 0:00–\(stamp(d))") }
-        if s.lane < 0 || s.lane >= count("soundLanes", e.soundLanes) { out.append("\(at): lane \(s.lane), but soundLanes is \(count("soundLanes", e.soundLanes))") }
-        if !(0...1).contains(s.volume) { out.append("\(at): volume must be 0–1") }
-        if s.fadeIn < 0 || s.fadeOut < 0 { out.append("\(at): fades can't be below 0") }
-        if let why = e.conflict(s, map: map) { out.append("\(at): \(why)") }
+        if s.length <= 0 { say("\(at): length must be above 0") }
+        if s.offset < 0 { say("\(at): offset can't be below 0") }
+        if s.start < 0 || s.start >= d { say("\(at): starts outside the recording, 0:00–\(stamp(d))") }
+        if s.lane < 0 || s.lane >= count("soundLanes", e.soundLanes) { say("\(at): lane \(s.lane), but soundLanes is \(count("soundLanes", e.soundLanes))") }
+        if !(0...1).contains(s.volume) { say("\(at): volume must be 0–1") }
+        if s.fadeIn < 0 || s.fadeOut < 0 { say("\(at): fades can't be below 0") }
+        rules(.sound(s))
     }
-    for m in e.moves where m.t < 0 || m.t > d + 0.01 { out.append("move \(m.id) at \(stamp(m.t)): outside the recording") }
-    for s in e.splits where s <= 0 || s >= d { out.append("split at \(stamp(s)): outside the recording") }
-    for r in e.removed where !([0] + e.splits).contains(where: { Edits.same($0, r) }) { out.append("removed \(stamp(r)): not the start of a clip part (0 or a split)") }
+    for m in e.moves.sorted(by: { $0.t < $1.t }) {
+        if m.t < 0 || m.t > d + 0.01 { say("move \(m.id) at \(stamp(m.t)): outside the recording") }
+        rules(.move(m))
+    }
+    for s in e.splits where s <= 0 || s >= d { say("split at \(stamp(s)): outside the recording") }
+    for r in e.removed where !([0] + e.splits).contains(where: { Edits.same($0, r) }) { say("removed \(stamp(r)): not the start of a clip part (0 or a split)") }
     let ends = e.pieces(d).map { Edits.key($0.end) }
-    for k in e.transitions.keys where !ends.contains(k) { out.append("transition at \(k) ms: not the end of a clip part") }
-    if e.pieces(d).allSatisfy(\.removed) { out.append("every clip part is removed") }
+    for k in e.transitions.keys where !ends.contains(k) { say("transition at \(k) ms: not the end of a clip part") }
+    if e.pieces(d).allSatisfy(\.removed) { say(report(Rules.keepAPart, e, map: map)) }
     // @ref LLP 0002#split
-    out += e.looseJoins(map: map)
+    e.looseJoins(map: map).forEach(say)
     return out
 }
+
 
 
 // MARK: Recording, through the app
@@ -438,9 +479,19 @@ case "show":
     }
 
 case "validate":
+    let since = option("--since")
     guard let ref = args.first else { fail(usage) }
-    let found = problems(open(ref, readable: false))
-    if found.isEmpty { print("ok") } else { found.forEach { print($0) }; exit(1) }
+    let r = open(ref, readable: false)
+    // @ref LLP 0005#refusals — a rule the file broke before this change is reported, never refused
+    var before = Set<String>()
+    if let since, let old = try? decode(Edits.self, URL(fileURLWithPath: since)) {
+        before = Set(old.conflicts(map: TimeMap(duration: r.meta.duration, edits: old)).map(\.key))
+    }
+    let found = findings(r)
+    let standing = found.filter { $0.key.map(before.contains) ?? false }, fresh = found.filter { !($0.key.map(before.contains) ?? false) }
+    if fresh.isEmpty { print("ok") } else { fresh.forEach { print($0.text) } }
+    standing.forEach { print("note: before this change: \($0.text)") }
+    if !fresh.isEmpty { exit(1) }
 
 case "frame":
     guard args.count >= 2, let at = Double(args[1]) else { fail(usage) }

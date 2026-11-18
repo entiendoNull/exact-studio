@@ -58,10 +58,35 @@ an image's effect only that image, and a whole-frame effect everything. Nobody h
 ## What may overlap
 
 - Two segments on one lane never overlap.
-- Never two zooms, two speeds, two 3D turns, or two of the same visual effect with the same
-  reach at one time, even on separate lanes. Texts, images and masks on separate lanes overlap freely.
+- Never two zooms, two speeds, two 3D turns, or two of the same visual effect at one time, even on
+  separate lanes. Texts, images and masks on separate lanes overlap freely.
 - On one image or one text: never two of the same effect at one time, and its moves and effects
   stay inside its span.
+
+Decided by Jacob on 2026-11-18, with the rules table (docs/edits.md, "What may overlap: the rules"):
+
+- **Every rule has an id and two lines.** Line 1 names the rule in five words or fewer; line 2 names
+  the other item or time and one way out. `Edits.conflicts` returns them as a value (`Conflict`:
+  rule, item, other, line 1, line 2), so the app, `validate` and MCP say the same words (LLP 0005).
+  The value names items, not lanes or rows, so later lane and row changes keep it.
+- **P1, `move-after-move`.** A move starts travelling only after the move before it lands, for the
+  video and for each image. Why: `Framing.movedPose` let a later move that started early jump to its
+  own progress the moment the earlier one landed.
+- **P2, `one-blur` and `one-mono`.** One blur at a time and one black and white at a time, whatever
+  each covers. Why: a video blur under a whole-frame blur blurred the video twice. The clash group
+  no longer counts `scope`; the lanes still do.
+- **P4, `no-zoom-in-orbit`.** No zoom during a 3D orbit. Why: half way the screen faces away, and a
+  zoom follows the cursor on a screen that is not there.
+- **A taken lane is not a refusal in the app.** A drop or a change that lands an item on a taken lane
+  puts it on the first free lane of its kind, or a new one. In a file, `validate` still reports
+  `lane-taken`.
+- **Old files are never lost.** A file that breaks a rule (one written before P1, P2 or P4) opens,
+  plays and exports as before. `validate` reports it and the app marks the items; only a change that
+  breaks a rule anew is refused. A break is new when its pair (rule, item, other) was not broken
+  before the change. So a file with a video blur under a whole-frame blur keeps both, either may
+  still be moved or changed, and a third blur over them is refused.
+- Taste (a spotlight with a zoom, zooms back to back) stays advice in docs/effects.md and the
+  directing skill; the app never refuses it.
 
 ## Where an effect applies
 

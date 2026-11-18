@@ -26,7 +26,8 @@ final class Editor {
     /// The selected segment, clip part ("p:…") or move ("m:…"); empty for none.
     private(set) var selected = ""
     /// Why the last edit was refused; cleared by the next one that lands.
-    private(set) var problem = ""
+    private(set) var refusal: Conflict?
+    var problem: String { refusal?.text ?? "" }
     // @ref LLP 0004#a-file-that-cannot-be-read
     private(set) var unreadable: [String: String] = [:]
     private var listeners: [ObjectIdentifier: () -> Void] = [:]
@@ -125,7 +126,7 @@ final class Editor {
             timing = true
         }
         guard timing || drawn else { return }
-        problem = ""
+        refusal = nil
         record(named: "Edit from File")
         timing ? rebuild(keepTime: true) : refresh()
         notify()
@@ -208,6 +209,7 @@ final class Editor {
     var playhead: Double { map.source(player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0) }
 
     func seek(source t: Double) {
+        guard !probing else { return }
         let out = map.output(min(max(t, 0), duration))
         player.seek(to: CMTime(seconds: out, preferredTimescale: 6000), toleranceBefore: .zero, toleranceAfter: .zero)
         settled?.cancel()
@@ -232,6 +234,7 @@ final class Editor {
     /// Play source seconds `from`–`to` once, then go back to where the playhead was:
     /// so a chosen animation is seen without pressing play. Not while already playing.
     func sample(_ from: Double, _ to: Double) {
+        guard !probing else { return }
         guard !isPlaying || sampleReturn != nil else { return }
         let back = sampleReturn ?? playhead
         endSample(returning: false)
@@ -439,6 +442,7 @@ final class Editor {
     private func restore(_ s: Snapshot) {
         endSample(returning: false)
         dragOrigin = nil
+        dragCheck = nil
         let now = snapshot
         let retime = Editor.timing(s.edits) != Editor.timing(edits) || !s.sameMeta(now)
         let lookChanged = s.look != look
@@ -453,7 +457,7 @@ final class Editor {
         if lookChanged { saveLook() }
         if !s.sameMeta(now) { try? Library.save(meta) }
         save()
-        problem = ""
+        refusal = nil
         dropGoneSelection()
         retime ? rebuild(keepTime: true) : refresh()
     }
@@ -469,20 +473,19 @@ final class Editor {
             + "|\(e.sounds.map { "\($0.file),\($0.start),\($0.length),\($0.offset)" })"
     }
 
-    /// Land `next` if every segment in it may sit where it is; else keep the
-    /// edits as they were and say why.
+    /// Land `next` unless it breaks a rule the edit did not break before; else keep the
+    /// edits as they were and say why. A file that broke a rule when it was opened still opens and saves.
+    // @ref LLP 0005#refusals — refuse only what a change breaks; never lose an edit
     @discardableResult
-    private func apply(_ proposed: Edits) -> Bool {
+    func apply(_ proposed: Edits) -> Bool {
         if let why = unreadable["edits.json"] { refuse(why); return false }
-        var next = proposed
-        let nextMap = TimeMap(duration: duration, edits: next)
-        // @ref LLP 0002#split — a half moved or resized away from the other is no longer joined
-        next.dropLooseJoins(map: nextMap)
-        if let why = next.segments.lazy.compactMap({ next.conflict($0) }).first ?? next.sounds.lazy.compactMap({ next.conflict($0, map: nextMap) }).first {
-            refuse(why)
+        let next = settle(proposed)
+        if let c = Editor.newConflict(next, since: baseline, duration: duration) {
+            refuse(c)
             return false
         }
-        problem = ""
+        if probing { return false }
+        refusal = nil
         guard next != edits else { save(); notify(); return true }
         let retime = Editor.timing(next) != Editor.timing(edits)
         edits = next
@@ -492,15 +495,117 @@ final class Editor {
         return true
     }
 
-    private func refuse(_ why: String) {
-        problem = why
+    private var baseline: Edits { dragOrigin ?? committed?.edits ?? edits }
+
+    // @ref LLP 0002#what-may-overlap — a taken lane is never a refusal in the app
+    private func settle(_ proposed: Edits) -> Edits {
+        var next = proposed
+        // @ref LLP 0002#split — a half moved or resized away from the other is no longer joined
+        next.dropLooseJoins(map: TimeMap(duration: duration, edits: next))
+        let changed = Editor.changed(baseline, next)
+        for _ in 0..<4 {
+            let map = TimeMap(duration: duration, edits: next)
+            let old = Set(baseline.conflicts(map: TimeMap(duration: duration, edits: baseline)).map(\.key))
+            guard let c = next.conflicts(map: map).first(where: { $0.rule == "lane-taken" && !old.contains($0.key) }),
+                  let mover = [c.item, c.other].compactMap({ $0 }).first(where: changed.contains) else { break }
+            Editor.relane(&next, mover, map: map)
+        }
+        next.fitLanes()
+        return next
+    }
+
+    private static func relane(_ e: inout Edits, _ ref: ItemRef, map: TimeMap) {
+        switch ref.kind {
+        case "sound":
+            guard let i = e.sounds.firstIndex(where: { $0.id == ref.id }) else { return }
+            var probe = e.sounds[i]
+            probe.lane = 0
+            while e.conflict(probe, map: map) != nil { probe.lane += 1 }
+            e.sounds[i].lane = probe.lane
+        case "image-effect":
+            guard let i = e.segments.firstIndex(where: { $0.id == ref.image }), var fx = e.segments[i].effects, let j = fx.firstIndex(where: { $0.id == ref.id }) else { return }
+            var row = 0
+            while fx.contains(where: { $0.id != ref.id && $0.lane == row && $0.overlaps(fx[j]) && $0.kind != fx[j].kind }) { row += 1 }
+            fx[j].lane = row
+            e.segments[i].effects = fx
+        case "move", "image-move": return
+        default:
+            guard let i = e.segments.firstIndex(where: { $0.id == ref.id }) else { return }
+            e.segments[i].lane = e.freeLane(for: e.segments[i])
+        }
+    }
+
+    static func changed(_ a: Edits, _ b: Edits) -> Set<ItemRef> {
+        var out = Set<ItemRef>()
+        for s in b.segments where a.segments.first(where: { $0.id == s.id }) != s {
+            out.insert(.of(s))
+            let was = a.segments.first { $0.id == s.id }
+            for fx in s.effects ?? [] where was?.effects?.first(where: { $0.id == fx.id }) != fx { out.insert(.effect(fx, image: s.id)) }
+            for m in s.moves ?? [] where was?.moves?.first(where: { $0.id == m.id }) != m { out.insert(.move(m, image: s.id)) }
+        }
+        for m in b.moves where a.moves.first(where: { $0.id == m.id }) != m { out.insert(.move(m)) }
+        for s in b.sounds where a.sounds.first(where: { $0.id == s.id }) != s { out.insert(.sound(s)) }
+        return out
+    }
+
+    static func newConflict(_ next: Edits, since before: Edits, duration: Double) -> Conflict? {
+        let map = TimeMap(duration: duration, edits: next)
+        let old = Set(before.conflicts(map: TimeMap(duration: duration, edits: before)).map(\.key))
+        let fresh = next.conflicts(map: map).filter { !old.contains($0.key) }
+        guard let first = fresh.first else { return nil }
+        let changed = changed(before, next)
+        for ref in changed.sorted(by: { $0.key < $1.key }) {
+            if let c = next.conflicts(of: ref, map: map).first(where: { c in fresh.contains { $0.key == c.key } }) { return c }
+        }
+        return first
+    }
+
+    var standing: [Conflict] {
+        let shown = dragOrigin ?? edits
+        if let cached = standingCache, cached.edits == shown { return cached.conflicts }
+        let found = shown.conflicts(map: map)
+        standingCache = (shown, found)
+        return found
+    }
+    private var standingCache: (edits: Edits, conflicts: [Conflict])?
+
+    private var standingProblem: String {
+        let ref: ItemRef? = selectedSegment.map(ItemRef.of) ?? selectedSound.map(ItemRef.sound) ?? selectedMove.map { ItemRef.move($0) }
+            ?? selectedImageMove.map { ItemRef.move($0.move, image: $0.image.id) } ?? selectedItemEffect.map { ItemRef.effect($0.effect, image: $0.item.id) }
+        guard let ref, let c = standing.first(where: { $0.involves(ref) }) else { return "" }
+        return c.text
+    }
+
+    private func refuse(_ why: String) { refuse(.plain(why)) }
+
+    private func refuse(_ c: Conflict) {
+        if probing { probed = probed ?? c; return }
+        refusal = c
         notify()
     }
 
+    // MARK: Asking first
+
+    private var probing = false
+    private var probed: Conflict?
+
+    // @ref LLP 0005#refusals — a menu item that would be refused is off, with its reason
+    func probe(_ body: () -> Void) -> Conflict? {
+        let was = (edits, selected, refusal, wantLane)
+        probing = true
+        probed = nil
+        body()
+        probing = false
+        (edits, selected, refusal, wantLane) = was
+        return probed
+    }
+
     func select(_ id: String) {
+        if probing { selected = id; return }
         guard selected != id else { return }
         selected = id
-        problem = ""
+        typed = nil
+        refusal = nil
         if let item = selectedItem {
             open(item)
             recentImages.removeAll { $0 == item.id }
@@ -535,7 +640,9 @@ final class Editor {
         guard let p = selectedPiece else { return }
         var next = edits
         if p.removed { next.removed.removeAll { Edits.same($0, p.start) } } else { next.removed.append(p.start) }
-        if !p.removed && next.pieces(duration).allSatisfy(\.removed) { return refuse("Keep at least one part of the clip.") }
+        if !p.removed && next.pieces(duration).allSatisfy(\.removed) {
+            return refuse(Rules.keepAPart)
+        }
         apply(next)
     }
 
@@ -596,8 +703,9 @@ final class Editor {
             // Same-group segments bound it: it fills the room between them, up to its length.
             let before = edits.segments.filter { $0.group == s.group && $0.end <= t + 0.0001 }.map(\.end).max() ?? 0
             let after = edits.segments.filter { $0.group == s.group && $0.start >= t - 0.0001 }.map(\.start).min() ?? duration
-            if edits.segments.contains(where: { $0.group == s.group && $0.start < t && $0.end > t }) || after - max(before, t) < 0.3 {
-                return refuse("There’s already \(Segment.article(s.kind)) at the playhead. Move the playhead to a free spot.")
+            if let o = edits.segments.first(where: { $0.group == s.group && $0.start < t && $0.end > t })
+                ?? (after - max(before, t) < 0.3 ? edits.segments.filter({ $0.group == s.group && $0.start >= t - 0.0001 }).min(by: { $0.start < $1.start }) : nil) {
+                return refuse(Rules.noRoom(s.kind, at: t, o))
             }
             s.start = max(before, t)
             s.end = min(after, s.start + length)
@@ -681,6 +789,7 @@ final class Editor {
 
     /// The group a selection or a new segment shows in opens, so it is never out of sight.
     private func reveal(space: Int) {
+        guard !probing else { return }
         let group = space == 0 ? "video" : space == 3 ? "frame" : space == Edits.soundSpace ? "sound" : "top"
         if folded.contains(group) { toggle(group: group) }
     }
@@ -945,11 +1054,13 @@ final class Editor {
             }
             return next
         }
+        check(ItemRef(kind: "image-effect", id: id, image: image))
         redraw()
     }
 
     /// Slide an image's move in time. `live` draws it without saving.
     func dragImageMove(_ image: String, _ id: String, to t: Double, live: Bool) {
+        if live, dragOrigin == nil { dragOrigin = edits }
         var next = edits
         next.segments = next.segments.map { img in
             guard img.id == image else { return img }
@@ -957,7 +1068,11 @@ final class Editor {
             m.moves = img.moves?.map { var mv = $0; if mv.id == id { mv.t = min(max(t, img.start), img.end) }; return mv }
             return m
         }
-        if live { edits = next; redraw() } else { apply(next) }
+        if live {
+            edits = next
+            check(ItemRef(kind: "image-move", id: id, image: image))
+            redraw()
+        } else { finish(next) }
     }
 
     // MARK: Sounds
@@ -1041,6 +1156,7 @@ final class Editor {
             m.lane = max(0, lane)
             return m
         }
+        check(ItemRef(kind: "sound", id: id))
         redrawViews()
     }
 
@@ -1204,9 +1320,23 @@ final class Editor {
 
     static func stamp(_ s: Double) -> String { (s < 0 ? "-" : "") + String(format: "%d:%05.2f", Int(abs(s)) / 60, abs(s).truncatingRemainder(dividingBy: 60)) }
 
+    private(set) var typed: (field: String, conflict: Conflict)?
+
+    // @ref LLP 0005#refusals — a typed time that clashes says why under its field before Return
+    func checkTime(_ field: String, _ t: Double?) {
+        let was = typed?.conflict
+        if let t, field == "start" || field == "end" {
+            typed = probe { field == "start" ? setTimes(start: t, end: nil) : setTimes(start: nil, end: t) }.map { (field, $0) }
+        } else {
+            typed = nil
+        }
+        if typed?.conflict != was { notify() }
+    }
+
     /// Typed times for the selection: an effect's span, a clip part's edges
     /// (which move the splits beside it), or a move's arrival.
     func setTimes(start: Double?, end: Double?) {
+        if !probing { typed = nil }
         if var s = selectedSound {
             // Start moves it; End sets how long it plays, up to the end of its file.
             if let a = start {
@@ -1235,7 +1365,9 @@ final class Editor {
             dragImageMove(image.id, move.id, to: a, live: false)
         } else if var s = selectedSegment {
             let a = start ?? s.start, b = end ?? s.end
-            guard a >= 0, b <= duration + 0.001, b - a >= 0.1 else { return refuse("Start must come at least 0.1 s before end, inside 0:00–\(Editor.stamp(duration)).") }
+            guard a >= 0, b <= duration + 0.001, b - a >= 0.1 else {
+                return refuse(Rules.minLength(.of(s), duration: duration))
+            }
             s.start = a; s.end = min(b, duration)
             replace(s.isOverlay ? Editor.tidy(s) : s)
         } else if var m = selectedMove {
@@ -1508,8 +1640,7 @@ final class Editor {
         } else if !next.moves.isEmpty && !live {
             let m = Move(id: Editor.newID("m"), t: playhead, to: to, style: lastStyle, duration: lastDuration)
             next.moves.append(m)
-            edits = next
-            save(); redraw(); select("m:" + m.id)
+            if apply(next) { select("m:" + m.id) } else { redraw() }
             return
         } else if next.moves.isEmpty {
             next.base = to
@@ -1668,14 +1799,20 @@ final class Editor {
     }
 
     func moveTime(_ id: String, to t: Double, live: Bool) {
+        if live, dragOrigin == nil { dragOrigin = edits }
         var next = edits
         next.moves = next.moves.map { $0.id == id ? Move(id: $0.id, t: min(max(t, 0), duration), to: $0.to, style: $0.style, duration: $0.duration, angles: $0.angles) : $0 }
-        if live { edits = next; redraw() } else { apply(next) }
+        if live {
+            edits = next
+            check(ItemRef(kind: "move", id: id))
+            redraw()
+        } else { finish(next) }
     }
 
     // MARK: Dragging (the timeline's)
 
     private var dragOrigin: Edits?
+    var dragFrom: Edits? { dragOrigin }
 
     /// Move or resize a segment while dragging: drawn at once, checked on drop.
     /// `lane` may be one past the last: the drop opens a new lane there.
@@ -1697,23 +1834,61 @@ final class Editor {
             m.start = s; m.end = e
             return m
         }
+        check(ItemRef(kind: edits.segments.first { $0.id == id }?.kind ?? "", id: id))
         // An image's children move in the picture too; the rest only in the timeline.
         selectedSegment?.isOverlay == true ? redraw() : redrawViews()
     }
 
-    /// The drop: keep the move if it fits, else put the segment back.
-    func endDrag() {
-        guard let origin = dragOrigin else { return }
-        dragOrigin = nil
+    struct DragCheck: Equatable {
+        var item: ItemRef
+        var conflict: Conflict?
+        var landing: Int?
+    }
+    private(set) var dragCheck: DragCheck?
+
+    private func dropped() -> Edits {
         var moved = edits
+        guard let origin = dragOrigin else { return moved }
         moved.segments = moved.segments.map { $0.isOverlay ? Editor.tidy($0) : $0 }
         moved.lanes = origin.lanes; moved.textLanes = origin.textLanes; moved.imageLanes = origin.imageLanes
         moved.frameLanes = origin.frameLanes; moved.soundLanes = origin.soundLanes
         moved.fitLanes()
-        edits = origin
-        if !apply(moved) { return redrawViews() }
+        return moved
+    }
+
+    // @ref LLP 0005#refusals — the check runs on every drag step, not only on the drop
+    private func check(_ ref: ItemRef) {
+        let next = settle(dropped())
+        let conflict = Editor.newConflict(next, since: baseline, duration: duration)
+        func lane(_ e: Edits) -> Int? {
+            switch ref.kind {
+            case "sound": return e.sounds.first { $0.id == ref.id }?.lane
+            case "image-effect": return e.segments.first { $0.id == ref.image }?.effects?.first { $0.id == ref.id }?.lane
+            case "move", "image-move": return nil
+            default: return e.segments.first { $0.id == ref.id }?.lane
+            }
+        }
+        let landing = conflict == nil && lane(next) != lane(edits) ? lane(next) : nil
+        dragCheck = DragCheck(item: ref, conflict: conflict, landing: landing)
+    }
+
+    /// The drop: keep the move if it fits (on the first free lane when its own is taken), else put it back.
+    @discardableResult
+    func endDrag() -> Bool {
+        guard dragOrigin != nil else { return true }
+        return finish(dropped())
+    }
+
+    @discardableResult
+    private func finish(_ next: Edits) -> Bool {
+        let origin = dragOrigin
+        dragOrigin = nil
+        dragCheck = nil
+        if let origin { edits = origin }
+        guard apply(next) else { redraw(); return false }
         // An image dropped on another lane opens that lane, as selecting it does.
         if let item = selectedItem, !isOpen(space: item.space, lane: item.lane) { open(item); redrawViews() }
+        return true
     }
 
     // MARK: Finding a device
@@ -1770,7 +1945,8 @@ final class Editor {
         var out: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "",
                                   "removed": false, "first": false, "last": false, "transition": "cut", "text": "", "size": 0,
                                   "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "", "rotation": 0,
-                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": blocked ?? problem,
+                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": blocked ?? (problem.isEmpty ? standingProblem : problem),
+                                  "startWhy": typed?.field == "start" ? typed!.conflict.text : "", "endWhy": typed?.field == "end" ? typed!.conflict.text : "",
                                   "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "",
                                   "volume": 100, "fadeIn": 0, "fadeOut": 0,
                                   "layer": "", "canForward": false, "canBackward": false, "canFront": false, "canBack": false]

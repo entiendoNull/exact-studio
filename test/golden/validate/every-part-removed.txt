@@ -1,1 +1,2 @@
-every clip part is removed
+edit: keep-a-part: Keep one clip part.
+  The video needs at least one kept part.

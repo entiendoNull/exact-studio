@@ -34,7 +34,7 @@ read an entry before you use a thing for the first time.
 # …edit edits.json / look.json…
 ./exact-studio split latest 4.2 t1                    # cut text t1 at 4.2 s into two joined halves
 ./exact-studio split latest 4.2 --all                 # Split All Lanes: the clip and every block at 4.2 s
-./exact-studio validate latest           # exit 1 with one line per problem
+./exact-studio validate latest           # exit 1 with one line per problem; a broken rule: its id and two lines
 ./exact-studio frame latest 4.5          # .exact/frame.png: the frame at 4.5 s of the video
 ./exact-studio export latest             # ~/Movies/Exact Studio/<name> <id>.mp4
 ./exact-studio export latest --quality 720p   # best (default), 1080p, 720p or small
@@ -115,11 +115,9 @@ all required, and `lane` (0 up, default 0). A segment's kind decides which rows 
 | an effect past the video | `blur` or `mono` with `scope` `"background"`, `"scene"`, `"frame"` or `"all"` | the whole-frame lanes | `frameLanes` |
 
 An effect on the video never touches a text or an image, and an image's or a text's own effects
-(below) never touch anything else. Two segments on one lane must not overlap in time, and these never overlap
-anywhere: two `zoom`s, two `speed`s, two `3d`s, or two of the same visual effect with the same reach.
-Texts, images and masks on separate lanes overlap freely. Images are drawn over the video with the lowest
-`lane` in front, and texts over the images; a text or an image can go behind the video instead (see
-[Depth](#depth-layer-and-order)).
+(below) never touch anything else. What may overlap is in [the rules](#what-may-overlap-the-rules).
+Images are drawn over the video with the lowest `lane` in front, and texts over the images; a text or
+an image can go behind the video instead (see [Depth](#depth-layer-and-order)).
 
 A file with no `textLanes` is an old one, where texts and whole-frame effects shared the effect
 lanes: the app sorts them into lanes of their own kind when it reads it.
@@ -284,7 +282,7 @@ default; 0.5 halves it). Before its first move the image is at
 and `lane` (its row under the image, 0 up, default 0). They ease in and out over 0.3 s and touch only this
 image. Kinds: `blur`; `mono` (black and white); `fade` (to `level`, an opacity of 0–1, default 0.3);
 `pulse`, `float` and `wiggle` (a gentle motion while they last). Two effects on one `lane` must not
-overlap, nor two of the same kind on any lane.
+overlap, nor two of the same kind on any lane (`image-one-each`).
 
 **Lanes:** images that follow one another can share a lane. Images that show at the same time need
 separate lanes; the lower `lane` is in front. A lane is below `imageLanes`.
@@ -371,6 +369,54 @@ with the recorded sound.
 To trim a sound's beginning, add the same amount to `offset` and `start` (when no cut lies between)
 and take it from `length`.
 
+### What may overlap: the rules
+
+The app, `validate` and MCP's `write_edits` check the same rules and say the same two lines. Line 1
+names the rule; line 2 names the other item or time, and one way out. `validate` prints the item,
+the other item, the rule's id, then both lines:
+
+```text
+zoom z2 (0:13.00–0:16.40), with zoom z1: one-zoom: One zoom at a time.
+  Zoom in 2× runs to 0:17.6. Start it at 0:17.6 or later.
+```
+
+When `validate` names a rule, do what its second line says. Times in the lines are rounded the safe
+way: "start at" later, "end by" earlier.
+
+| id | rule | line 1 | line 2, for example |
+|---|---|---|---|
+| `one-zoom` | One zoom at a time, anywhere: zoom in and zoom out alike. | One zoom at a time. | Zoom in 2× runs to 0:17.6. Start it at 0:17.6 or later. |
+| `one-speed` | One speed change at a time. | One speed at a time. | Slow 0.5× starts at 0:09.4. End it by 0:09.4. |
+| `one-3d` | One `3d` at a time, hold or orbit. | One 3D turn at once. | 3D orbit runs to 0:05.0. Start it at 0:05.0 or later. |
+| `one-spotlight` | One spotlight at a time. | One spotlight at a time. | Spotlight runs to 0:04.0. Start it at 0:04.0 or later. |
+| `one-highlight` | One cursor highlight at a time. | One highlight at a time. | Cursor highlight runs to 0:04.0. Start it at 0:04.0 or later. |
+| `one-blur` | One `blur` at a time, whatever its `scope`. | One blur at a time. | Blur · whole frame runs to 0:35.0. Start it at 0:35.0 or later. |
+| `one-mono` | One `mono` at a time, whatever its `scope`. | One black & white at once. | Black & white runs to 0:12.0. Start it at 0:12.0 or later. |
+| `no-zoom-in-orbit` | No `zoom` during a `3d` with `style` `"orbit"`: half way the screen faces away. | No zoom during an orbit. | 3D orbit runs to 0:05.0. Start it at 0:05.0 or later. |
+| `move-after-move` | A move starts travelling (`t - duration`) only after the move before it lands: for `moves` and for each image's own. | One move at a time. | The move before lands at 0:09.0. Land this one at 0:09.8 or later. |
+| `lane-taken` | Two items on one lane never overlap; sounds by when they play in the video. | That lane is taken. | Spotlight is on this lane then. Put it on another lane. |
+| `image-one-each` | On one image, one of each effect kind at a time. | One of each per image. | Its pulse runs to 0:06.0. Start it at 0:06.0 or later. |
+| `image-inside` | An image's own effects and moves stay inside its time. | Keep it inside the image. | logo.png shows 0:30.0–0:36.0. Start and end it there. |
+| `image-effect-kind` | An image's own effect is one of its six kinds. | No such image effect. | An image takes blur, mono, fade, pulse, float or wiggle. |
+| `min-length` | Every item lasts 0.1 s or more. | Too short. | An item lasts at least 0.1 s, inside 0:00–0:42.0. |
+| `keep-a-part` | At least one clip part is kept. | Keep one clip part. | The video needs at least one kept part. |
+| `room-at-playhead` | The app only: an add needs 0.3 s free of its kind at the playhead. | (its kind's line 1) | A zoom runs here until 0:16.0. Move the playhead past it. |
+| `last-effects-lane` | The app only: one effect lane always stays. | One Effects lane stays. | It is the last one. |
+
+Texts, images and masks on separate lanes overlap freely. Taste (a spotlight with a zoom, zooms back
+to back, a key point under a blur) is advice in [effects.md](effects.md), never a rule.
+
+**In the app.** A change that would break a rule is refused, and the reason shows where it was
+tried: beside the pointer while dragging, as the second line of a menu item that is off, under a
+typed time. A drop on a taken lane is not refused: the item goes to the first free lane of its
+kind, or a new one.
+
+**A file from before.** A file that already breaks a rule, such as one written before `one-blur`
+covered both reaches (a video blur under a whole-frame blur), still opens and keeps every edit; it
+plays and exports as it always did. `validate` reports it, and the app marks the items and shows the
+reason when one is selected. Only a change that breaks a rule anew is refused: `write_edits` lists
+the old breaks as notes and saves, and `validate --since <old edits.json>` does the same.
+
 ### Placement and moves: `base`, `moves`
 
 `base` is where the video sits before any move: `x`, `y` its centre (0–1, top-left origin, default
@@ -380,7 +426,7 @@ default), `linear`, `spring`, `zoom` (through full screen), `swipe`, `fade`, `sp
 ([how each looks](effects.md#move-styles)). `to` is
 where it lands (`x`, `y`, `scale`, with the same defaults as `base`), and `angles` (`tilt`, `turn`,
 `roll` in degrees, each default 0) the 3D angle it lands at, used while `three.on`; without `angles`
-it keeps the angle it had.
+it keeps the angle it had. A move starts travelling only after the one before it lands (`move-after-move`).
 
 ### 3D: `three`
 

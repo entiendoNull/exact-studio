@@ -46,6 +46,23 @@ test "a click on a zoom selects it; the inspector sets its level and deletes it"
   expect state summary.lanes == 6
   expect state summary.moves == 1
 
+test "a typed time that clashes says why under its field; Return refuses it and the field goes back"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 275 176 mouse
+  clock data
+  expect text "segment-title" == "Zoom In"
+  type "end" "5.5"
+  clock data
+  expect text "end-why" == "One zoom at a time. Zoom out 0.7× starts at 0:05.0. End it by 0:05.0."
+  expect state sel.end == 2.5
+  type "end" key "Enter"
+  clock data
+  expect tree missing "end-why"
+  expect text "end" == "0:02.50"
+  expect state sel.end == 2.5
+  expect state sel.problem == "One zoom at a time. Zoom out 0.7× starts at 0:05.0. End it by 0:05.0."
+
 test "a click on a mask selects it and shows its style"
   tap "recording-full"
   clock settle

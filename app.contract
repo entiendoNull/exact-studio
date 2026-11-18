@@ -80,6 +80,8 @@ shape SegmentInfo
   hasAngles: bool
   scope: string
   problem: string
+  startWhy: string
+  endWhy: string
   file: string
   opacity: number
   radius: number
@@ -199,6 +201,8 @@ component ExactStudio
   state now = 0
   state listed = 0
   state typingIn = ""
+  state draftField = ""
+  state draft = ""
   state removing = ""
   state aimed = ""
   resource status = recorderStatus() as shape Status else empty()
@@ -339,6 +343,14 @@ component ExactStudio
     typingIn = sel.id
   action fieldOut
     typingIn = ""
+    if draftField != ""
+      draftField = ""
+      send edited = editClip(selected, "type-time", "", 0, "")
+  // @ref LLP 0005#refusals — a typed time that clashes says why under its field
+  action typeTime(field: string, v: string)
+    draftField = field
+    draft = v
+    send edited = editClip(selected, "type-time", field, 0, v)
   action trim(edge: string, by: number)
     send nudged = nudgeCrop(selected, edge, by)
   action add(track: string)
@@ -464,8 +476,10 @@ component ExactStudio
   action setTransition(v: string)
     send edited = editClip(selected, "transition", "", 0, v)
   action setStart(v: string)
+    draftField = ""
     send edited = editClip(selected, "start", "", 0, v)
   action setEnd(v: string)
+    draftField = ""
     send edited = editClip(selected, "end", "", 0, v)
 
   view
@@ -502,7 +516,7 @@ component ExactStudio
             scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
               if cardLeft
                 column padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box"
-                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, arrange=arrange)
+                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
               else
                 column gap=30 padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
                   if status.recording
@@ -667,14 +681,14 @@ component ExactStudio
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
                       scroll width="24rem" max-height="85%" pointer-events="auto" border-radius=16 box-shadow="0px 18px 60px #00000080" background-color="-exact-secondary-background"
                         column padding=12
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, arrange=arrange)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
                   if sel.id != "" and panelMode == "float"
                     column position="absolute" left=floatX top=floatY width="24rem" max-height=floatRoom resize=floatSized border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0
                         column padding=12 padding-top=4
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, arrange=arrange)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
@@ -685,7 +699,7 @@ component ExactStudio
                       image "symbol:alert" color="-exact-system-orange" aria-hidden=true
                       text sel.problem font="-exact-footnote" flex=1
                   if sel.id != "" and panelMode == "dock"
-                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, arrange=arrange)
+                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
                   row align-items="center" gap=8 margin-bottom=-14
                     text "Frame" font="-exact-headline" flex=1 testId="inspector-title"
                     // @ref LLP 0005#calm-by-default
@@ -953,6 +967,9 @@ component SettingsCard
     fieldIn: action
     fieldOut: action
     arrange: action
+    draftField: string
+    draft: string
+    typeTime: action
   derive reaches = ["video", "background", "scene", "frame", "all"]
   action placeReach(n: number)
     segField("scope", nth(reaches, n))
@@ -991,10 +1008,14 @@ component SettingsCard
         row gap=8
           column gap=4 flex=1 min-width=0
             text "Start" font="-exact-caption1" color="-exact-secondary-label"
-            input value=sel.startText change=setStart focus=fieldIn blur=fieldOut disabled=(sel.kind == "clip" and sel.first) aria-label="Start" font-variant-numeric="tabular-nums" testId="start"
+            input value=(draftField == "start" ? draft : sel.startText) input=typeTime("start") change=setStart focus=fieldIn blur=fieldOut disabled=(sel.kind == "clip" and sel.first) aria-label="Start" aria-invalid=(sel.startWhy != "") font-variant-numeric="tabular-nums" border-radius=6 box-shadow=(sel.startWhy != "" ? "0px 0px 0px 2px #ff7a6e" : "none") testId="start"
+            if sel.startWhy != ""
+              text sel.startWhy font="-exact-caption1" color="#ff9a90" testId="start-why"
           column gap=4 flex=1 min-width=0
             text "End" font="-exact-caption1" color="-exact-secondary-label"
-            input value=sel.endText change=setEnd focus=fieldIn blur=fieldOut disabled=(sel.kind == "clip" and sel.last) aria-label="End" font-variant-numeric="tabular-nums" testId="end"
+            input value=(draftField == "end" ? draft : sel.endText) input=typeTime("end") change=setEnd focus=fieldIn blur=fieldOut disabled=(sel.kind == "clip" and sel.last) aria-label="End" aria-invalid=(sel.endWhy != "") font-variant-numeric="tabular-nums" border-radius=6 box-shadow=(sel.endWhy != "" ? "0px 0px 0px 2px #ff7a6e" : "none") testId="end"
+            if sel.endWhy != ""
+              text sel.endWhy font="-exact-caption1" color="#ff9a90" testId="end-why"
         text "Type a time like 1.25 or 0:01.25 and press Return." font="-exact-caption1" color="-exact-tertiary-label"
       if sel.kind == "recorded"
         row align-items="center" gap=8

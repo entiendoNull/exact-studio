@@ -37,7 +37,7 @@ effect lanes. The drawn cursor is drawn over them, so it stays sharp under a blu
   averaged over about 0.35 s, so it glides.
 - **Parameters:** `level` (default 2). In: 1.5–3 (the app offers 1.5, 2, 2.5, 3). Out: 0.5–0.85.
   Near 1 it does little.
-- **Limits:** one zoom at a time anywhere. A zoom in never shows past the frame's edge, so near an
+- **Limits:** one zoom at a time anywhere (`one-zoom`), and none during a 3D orbit (`no-zoom-in-orbit`). A zoom in never shows past the frame's edge, so near an
   edge the cursor is not centred. It scales the video with its shadow, masks and 3D slab; the
   background, texts and images stay put. It follows the video's moves. Without a cursor path it
   centres the video. Above 3 the picture goes soft.
@@ -90,7 +90,8 @@ effect lanes. The drawn cursor is drawn over them, so it stays sharp under a blu
 - **Sees:** the video goes soft; the background, texts and images stay sharp.
 - **Timing:** eases in and out over 0.25 s.
 - **Parameters:** `scope` (see [Whole-frame reach](#whole-frame-reach)). The strength is fixed.
-- **Limits:** one blur with the same reach at a time. A mask is applied first, so a blur never weakens it.
+- **Limits:** one blur at a time, whatever its reach (`one-blur`): a video blur under a whole-frame blur
+  would blur the video twice. A mask is applied first, so a blur never weakens it.
 - **Use:** under a title in the first second, or to rest the eye between chapters. **Avoid:** on a key point.
 
 ### `mono`
@@ -102,7 +103,7 @@ effect lanes. The drawn cursor is drawn over them, so it stays sharp under a blu
 - **Sees:** the video fades to black and white; the background, texts and images keep their colour.
 - **Timing:** eases in and out over 0.25 s.
 - **Parameters:** `scope`, as `blur`.
-- **Limits:** one with the same reach at a time.
+- **Limits:** one at a time, whatever its reach (`one-mono`).
 - **Use:** for a "before" beat next to a colourful "after". **Avoid:** on a key point.
 
 ### `3d`
@@ -137,7 +138,8 @@ It works with 3D off (the video is a slab only during the span) and with 3D on (
 - **Timing:** the turn runs over the whole span, slow at both ends and fastest in the middle.
   `tilt` and `roll` ease in and out as in `hold`.
 - **Parameters:** `tilt`, `roll` as `hold`. `turn` is ignored: the turn is always 360°. A span of 3–5 s reads well; under 2 s it whips.
-- **Limits:** as `hold`. Half way the screen faces away: nothing on it can be read.
+- **Limits:** as `hold`. Half way the screen faces away: nothing on it can be read, so no zoom
+  during it (`no-zoom-in-orbit`: a zoom follows the cursor on a screen that is not there).
 - **Use:** at most once, in an open or a close. **Avoid:** anywhere the screen must be read.
 
 ### `mask`
@@ -176,8 +178,10 @@ All three take `radius` (0–0.5 of the box's short side) for rounded corners.
 
 `blur` and `mono` take a `scope`: a cut in the stack background, video, images, texts (back to
 front). It covers every layer under the cut. Any `scope` but `"video"` sits on the whole-frame lanes.
-Two with different reaches may overlap. To cover one image or one text alone, use its own effects
-([Image effects](#image-effects), [Text effects](#text-effects)).
+Still one blur and one black and white at a time, whatever the reach (`one-blur`, `one-mono`): two
+reaches over one moment would cover the lower layers twice. A file from before this rule may hold a
+video blur under a whole-frame one: it opens and plays as it did, and `validate` reports it. To cover
+one image or one text alone, use its own effects ([Image effects](#image-effects), [Text effects](#text-effects)).
 
 ### `video`
 
@@ -282,9 +286,9 @@ No key is a plain cut.
 ## Move styles
 
 A move lands the video (or, in an image's `moves`, the image) at `to` at `t`, travelling over the
-`duration` before it (default 0.8 s). Before the first move the video is at `base`. Moves should not
-overlap: a later move that starts before an earlier one lands jumps to its own progress when the
-earlier one lands. Each strip: `base` → x 0.3, y 0.55, scale 0.55 landing at 3 s after 1.5 s,
+`duration` before it (default 0.8 s). Before the first move the video is at `base`. A move starts
+travelling only after the one before it lands (`move-after-move`): one that started earlier jumped
+to its own progress when the earlier one landed, so the app and `validate` refuse it. Each strip: `base` → x 0.3, y 0.55, scale 0.55 landing at 3 s after 1.5 s,
 frames 1.4–3.2 s.
 
 With 3D on, a move's `angles` turn the video as it travels, eased as its style says. With 3D off
@@ -680,7 +684,7 @@ frames 2.55–2.98 s.
 ## Image effects
 
 An image's own `effects`: each touches only that image and eases in and out over 0.3 s (a motion
-grows and shrinks with that ease). Two of one kind never overlap on one image. Each strip: an
+grows and shrinks with that ease). Two of one kind never overlap on one image (`image-one-each`). Each strip: an
 effect from 2 s on the centred picture.
 
 ### `blur`
