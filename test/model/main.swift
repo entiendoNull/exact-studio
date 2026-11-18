@@ -1968,5 +1968,10 @@ test("another copy of the app is never a candidate either") {
     eq(Sources.ours(id, mine: nil), false)
 }
 
+test("new ids never repeat, even many in one millisecond") {
+    let ids = (0..<5000).map { _ in Editor.newID("t") }
+    eq(Set(ids).count, ids.count)
+}
+
 print("\(passed) passed, \(failed.count) failed")
 if !failed.isEmpty { failed.forEach { print("  failed: \($0)") }; exit(1) }

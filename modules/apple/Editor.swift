@@ -617,7 +617,11 @@ final class Editor {
         notify()
     }
 
-    static func newID(_ prefix: String) -> String { "\(prefix)\(Int(Date().timeIntervalSince1970 * 1000) % 100_000_000)\(Int.random(in: 10...99))" }
+    nonisolated(unsafe) private static var lastID = 0
+    static func newID(_ prefix: String) -> String {
+        lastID = max(lastID + 1, Int(Date().timeIntervalSince1970 * 1000) % 100_000_000 * 100 + Int.random(in: 0...9))
+        return "\(prefix)\(lastID)"
+    }
 
     var selectedSegment: Segment? { edits.segments.first { $0.id == selected } }
     var pieces: [Piece] { edits.pieces(duration) }
