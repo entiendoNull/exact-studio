@@ -271,24 +271,100 @@ test("Zoom on Clicks: clicks close together share a zoom") {
     near(z[0].start, 1.2); near(z[0].end, 5.2); near(z[1].end, 10)
 }
 
-test("every template, for every frame shape, lands without a clash inside the video") {
-    var cut = Edits()
-    cut.splits = [3, 4.5]; cut.removed = [3]
-    let map = TimeMap(duration: 10, edits: cut)
-    for name in Templates.names { for aspect in ["16:9", "9:16", "1:1", "4:3", "auto"] {
-        guard let made = Templates.make(name, duration: map.outputDuration, source: { map.source($0) }, aspect: aspect,
-                                        clicks: [Point(t: 2, x: 0.5, y: 0.5)], three: ThreeD()) else { expect(false, "\(name) \(aspect) made nothing"); continue }
-        var e = cut
-        e.pack(made.segments)
-        expect(!made.segments.isEmpty, "\(name) \(aspect) has no segments")
-        for s in e.segments {
-            if let why = e.conflict(s) { expect(false, "\(name) \(aspect): \(s.kind) \(s.id): \(why)") }
-            expect(s.start >= 0 && s.end <= 10.001 && s.end - s.start >= 0.1, "\(name) \(aspect): \(s.kind) \(s.id) at \(s.start)–\(s.end)")
-        }
-        for m in made.moves { expect(m.t >= 0 && m.t <= 10.001, "\(name) \(aspect): move at \(m.t)") }
-    } }
-    expect(Templates.make("nope", duration: 10, source: { $0 }, aspect: "16:9", clicks: [], three: ThreeD()) == nil, "an unknown template")
-    expect(Templates.make("launch", duration: 1, source: { $0 }, aspect: "16:9", clicks: [], three: ThreeD()) == nil, "a recording too short")
+func templateMeta(_ kind: String, _ w: Double, _ h: Double, duration: Double, clicks: [Double]) -> RecordingMeta {
+    RecordingMeta(id: "t", name: "t", kind: kind, created: 0, duration: duration, width: w, height: h, crop: .full,
+                  clicks: clicks.enumerated().map { Point(t: $1, x: 0.3 + 0.1 * Double($0 % 4), y: 0.5) })
+}
+
+func overlap(_ a: (Double, Double), _ b: (Double, Double)) -> Bool { a.0 < b.1 - 0.001 && b.0 < a.1 - 0.001 }
+
+test("every template, on every frame shape, length, click pattern and cut, is clean, readable and calm") {
+    let shapes = [("simulator", 814.0, 1770.0), ("display", 1920.0, 1080.0), ("display", 1322.0, 534.0), ("window", 800.0, 800.0)]
+    var made = 0
+    for info in Templates.all { for aspect in ["16:9", "9:16", "1:1", "4:3", "auto"] { for (kind, w, h) in shapes {
+        for length in [info.shortest, 8, 20, 60, 180] where length >= info.shortest { for pattern in ["none", "one", "sparse", "dense"] { for cut in [false, true] {
+            let clicks: [Double] = pattern == "none" ? [] : pattern == "one" ? [length * 0.6]
+                : Array(stride(from: 1.0, to: length - 0.5, by: pattern == "sparse" ? 5.5 : 1.1))
+            var edits = Edits()
+            if cut, length >= info.shortest + 2 { edits.splits = [length * 0.4, length * 0.4 + 1.5]; edits.removed = [length * 0.4] }
+            let meta = templateMeta(kind, w, h, duration: length, clicks: clicks)
+            var look = Look(); look.aspect = aspect
+            let map = TimeMap(duration: length, edits: edits)
+            let at = "\(info.name) \(aspect) \(kind) \(Int(w))×\(Int(h)) \(length)s \(pattern)\(cut ? " cut" : "")"
+            guard map.outputDuration >= info.shortest else {
+                expect(Templates.make(info.name, map: map, meta: meta, look: look) == nil, "\(at): made for a video under \(info.shortest) s"); continue
+            }
+            guard let m = Templates.make(info.name, map: map, meta: meta, look: look) else {
+                let room = clicks.map { map.output($0) - 0.5 }.contains { $0 >= 0 && $0 + 2.5 <= map.outputDuration - 1.2 }
+                expect(info.name == "clean" && !room, "\(at): made nothing"); continue
+            }
+            made += 1
+            let again = Templates.make(info.name, map: map, meta: meta, look: look)
+            expect(again?.segments == m.segments && again?.moves == m.moves, "\(at): not the same twice")
+            var e = Templates.apply(m, to: edits)
+            e.pack(e.segments)
+            expect(!e.segments.isEmpty, "\(at): nothing in it")
+            for s in e.segments {
+                if let why = e.conflict(s) { expect(false, "\(at): \(s.kind) \(s.id): \(why)") }
+                expect(s.start >= 0 && s.end <= length + 0.001 && s.end - s.start >= 0.1, "\(at): \(s.kind) \(s.id) at \(s.start)–\(s.end)")
+            }
+            for mv in m.moves { expect(mv.t >= 0 && mv.t <= length + 0.001, "\(at): move at \(mv.t)") }
+            let out = { (s: Segment) in (map.output(s.start), map.output(s.end)) }
+            let texts = e.texts.sorted { $0.start < $1.start }
+            expect(texts.contains(where: \.isPlaceholder) == info.placeholders, "\(at): placeholders \(texts.map { $0.text ?? "" })")
+            let stage = Templates.Stage.of(meta: meta, look: look)
+            for t in texts {
+                let words = t.isPlaceholder ? Templates.slotWords : (t.text ?? "").split(separator: " ").count
+                let (a, b) = out(t)
+                expect(b - a >= Templates.onScreen(words: words) - 0.001, "\(at): “\(t.text ?? "")” on screen \(b - a) s, needs \(Templates.onScreen(words: words))")
+                let width = Double((t.text ?? "").count) * (t.size ?? 0.05) * 0.5 / stage.ratio
+                let centred = abs((t.x ?? 0.5) - 0.5) < 0.01
+                expect(width <= (centred ? 0.8 : stage.room) + 0.001, "\(at): “\(t.text ?? "")” \(width) of the width")
+                expect((t.size ?? 0) >= 0.04, "\(at): “\(t.text ?? "")” size \(t.size ?? 0)")
+                expect(t.animIn != "letters" && t.loop == "none", "\(at): a loud text \(t.id)")
+            }
+            for (x, y) in zip(texts, texts.dropFirst()) where x.x == y.x && x.y == y.y {
+                expect(out(y).0 - out(x).1 >= 0.3 - 0.001, "\(at): \(x.id) and \(y.id) follow too closely in one place")
+            }
+            for (x, y) in zip(texts, texts.dropFirst()) where overlap(out(x), out(y)) {
+                expect(info.name == "launch" && x.id.hasSuffix("t2") && y.id.hasSuffix("t3"), "\(at): \(x.id) and \(y.id) on screen together")
+            }
+            let emphasis = e.segments.filter { ["zoom", "3d", "spotlight", "highlight", "mono"].contains($0.kind) || ($0.kind == "blur" && !$0.coversFrame) }
+            for z in emphasis {
+                for t in texts where overlap(out(z), out(t)) { expect(false, "\(at): \(z.kind) \(z.id) fights \(t.id)") }
+                for o in emphasis where o.id < z.id && overlap(out(z), out(o)) { expect(false, "\(at): \(z.kind) \(z.id) fights \(o.kind) \(o.id)") }
+                if z.kind == "zoom" { expect(map.output(z.end) - map.output(z.start) >= 2.5 - 0.001, "\(at): zoom \(z.id) too short to hold") }
+            }
+            let zooms = e.segments.filter { $0.kind == "zoom" }.sorted { $0.start < $1.start }
+            for (x, y) in zip(zooms, zooms.dropFirst()) { expect(out(y).0 - out(x).1 >= 1 - 0.001, "\(at): zooms \(x.id) and \(y.id) back to back") }
+            for b in e.segments where b.coversFrame {
+                expect(texts.contains { overlap(out(b), out($0)) } && out(b).0 < 0.01, "\(at): a blur \(b.id) that is not under the opening title")
+            }
+        } } }
+    } } }
+    expect(made > 1000, "only \(made) made")
+    var look = Look(); look.aspect = "16:9"
+    let map = TimeMap(duration: 10, edits: Edits())
+    expect(Templates.make("nope", map: map, meta: templateMeta("display", 1920, 1080, duration: 10, clicks: []), look: look) == nil, "an unknown template")
+}
+
+test("templates fit the recording: zooms land on clicks, steps follow them, Before / After takes the cut") {
+    var look = Look(); look.aspect = "16:9"
+    let meta = templateMeta("display", 1920, 1080, duration: 30, clicks: [3, 12, 21])
+    let map = TimeMap(duration: 30, edits: Edits())
+    let clean = Templates.make("clean", map: map, meta: meta, look: look)!
+    eq(clean.segments.map(\.start), [2.5, 11.5, 20.5])
+    let steps = Templates.make("steps", map: map, meta: meta, look: look)!
+    eq(steps.segments.map(\.text!), ["1. [What to do]", "2. [What to do]", "3. [What to do]"])
+    eq(steps.segments.map(\.start), [0.2, 11.4, 20.4])
+    var cut = Edits(); cut.splits = [8, 10]; cut.removed = [8]
+    let ba = Templates.make("before-after", map: TimeMap(duration: 30, edits: cut), meta: meta, look: look)!
+    eq(ba.segments.map(\.text!), ["Before", "After"])
+    near(ba.segments[0].end, 7.85); near(ba.segments[1].start, 10.25)
+    let tall = Templates.make("social", map: map, meta: meta, look: { var l = look; l.aspect = "9:16"; return l }())!
+    expect(tall.segments[0].y! < tall.base.y, "the hook stands above the video in a tall frame")
+    let wide = Templates.make("social", map: map, meta: templateMeta("simulator", 814, 1770, duration: 30, clicks: []), look: look)!
+    expect(wide.segments[0].x! < wide.base.x, "the hook stands beside a phone in a wide frame")
 }
 
 test("mask colours: a hex or a text colour's name, else refused") {
@@ -637,18 +713,30 @@ test("typed times are checked; delete removes the selection") {
     eq(e.edits.effects.count, 1); eq(e.selected, "")
 }
 
-test("a template replaces the texts, effects and moves, keeps the cuts, images and masks; undo puts them back") {
+test("a template replaces the texts, effects and moves, keeps the cuts, speed changes, images and masks; undo puts them back") {
+    for info in Templates.all where info.shortest <= 9.4 {
+        let e = open("full")
+        let before = e.edits
+        e.applyTemplate(info.name)
+        eq(e.undoName, "Template", info.name)
+        expect(e.edits != before, "\(info.name) changed nothing")
+        eq(e.edits.splits, before.splits); eq(e.edits.removed, before.removed); eq(e.edits.three, before.three)
+        eq(e.edits.speeds.map { [$0.start, $0.end, $0.rate ?? 0] }, before.speeds.map { [$0.start, $0.end, $0.rate ?? 0] }, "\(info.name) keeps the speed changes"); expect(!before.speeds.isEmpty, "full has a speed change")
+        eq(e.edits.images.map(\.id), ["img"]); eq(e.edits.masks.map(\.id).sorted(), ["mask1", "mask2"])
+        expect(!e.edits.texts.contains { $0.id == "txt" }, "\(info.name): the old text stayed")
+        eq(e.problem, "")
+        eq(e.selectedSegment?.isPlaceholder ?? false, info.placeholders, "\(info.name): the first line to fill is selected")
+        e.undo()
+        eq(e.edits, before, info.name); eq(onDisk(e), before, "\(info.name) saved"); eq(e.undoName, ""); eq(e.redoName, "Template")
+        e.redo()
+        e.undo()
+        eq(e.edits, before, "\(info.name) after redo and undo")
+    }
     let e = open("full")
     let before = e.edits
     e.applyTemplate("launch")
-    eq(e.undoName, "Template")
-    expect(e.edits != before, "the template changed nothing")
-    eq(e.edits.splits, before.splits); eq(e.edits.removed, before.removed)
-    eq(e.edits.images.map(\.id), ["img"]); eq(e.edits.masks.map(\.id).sorted(), ["mask1", "mask2"])
-    expect(!e.edits.texts.contains { $0.id == "txt" }, "the old text stayed")
-    eq(e.problem, "")
-    e.undo()
-    eq(e.edits, before); eq(onDisk(e), before, "saved"); eq(e.undoName, ""); eq(e.redoName, "Template")
+    eq(e.problem, "Product Launch needs a video at least 10 s long.")
+    eq(e.edits, before)
     e.applyTemplate("nope")
     eq(e.edits, before)
 }

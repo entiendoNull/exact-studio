@@ -27,8 +27,10 @@ exact-studio — edit Exact Studio recordings from the command line
                                             default .exact/strip.png
   exact-studio export <id> [--out f.mp4] [--quality best|1080p|720p|small]
                                             renders the video; default ~/Movies/Exact Studio/<name>.mp4
-  exact-studio template <id> <name>         replaces texts, effects and moves with a template:
-                                            launch, hero, tour, teaser (laid out for look.json's aspect)
+  exact-studio template <id> <name>         replaces texts, effects, zooms and moves with a template fitted to the
+                                            recording's length, clicks and look.json's frame; prints the lines to
+                                            fill: a [bracketed] text is unfilled, and validate and export refuse it
+  exact-studio template --list              the templates, each with what it is for
   exact-studio image <id> <picture> [--at <t>] [--for <seconds>]
                                             copies a picture into the recording's images/ folder and adds an
                                             image on top of the video at <t> seconds of the recording (default 0)
@@ -207,6 +209,8 @@ func problems(_ r: Recording) -> [String] {
         if s.kind == "zoom", (s.level ?? 0) <= 0 { out.append("\(at): a zoom needs a level above 0 (below 1 zooms out)") }
         if s.kind == "speed", (s.rate ?? 0) <= 0 { out.append("\(at): a speed change needs a rate above 0") }
         if s.kind == "text", (s.text ?? "").isEmpty { out.append("\(at): a text needs its words") }
+        // @ref LLP 0003#templates
+        if s.isPlaceholder { out.append("\(at): unfilled “\(s.text ?? "")”; write the line or delete the text") }
         if s.kind == "image" {
             if (s.file ?? "").isEmpty { out.append("\(at): an image needs its file, a path inside the recording's folder") }
             else if Pictures.image(s.file, in: folder) == nil { out.append("\(at): \(s.file!) is not a picture in \(folder.lastPathComponent)/ (\(Pictures.types.joined(separator: ", ")))") }
@@ -379,7 +383,7 @@ case "show":
         switch s.kind {
         case "zoom": what += " \(s.level ?? 2)×"
         case "speed": what += " \(s.rate ?? 1)×"
-        case "text": what += " “\(s.text ?? "")” \(s.style ?? "plain") in:\(s.animIn ?? "") out:\(s.animOut ?? "")"
+        case "text": what += " “\(s.text ?? "")” \(s.style ?? "plain") in:\(s.animIn ?? "") out:\(s.animOut ?? "")\(s.isPlaceholder ? "  UNFILLED" : "")"
         case "image": what += " \(s.file ?? "") at x \(s.x ?? 0.5) y \(s.y ?? 0.5) size \(s.size ?? 0.25) in:\(s.animIn ?? "fade") out:\(s.animOut ?? "fade")"
         case "3d": what += " \(s.style ?? "hold") tilt \(s.tilt ?? 0) turn \(s.turn ?? 0)"
         case "mask":
@@ -522,17 +526,25 @@ case "export":
     print("\(out.path)  \(Int(comp.renderSize.width))×\(Int(comp.renderSize.height))  \(stamp(map.outputDuration))  in \(Int(Date().timeIntervalSince(start)))s")
 
 case "template":
+    if flag("--list") {
+        for t in Templates.all {
+            print("\(t.name.padding(toLength: 14, withPad: " ", startingAt: 0))\(t.title): \(t.line)\(t.placeholders ? " (lines to fill)" : "")")
+        }
+        break
+    }
     guard args.count >= 2 else { fail(usage) }
     var r = open(args[0])
+    guard let info = Templates.info(args[1]) else { fail("no template \(args[1]); one of \(Templates.names.joined(separator: ", "))") }
     let map = TimeMap(duration: r.meta.duration, edits: r.edits)
-    guard let made = Templates.make(args[1], duration: map.outputDuration, source: { map.source($0) }, aspect: r.look.aspect,
-                                    clicks: r.meta.clicks, three: r.edits.three) else { fail("no template \(args[1]); one of \(Templates.names.joined(separator: ", "))") }
-    // The images and masks stay: a template knows nothing of them, and a mask hides something.
-    r.edits.pack(made.segments + r.edits.images + r.edits.masks)
-    r.edits.moves = made.moves
-    r.edits.base = made.base
+    guard let made = Templates.make(info.name, map: map, meta: r.meta, look: r.look, keep: Templates.kept(r.edits)) else {
+        fail("\(Templates.refusal(info, duration: map.outputDuration)) This one plays \(stamp(map.outputDuration)).", code: 1)
+    }
+    r.edits = Templates.apply(made, to: r.edits)
     write(r.edits, r.folder.appendingPathComponent("edits.json"))
-    print("\(args[1]) applied to \(r.id): \(r.edits.segments.count) segments, \(made.moves.count) moves (edits.json)")
+    print("\(info.title) applied to \(r.id): \(r.edits.segments.count) segments, \(made.moves.count) moves (edits.json)")
+    for s in r.edits.texts.filter(\.isPlaceholder).sorted(by: { $0.start < $1.start }) {
+        print("  to fill: text \(s.id) “\(s.text ?? "")” \(stamp(s.start))–\(stamp(s.end))")
+    }
 
 case "image":
     let at = option("--at").flatMap(Double.init) ?? 0, length = option("--for").flatMap(Double.init) ?? 4

@@ -1,0 +1,7 @@
+clean         Clean Demo: Zooms on your clicks, no text. For a demo the screen explains
+hero          Hero Angle: Opens at a slight 3D angle, then zooms on clicks. For a page header
+before-after  Before / After: Labels the screen before and after the change. For a fix or a redesign
+spotlight     Feature Spotlight: Zooms on the key action, then one line names it. For one feature (lines to fill)
+social        Social Hook: A hook line for the first seconds, then zooms on clicks. For a feed (lines to fill)
+steps         Tutorial Steps: A numbered line for each step, as you click. For a how-to (lines to fill)
+launch        Product Launch: A title over a blurred opening, zooms, a closing line. For a launch (lines to fill)

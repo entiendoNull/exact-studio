@@ -152,8 +152,8 @@ fn imageFxLabel(kind: string): string = kind == "blur" ? "Blur" : kind == "mono"
 fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
 fn poseLabel(p: string): string = p == "hero" ? "Hero" : p == "lean-left" ? "Lean Left" : p == "lean-right" ? "Lean Right" : p == "lay-back" ? "Lay Back" : p == "tumble" ? "Tumble" : "Face On"
 fn placeName(pl: string): string = pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner"
-fn templateName(t: string): string = t == "launch" ? "Clean Launch" : t == "hero" ? "Product Hero" : t == "tour" ? "Feature Tour" : "Social Teaser"
-fn templateLine(t: string): string = t == "launch" ? "Blurred title card, zooms on clicks, an end line" : t == "hero" ? "A 3D hero angle, a feature line, an orbit" : t == "tour" ? "Three captions, moving between sides" : "A blurred hook, pops, a 3D tumble, a call to action"
+fn templateName(t: string): string = t == "clean" ? "Clean Demo" : t == "hero" ? "Hero Angle" : t == "before-after" ? "Before / After" : t == "spotlight" ? "Feature Spotlight" : t == "social" ? "Social Hook" : t == "steps" ? "Tutorial Steps" : "Product Launch"
+fn templateLine(t: string): string = t == "clean" ? "Zooms on your clicks, no text. For a demo the screen explains" : t == "hero" ? "Opens at a slight 3D angle, then zooms on clicks. For a page header" : t == "before-after" ? "Labels the screen before and after the change. For a fix or a redesign" : t == "spotlight" ? "Zooms on the key action, then one line names it. For one feature" : t == "social" ? "A hook line for the first seconds, then zooms on clicks. For a feed" : t == "steps" ? "A numbered line for each step, as you click. For a how-to" : "A title over a blurred opening, zooms, a closing line. For a launch"
 fn panelLabel(m: string): string = m == "dock" ? "Docked on the Right" : m == "float" ? "Floating" : m == "overlay" ? "Lightbox over the Video" : "On the Left"
 
 routes nav
@@ -474,10 +474,17 @@ component ExactStudio
                 image "symbol:sf/wand.and.stars"
                 text "Templates"
               column id="template-menu" popover="auto" role="menu" aria-label="Templates: replace the texts, effects and moves"
-                for t in ["launch", "hero", "tour", "teaser"] key=t
-                  button press=template(t) popovertarget="template-menu" popovertargetaction="hide" testId=`template-${t}`
-                    text templateName(t)
-                    text templateLine(t)
+                column role="group" aria-label="Ready to use: no text to write"
+                  for t in ["clean", "hero", "before-after"] key=t
+                    button press=template(t) popovertarget="template-menu" popovertargetaction="hide" testId=`template-${t}`
+                      text templateName(t)
+                      text templateLine(t)
+                hr
+                column role="group" aria-label="Lines to fill: write each [bracketed] line before you export"
+                  for t in ["spotlight", "social", "steps", "launch"] key=t
+                    button press=template(t) popovertarget="template-menu" popovertargetaction="hide" testId=`template-${t}`
+                      text templateName(t)
+                      text templateLine(t)
               button press=openExport buttonStyle="filled" margin-left=6 testId="export-open"
                 image "symbol:share"
                 text "Export"

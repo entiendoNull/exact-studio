@@ -68,7 +68,7 @@ To update, run `git pull` in both folders and run the last command again.
 - **Rows by kind:** effects for the video, texts, images, sounds, and effects for the whole frame each have their own rows. Each row has a + that adds its own kind of thing at the playhead.
 - **A tidy timeline:** every group folds away, and the rows have three heights to pick from.
 - **Zoom the timeline:** with the mouse wheel, a pinch, or the − and + buttons; Fit shows it all again. A trackpad scrolls instead, and a switch turns wheel zoom off.
-- **Templates:** Launch, Hero, Tour and Teaser. Each adds texts, effects and moves for the frame's shape.
+- **Templates:** Clean Demo, Hero Angle, Before / After, Feature Spotlight, Social Hook, Tutorial Steps and Product Launch. Each fits the recording's length, clicks and frame shape. A template never writes a claim: its lines are [bracketed] placeholders, and export refuses them until you write them.
 - **Zoom on clicks:** adds a zoom around each group of clicks.
 - **Sound follows the cuts:** the recorded sound has its own row under the clip, with its waveform. Cuts, speed and fades apply to it too. Mute it or set its volume.
 - **Music and sounds:** add music or a sound effect from a file, on sound lanes of their own. Each plays straight through from where it starts, whatever the cuts do, with its own volume and fades. Drop a sound file on the preview to add it at the playhead.
@@ -105,7 +105,7 @@ Every recording's edit is plain JSON beside it: `edits.json` (cuts, transitions,
 ./exact-studio validate latest
 ./exact-studio frame latest 4.5     # .exact/frame.png
 ./exact-studio export latest
-./exact-studio template latest hero
+./exact-studio template latest spotlight
 ./exact-studio image latest logo.png --at 2 --for 6
 ./exact-studio sound latest music.m4a --at 0
 ./exact-studio frame latest 4.5 --raw    # the full recorded frame, to measure a mask on

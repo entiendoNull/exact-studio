@@ -24,6 +24,21 @@ Never start editing before the shot list exists.
   can go back. If they already hold edits, treat those as the owner's intent: build on them, and ask
   before you remove any of them. `template` replaces every text, effect and move, so never run it on
   an edited recording without asking.
+- **A template is a start, not a cut.** On an unedited recording it can save the layout work; pick by
+  the brief, then direct it like any other edit (shot list, copy, review):
+
+  | The piece | Template |
+  |---|---|
+  | A demo where the screen explains itself, no copy | `clean` (or `hero` for a device recording on a page header) |
+  | A fix or a redesign shown in one take | `before-after`, after cutting so the change sits at a cut |
+  | One feature, one line | `spotlight` |
+  | A 9:16 or 1:1 social clip | `social` |
+  | A how-to | `steps`, one line per action, imperative |
+  | A launch with a name, a pitch and a close | `launch` |
+
+  Write every `[bracketed]` line from your script, or delete it; `validate` stays failing until you
+  do. Then move what the template guessed: its key click, its step starts, its split between Before
+  and After. Then run the review pass on it as on your own edit.
 - Work on recording time in the file and video time in your head. `show` prints both lengths;
   `frame <id> <t>` takes video time, `--source` recording time, and prints the other.
 
@@ -210,7 +225,8 @@ just before and just after. Plus the first and last frame. Check:
       held at least 1.5 s.
 - [ ] **Consistent**: same placement, style and animations for texts of the same role.
 - [ ] **Clean**: no secrets (masks checked), no error, notification or debug overlay left in.
-- [ ] **No template leftovers**: no "Your App", "Link in bio", "Try it today" the owner did not ask for.
+- [ ] **No template leftovers**: no `[bracketed]` placeholder (`validate` lists them), and no line the
+      owner did not ask for.
 - [ ] `./exact-studio validate <id>` prints `ok`.
 
 Then remove one thing: watch the plan again and drop the weakest effect or line. Restraint is the

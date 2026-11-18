@@ -864,13 +864,7 @@ struct Framing {
     // @ref LLP 0002#split
     private let runs: [String: [Segment]]
 
-    init(meta: RecordingMeta, look: Look, edits: Edits, cursor: [Point], folder: URL? = nil) {
-        self.meta = meta
-        self.folder = folder
-        silhouette = meta.mask.flatMap { name in folder.flatMap { Masks.image($0.appendingPathComponent(name)) } }
-        deviceBody = meta.mask.flatMap { name in folder.flatMap { Masks.body($0.appendingPathComponent(name)) } }
-        self.look = look
-        self.edits = edits
+    static func layout(meta: RecordingMeta, look: Look) -> (canvas: CGSize, subject: CGRect) {
         let crop = meta.crop
         let content = CGSize(width: meta.width * crop.w, height: meta.height * crop.h)
         let ratio: Double
@@ -884,12 +878,23 @@ struct Framing {
         // The long side at 1920, or the source's own size when larger, rounded to even pixels.
         let long = max(1920, min(3840, max(content.width, content.height)))
         let w = ratio >= 1 ? long : long * ratio, h = ratio >= 1 ? long / ratio : long
-        canvas = CGSize(width: (w / 2).rounded() * 2, height: (h / 2).rounded() * 2)
+        let canvas = CGSize(width: (w / 2).rounded() * 2, height: (h / 2).rounded() * 2)
         let pad = min(canvas.width, canvas.height) * look.padding / 100
         let room = CGSize(width: canvas.width - pad * 2, height: canvas.height - pad * 2)
         let k = min(room.width / max(content.width, 1), room.height / max(content.height, 1))
         let size = CGSize(width: content.width * k, height: content.height * k)
-        subject = CGRect(x: (canvas.width - size.width) / 2, y: (canvas.height - size.height) / 2, width: size.width, height: size.height)
+        return (canvas, CGRect(x: (canvas.width - size.width) / 2, y: (canvas.height - size.height) / 2, width: size.width, height: size.height))
+    }
+
+    init(meta: RecordingMeta, look: Look, edits: Edits, cursor: [Point], folder: URL? = nil) {
+        self.meta = meta
+        self.folder = folder
+        silhouette = meta.mask.flatMap { name in folder.flatMap { Masks.image($0.appendingPathComponent(name)) } }
+        deviceBody = meta.mask.flatMap { name in folder.flatMap { Masks.body($0.appendingPathComponent(name)) } }
+        self.look = look
+        self.edits = edits
+        let crop = meta.crop
+        (canvas, subject) = Framing.layout(meta: meta, look: look)
         let toCrop = { (p: Point) -> Point in Point(t: p.t, x: (p.x - crop.x) / crop.w, y: (p.y - crop.y) / crop.h) }
         self.cursor = CursorPath(samples: cursor.map(toCrop))
         releases = (meta.releases ?? []).map(\.t).sorted()
