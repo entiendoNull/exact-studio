@@ -222,4 +222,9 @@ extension Segment {
     // @ref LLP 0003#templates
     var isPlaceholder: Bool { kind == "text" && (text ?? "").range(of: #"\[[^\]]*\]"#, options: .regularExpression) != nil }
 }
+
+extension Edits {
+    // @ref LLP 0003#templates
+    var unfilled: [Segment] { texts.filter(\.isPlaceholder).sorted { $0.start < $1.start } }
+}
 #endif

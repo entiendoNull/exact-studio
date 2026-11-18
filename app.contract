@@ -145,6 +145,13 @@ shape Exported
 shape Done
   ok: bool
 
+// @ref LLP 0003#templates
+shape ExportCheck
+  count: number
+  lines: string[]
+  first: string
+  why: string
+
 fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
 fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:smartphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
@@ -205,6 +212,7 @@ component ExactStudio
   state draft = ""
   state removing = ""
   state aimed = ""
+  state focusLine = ""
   resource status = recorderStatus() as shape Status else empty()
   resource sources = captureSources(listed) as shape SourceList else empty()
   resource library = recordings() as shape RecordingList else empty()
@@ -212,6 +220,7 @@ component ExactStudio
   resource summary = editSummary(selected) as shape Summary else empty()
   // The recording's own look (look.json beside it).
   resource lk = recordingLook(selected) as shape LookInfo else empty()
+  resource check = exportCheck(selected) as shape ExportCheck else empty()
   mutation started as shape Reply then afterStart
   mutation soundSet as shape Done
   mutation stopped as shape Stopped refreshes library then afterStop
@@ -263,6 +272,8 @@ component ExactStudio
   // And it can stop there, so the recording that finished is selected once, when the status names it.
   task landed when status.finished != "" key=status.finished
     after(1, selectFinished)
+  task wordsFocus when focusLine != "" and sel.id == focusLine key=focusLine
+    after(1, focusWords)
 
   action step
     now = performanceNow()
@@ -325,6 +336,15 @@ component ExactStudio
     exportOpen = true
   action closeExport
     exportOpen = false
+  action showFirst
+    exportOpen = false
+    focusLine = check.first
+    if panelMode == "dock"
+      rightOpen = true
+    send edited = editClip(selected, "show-unfilled", "", 0, "")
+  action focusWords
+    focusLine = ""
+    focus("text-words")
   action reveal
     send revealed = revealFile(exportPath)
   action askRemove(id: string)
@@ -897,31 +917,43 @@ component ExactStudio
                   button press=closeExport aria-label="Close" testId="export-close"
                     image "symbol:close"
 
-                column gap=10
-                  text "QUALITY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
-                  row role="radiogroup" aria-label="Export quality"
-                    for q in ["best", "1080p", "720p", "small"] key=q
-                      button role="radio" aria-checked=(exportQuality == q) press=pickQuality(q) testId=`quality-${q}` flex=1
-                        text (q == "best" ? "Full" : q == "small" ? "Small" : q)
-                  text (exportQuality == "best" ? "The full size, up to 4K. The sharpest, and the largest file." : exportQuality == "1080p" ? "Sharp everywhere. A good default for sharing." : exportQuality == "720p" ? "A smaller file for chat, docs and the web." : "The smallest file, quick to send. Less sharp.") font="-exact-footnote" color="-exact-tertiary-label" testId="quality-hint"
+                if check.count > 0
+                  column gap=16 testId="export-unfilled"
+                    column gap=6
+                      text (check.count == 1 ? "1 line to fill first" : `${check.count} lines to fill first`) font="-exact-headline" testId="export-unfilled-title"
+                      text "These are still placeholders in brackets, so they would show as they are. Write each one, or delete it, then export." font="-exact-footnote" color="-exact-secondary-label"
+                    scroll max-height=168 border-radius=12 background-color="-exact-tertiary-background"
+                      column padding="6px 14px" role="list" aria-label="Lines to fill"
+                        for line in check.lines key=line
+                          text line role="listitem" font-variant-numeric="tabular-nums" padding="6px 0" testId="export-unfilled-line"
+                    button press=showFirst buttonStyle="filled" testId="export-show-first"
+                      text "Show First"
+                else
+                  column gap=10
+                    text "QUALITY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+                    row role="radiogroup" aria-label="Export quality"
+                      for q in ["best", "1080p", "720p", "small"] key=q
+                        button role="radio" aria-checked=(exportQuality == q) press=pickQuality(q) testId=`quality-${q}` flex=1
+                          text (q == "best" ? "Full" : q == "small" ? "Small" : q)
+                    text (exportQuality == "best" ? "The full size, up to 4K. The sharpest, and the largest file." : exportQuality == "1080p" ? "Sharp everywhere. A good default for sharing." : exportQuality == "720p" ? "A smaller file for chat, docs and the web." : "The smallest file, quick to send. Less sharp.") font="-exact-footnote" color="-exact-tertiary-label" testId="quality-hint"
 
-                column gap=10
-                  button press=exportIt("movies") buttonStyle="filled" disabled=pending(exported) testId="export"
-                    image "symbol:sf/square.and.arrow.down"
-                    text (pending(exported) ? "Exporting…" : "Save to Movies")
-                  row gap=10
-                    button press=exportIt("choose") buttonStyle="bordered" disabled=pending(exported) flex=1 testId="export-save-as"
-                      image "symbol:sf/folder"
-                      text "Save As…"
-                    button press=exportIt("clipboard") buttonStyle="bordered" disabled=pending(exported) flex=1 testId="export-copy"
-                      image "symbol:sf/doc.on.clipboard"
-                      text "Copy to Clipboard"
-                  if exportLine != ""
-                    row gap=8 align-items="center" min-height=24
-                      text exportLine font="-exact-footnote" color="-exact-secondary-label" flex=1 testId="export-line"
-                      if exportPath != ""
-                        button press=reveal testId="reveal"
-                          text "Show in Finder" font="-exact-footnote"
+                  column gap=10
+                    button press=exportIt("movies") buttonStyle="filled" disabled=pending(exported) testId="export"
+                      image "symbol:sf/square.and.arrow.down"
+                      text (pending(exported) ? "Exporting…" : "Save to Movies")
+                    row gap=10
+                      button press=exportIt("choose") buttonStyle="bordered" disabled=pending(exported) flex=1 testId="export-save-as"
+                        image "symbol:sf/folder"
+                        text "Save As…"
+                      button press=exportIt("clipboard") buttonStyle="bordered" disabled=pending(exported) flex=1 testId="export-copy"
+                        image "symbol:sf/doc.on.clipboard"
+                        text "Copy to Clipboard"
+                    if exportLine != ""
+                      row gap=8 align-items="center" min-height=24
+                        text exportLine font="-exact-footnote" color="-exact-secondary-label" flex=1 testId="export-line"
+                        if exportPath != ""
+                          button press=reveal testId="reveal"
+                            text "Show in Finder" font="-exact-footnote"
 
           dialog id="confirm-clear" role="alertdialog" aria-label=`Clear all edits of “${currentName}”?`
             text "Every cut, effect, text, image, sound, mask and move goes. The background and the frame stay. You can undo this with ⌘Z."
@@ -1125,7 +1157,7 @@ component SettingsCard
       if sel.kind == "text"
         column gap=4
           text "Words" font="-exact-caption1" color="-exact-secondary-label"
-          input value=sel.text change=textField("text") focus=fieldIn blur=fieldOut aria-label="Text" testId="text-words"
+          input id="text-words" value=sel.text change=textField("text") focus=fieldIn blur=fieldOut aria-label="Text" testId="text-words"
         column gap=4
           row
             text "Size" flex=1

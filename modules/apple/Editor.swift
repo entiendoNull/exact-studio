@@ -361,9 +361,28 @@ final class Editor {
 
     /// A separate composition for export, at this editor's edits and the look asked for.
     func exportable(look: Look) throws -> (AVAsset, AVMutableVideoComposition, AVAudioMix?) {
+        if let why = unfilledWhy { throw ExactStudioError(why) }
         let own = RenderState(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
         let (mix, composition, map, sounds) = try Composition.make(asset: asset, meta: meta, edits: edits, state: own)
         return (mix, composition, Composition.audioMix(mix, map: map, edits: edits, sounds: sounds))
+    }
+
+    // @ref LLP 0003#templates
+    var unfilledLines: [String] { edits.unfilled.map { "\(MotionPath.stamp($0.start)) \($0.text ?? "")" } }
+
+    var unfilledWhy: String? {
+        let n = edits.unfilled.count
+        return n == 0 ? nil : "\(n == 1 ? "1 line" : "\(n) lines") still in brackets. Write \(n == 1 ? "it" : "them") or delete \(n == 1 ? "it" : "them"), then export."
+    }
+
+    var exportCheck: [String: Any] {
+        ["count": edits.unfilled.count, "lines": unfilledLines, "first": edits.unfilled.first?.id ?? "", "why": unfilledWhy ?? ""]
+    }
+
+    func showFirstUnfilled() {
+        guard let s = edits.unfilled.first else { return }
+        select(s.id)
+        seek(source: min(s.start + 1, (s.start + s.end) / 2))
     }
 
     /// Whether the recording has sound.
@@ -1536,7 +1555,7 @@ final class Editor {
         }
         let next = Templates.apply(made, to: edits)
         named("Template") { apply(next) }
-        select(next.texts.sorted { $0.start < $1.start }.first(where: \.isPlaceholder)?.id ?? "")
+        select(next.unfilled.first?.id ?? "")
     }
 
     func clearAll() {

@@ -8,6 +8,7 @@
 //          {op: "selection", id}                → {id, kind ("clip" for a part of the clip), level, rate, start, end,
 //                                                   startText, endText, removed, first, last, problem, startWhy, endWhy}
 //          {op: "summary", id}                  → {parts, removed, effects, lanes, length, source}
+//          {op: "export-check", id}             → {count, lines, first, why}  the [bracketed] lines export refuses, by time
 //   later  {op: "sources"}                      → {items: [{id, name, app, kind}], allowed}
 //          {op: "start", source}                → {ok, error}   source "pick-display", "pick-window", "area" or
 //                                                   "pick-simulator" opens a picker; else a listed source's id
@@ -17,7 +18,8 @@
 //          {op: "edit", id, do, track?, number?, kind?}  → {ok}
 //                 do: add (track: a kind, or zoom-in, zoom-out, slow, fast), set (number | kind),
 //                     delete, split (the selection, else the clip), split-all, auto, clear, play, split-clip, remove, join-prev, join-next,
-//                     add-lane, start / end (kind: the typed time), type-time (track: start or end, kind: the text so far)
+//                     add-lane, start / end (kind: the typed time), type-time (track: start or end, kind: the text so far),
+//                     show-unfilled
 //          {op: "export", id, quality, to}      → {ok, error, path, copied}  quality best|1080p|720p|small; to movies|choose|clipboard
 //          {op: "delete", id}                   → {ok, error}
 //          {op: "reveal", path}                 → {ok}
@@ -151,8 +153,10 @@ final class Studio: ExactModule {
             return editor(request["id"] as? String ?? "")?.lookInfo ?? Editor.defaultLook
         case "summary":
             return editor(request["id"] as? String ?? "")?.summary ?? Self.emptySummary
+        case "export-check":
+            return editor(request["id"] as? String ?? "")?.exportCheck ?? ["count": 0, "lines": [String](), "first": "", "why": ""]
         default:
-            throw ExactNativeRefusal("studio answers status, selection and summary")
+            throw ExactNativeRefusal("studio answers status, selection, summary and export-check")
         }
     }
 
@@ -297,6 +301,7 @@ final class Studio: ExactModule {
         case "move": e.setMoveField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "place": e.placePreset(r["kind"] as? String ?? "")
         case "deselect": e.select("")
+        case "show-unfilled": e.showFirstUnfilled()
         case "arrange": e.arrange(r["track"] as? String ?? "")
         case "seg": e.setSegment(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "template": e.applyTemplate(r["kind"] as? String ?? "")
