@@ -21,6 +21,10 @@ exact-studio — edit Exact Studio recordings from the command line
                                             --raw: the full recorded frame there, before the crop, at its own pixel
                                             size, with no edits: a pixel at (px, py) is (px/width, py/height) in a
                                             mask's rect
+  exact-studio strip <id> <from> <to> [--frames 5] [--width 960] [--out f.png] [--source]
+                                            renders frames evenly from <from> to <to> seconds of the video (--source:
+                                            of the recording) side by side in one PNG, to see a motion at a glance;
+                                            default .exact/strip.png
   exact-studio export <id> [--out f.mp4] [--quality best|1080p|720p|small]
                                             renders the video; default ~/Movies/Exact Studio/<name>.mp4
   exact-studio template <id> <name>         replaces texts, effects and moves with a template:
@@ -47,6 +51,9 @@ exact-studio — edit Exact Studio recordings from the command line
                                             video looks and sounds the same; prints what it cut
   exact-studio split <id> <t> --all         Split All Lanes: the clip and every block under <t>; moves are never cut
   exact-studio schema                       prints where the docs and JSON Schemas are
+
+  docs/edits.md is the file format; docs/effects.md says what each effect, move, animation, style and
+  transition looks like on screen, its timing and limits, with a picture strip: read an entry before using it.
 
 Recording, through the Exact Studio app (opened when it is not running):
   exact-studio sources [--no-launch]        what can be recorded now, one per line, each with the name record start takes
@@ -457,6 +464,42 @@ case "frame":
         print("\(out.path)  \(img.width)×\(img.height)  video \(stamp(t)) = recording \(stamp(map.source(t)))")
     } catch { fail("couldn't render the frame: \(error)") }
 
+case "strip":
+    let source = flag("--source")
+    let count = Int(option("--frames") ?? "5") ?? 0
+    let width = Int(option("--width") ?? "960") ?? 0
+    let out = URL(fileURLWithPath: option("--out") ?? ".exact/strip.png")
+    guard args.count >= 3, let a = Double(args[1]), let b = Double(args[2]), b > a else { fail(usage) }
+    guard (2...12).contains(count) else { fail("--frames is 2–12") }
+    guard (count * 32...4000).contains(width) else { fail("--width is \(count * 32)–4000 pixels") }
+    let r = open(args[0])
+    let (mix, comp, map, _) = composition(r)
+    let gen = AVAssetImageGenerator(asset: mix)
+    gen.videoComposition = comp
+    gen.requestedTimeToleranceBefore = .zero
+    gen.requestedTimeToleranceAfter = .zero
+    let canvas = comp.renderSize
+    let gap = 6, cellW = (width - gap * (count - 1)) / count, cellH = max(1, Int((Double(cellW) * canvas.height / canvas.width).rounded()))
+    let total = cellW * count + gap * (count - 1)
+    guard let ctx = CGContext(data: nil, width: total, height: cellH, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { fail("couldn't make the strip") }
+    ctx.interpolationQuality = .high
+    var times: [String] = []
+    for i in 0..<count {
+        let u = a + (b - a) * Double(i) / Double(count - 1)
+        let t = min(max(source ? map.output(u) : u, 0), map.outputDuration - 0.02)
+        do {
+            let img = try gen.copyCGImage(at: CMTime(seconds: t, preferredTimescale: 600), actualTime: nil)
+            ctx.draw(img, in: CGRect(x: i * (cellW + gap), y: 0, width: cellW, height: cellH))
+        } catch { fail("couldn't render the frame at \(stamp(t)): \(error)") }
+        times.append(source ? stamp(map.source(t)) : stamp(t))
+    }
+    do {
+        try FileManager.default.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try NSBitmapImageRep(cgImage: ctx.makeImage()!).representation(using: .png, properties: [:])!.write(to: out)
+    } catch { fail("couldn't write \(out.path): \(error)") }
+    print("\(out.path)  \(total)×\(cellH)  \(count) frames, left to right, at \(source ? "recording" : "video") \(times.joined(separator: ", "))")
+
 case "export":
     guard let ref = args.first else { fail(usage) }
     let r = open(ref)
@@ -649,6 +692,7 @@ case "split":
 case "schema":
     let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     print("docs/edits.md, schema/edits.schema.json and schema/look.schema.json in the exact-studio repository (\(root.path))")
+    print("docs/effects.md: what each effect, move, text animation, style and transition looks like, its timing and limits")
 
 case "help", "--help", "-h":
     print(usage)

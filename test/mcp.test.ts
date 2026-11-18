@@ -62,9 +62,21 @@ test('tools/list offers every tool, each with a schema', async () => {
   expect(result.tools.map((t: any) => t.name)).toEqual([
     'list_sources', 'start_recording', 'recording_status', 'stop_recording', 'list_recordings', 'show_recording',
     'read_edits', 'write_edits', 'write_look', 'validate_recording', 'render_frame', 'export_video', 'apply_template',
-    'add_image', 'add_sound', 'add_mask', 'split', 'edit_format', 'directing_guide', 'feedback_guide',
+    'add_image', 'add_sound', 'add_mask', 'split', 'edit_format', 'effects_guide', 'directing_guide', 'feedback_guide',
   ]);
   for (const t of result.tools) expect(t.inputSchema.type).toBe('object');
+});
+
+test('effects_guide gives the whole reference, or one entry with its picture strip', async () => {
+  const all = await tool('effects_guide', {});
+  expect(all.content[0].text).toStartWith('# What each effect looks like');
+  const orbit = await tool('effects_guide', { name: 'orbit' });
+  expect(orbit.isError).toBeUndefined();
+  expect(orbit.content[0].text).toStartWith('Effects on the video:\n#### `orbit`');
+  expect(orbit.content[0].text).not.toContain('#### `hold`');
+  expect(orbit.content.filter((c: any) => c.type === 'image').length).toBe(1);
+  expect((await tool('effects_guide', { name: 'mint' })).content[0].text).toStartWith('## Text colours');
+  expect((await tool('effects_guide', { name: 'sparkle' })).isError).toBe(true);
 });
 
 test('validate_recording and show_recording answer through the CLI', async () => {
