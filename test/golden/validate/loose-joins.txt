@@ -1,0 +1,6 @@
+zoom z: joinEnd, but no zoom on its lane starts where it ends with joinStart
+zoom z-2: joinStart, but no zoom on its lane ends where it starts with joinEnd
+blur b: joinEnd, but no blur on its lane starts where it ends with joinStart
+mono b-2: joinStart, but no mono on its lane ends where it starts with joinEnd
+image i: its pulse effect p: joinStart, but no pulse effect on its row ends where it starts with joinEnd (in this image or one joined to it)
+sound s: joinEnd, but no sound of sounds/beep.wav on its lane starts where it ends with joinStart

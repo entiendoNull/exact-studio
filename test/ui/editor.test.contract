@@ -72,17 +72,43 @@ test "a clip part is removed and put back from the inspector"
   clock data
   expect state summary.removed == 1
 
-test "Split Clip with the playhead at the start says why it can't"
+test "Split Clip with the playhead at the start is off and says why"
   tap "recording-empty"
   clock data
-  tap "split-clip"
-  clock data
-  expect text "problem" == "Move the playhead into the clip to split it."
+  expect disabled "split-clip"
+  expect state summary.splitWhy == "Move the playhead into the clip to split it."
   expect state summary.parts == 1
   expect state summary.removed == 0
   expect state summary.effects == 0
   expect state summary.lanes == 1
   expect state summary.moves == 0
+
+test "Split follows the selection; Split All Lanes is off at the start and says why"
+  tap "recording-full"
+  clock settle
+  expect state summary.splitLabel == "Split Clip"
+  expect disabled "split-all"
+  expect state summary.splitAllWhy == "Nothing under the playhead can be split there."
+  tap "timeline" drag 0 0 from 275 176 mouse
+  clock data
+  expect state summary.splitLabel == "Split Zoom"
+  expect state summary.canSplit == false
+  expect disabled "split-clip"
+
+test "Split Text splits the selected text at the playhead, as one undo step"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 275 12 mouse
+  clock data
+  tap "timeline" drag 0 0 from 259 314 mouse
+  clock data
+  expect state summary.splitLabel == "Split Text"
+  expect state summary.canSplit == true
+  tap "split-clip"
+  clock data
+  expect state summary.undoName == "Split Text"
+  expect state summary.effects == 11
+  expect state summary.parts == 4
 
 test "a template replaces the edit; Undo and Redo take it back and forth"
   tap "recording-full"

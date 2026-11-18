@@ -201,6 +201,14 @@
             "type": "number",
             "minimum": 0,
             "description": "Seconds"
+          },
+          "joinStart": {
+            "type": "boolean",
+            "description": "true: it continues the sound of the same file on the same lane, in video time that ends where it starts, which has joinEnd: a split's second half. No fade where they meet. Default: not joined"
+          },
+          "joinEnd": {
+            "type": "boolean",
+            "description": "true: the sound of the same file on the same lane, in video time that starts where it ends, which has joinStart, continues it: a split's first half. Default: not joined"
           }
         },
         "required": [
@@ -512,6 +520,14 @@
                   "minimum": 0,
                   "maximum": 1,
                   "description": "fade: the opacity it fades to"
+                },
+                "joinStart": {
+                  "type": "boolean",
+                  "description": "true: it continues the effect of the same kind on the same row, of this image or one joined to it that ends where it starts, which has joinEnd: a split's second half. Nothing eases where they meet. Default: not joined"
+                },
+                "joinEnd": {
+                  "type": "boolean",
+                  "description": "true: the effect of the same kind on the same row, of this image or one joined to it that starts where it ends, which has joinStart, continues it: a split's first half. Default: not joined"
                 }
               },
               "required": [
@@ -559,6 +575,14 @@
               "h"
             ],
             "additionalProperties": false
+          },
+          "joinStart": {
+            "type": "boolean",
+            "description": "true: it continues the segment of the same kind on the same lane that ends where it starts, which has joinEnd: a split's second half. Where they meet nothing eases, enters or exits, a text's loop keeps its phase, and an image's moves and effects run across both. Default: not joined"
+          },
+          "joinEnd": {
+            "type": "boolean",
+            "description": "true: the segment of the same kind on the same lane that starts where it ends, which has joinStart, continues it: a split's first half. Default: not joined"
           }
         },
         "additionalProperties": false,

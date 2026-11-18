@@ -290,6 +290,25 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
     },
   },
   {
+    name: 'split',
+    description:
+      'Cuts at a moment of the recording, so each half can be changed, moved or removed on its own. With no item it splits the clip; with item it splits that segment (a text, zoom, effect, mask, image), sound, or an image\'s own effect ("<image id>:<effect id>"); with all it is Split All Lanes: the clip and every block under that moment. Moves are never cut. The halves are joined (joinStart and joinEnd), so the video looks and sounds exactly the same until you change one. Returns what it cut and the new ids.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id,
+        at: { type: 'number', description: 'Where to cut, in seconds of the recording.' },
+        item: { type: 'string', description: 'A segment\'s or a sound\'s id, or "<image id>:<effect id>". Leave out to split the clip.' },
+        all: { type: 'boolean', description: 'Split All Lanes: the clip and every block under that moment.' },
+      },
+      required: ['id', 'at'],
+    },
+    call: async (a) => {
+      if (typeof a.at !== 'number') return text('at is a number of seconds of the recording.', true);
+      return outOf(await run(['split', a.id, String(a.at), ...(a.all ? ['--all'] : a.item ? [a.item] : [])]));
+    },
+  },
+  {
     name: 'edit_format',
     description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, masks included, with examples. Read it before write_edits.',
     inputSchema: { type: 'object', properties: {} },

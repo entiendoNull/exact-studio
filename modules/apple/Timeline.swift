@@ -634,11 +634,12 @@ final class TimelineView: NSView {
             guard to - from > 90 else { return }
             (words as NSString).draw(in: CGRect(x: from, y: r.y + r.height / 2 - 7, width: to - from, height: 16), withAttributes: hint.merging([.paragraphStyle: fit]) { $1 })
         }
-        func block(_ r: CGRect, _ color: NSColor, _ text: String, selected: Bool, dark: Bool = false, inside: ((CGRect) -> Void)? = nil) {
+        func block(_ r: CGRect, _ color: NSColor, _ text: String, selected: Bool, dark: Bool = false, joined: (Bool, Bool) = (false, false),
+                   inside: ((CGRect) -> Void)? = nil) {
             color.withAlphaComponent(selected ? 0.95 : 0.78).setFill()
-            NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
+            Self.shape(r, radius: 6, square: joined).fill()
             inside?(r)
-            stroke(r, selected: selected)
+            stroke(r, selected: selected, square: joined)
             // Zoomed, a block's name stays in the part of it that shows.
             let from = max(r.minX, trackRect.minX), to = min(r.maxX, trackRect.maxX)
             title(text, in: CGRect(x: from, y: r.minY, width: max(0, to - from), height: r.height), dark: dark)
@@ -742,9 +743,11 @@ final class TimelineView: NSView {
                 if lane == 0, (image.effects ?? []).isEmpty {
                     childHint("Press + to add an effect to this image only: blur, fade, pulse and more.", r, image)
                 }
+                let pool = Joins.whole(image, run: Joins.run(image, in: editor.edits.segments)).effects ?? []
                 for fx in image.effects ?? [] where fx.lane == lane {
                     let b = CGRect(x: x(fx.start), y: r.y + 2, width: max(4, x(fx.end) - x(fx.start)), height: r.height - 4)
-                    block(b, Self.color(image: fx), Self.caption(image: fx), selected: editor.selected == Editor.childID("ie", image: id, fx.id))
+                    block(b, Self.color(image: fx), Self.caption(image: fx), selected: editor.selected == Editor.childID("ie", image: id, fx.id),
+                          joined: (pool.contains { $0.joins(fx) }, pool.contains { fx.joins($0) }))
                 }
             }
             if hasPlus(r) {
@@ -773,7 +776,9 @@ final class TimelineView: NSView {
             // An image stays lit while one of its own moves or effects is selected; the image whose
             // rows an open lane shows has a quiet outline.
             let selected = editor.selected == seg.id || (seg.kind == "image" && editor.selectedImage?.id == seg.id)
-            block(b, Self.color(seg), Self.caption(seg), selected: selected, dark: seg.kind == "highlight")
+            // @ref LLP 0002#split — a joined edge is square: the block goes on
+            block(b, Self.color(seg), Self.caption(seg), selected: selected, dark: seg.kind == "highlight",
+                  joined: (segments.contains { $0.joins(seg) }, segments.contains { seg.joins($0) }))
             if !selected, seg.kind == "image", editor.openImageLanes.contains(seg.lane), editor.currentImage(lane: seg.lane)?.id == seg.id {
                 NSColor(white: 1, alpha: 0.6).setStroke()
                 let p = NSBezierPath(roundedRect: b.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
@@ -788,7 +793,9 @@ final class TimelineView: NSView {
             guard let r = row(.lane(Edits.soundSpace, snd.lane)) else { continue }
             let b = CGRect(x: x(snd.start), y: r.y + 2, width: max(4, x(snd.end(map)) - x(snd.start)), height: r.height - 4)
             let from = map.output(snd.start) - snd.offset
-            block(b, Self.soundColor, URL(fileURLWithPath: snd.file).lastPathComponent, selected: editor.selected == Editor.soundID(snd.id)) { box in
+            let sounds = editor.edits.sounds
+            block(b, Self.soundColor, URL(fileURLWithPath: snd.file).lastPathComponent, selected: editor.selected == Editor.soundID(snd.id),
+                  joined: (sounds.contains { $0.joins(snd, map: map) }, sounds.contains { snd.joins($0, map: map) })) { box in
                 guard let wave = Waveform.of(editor.folder.appendingPathComponent(snd.file), ready: { [weak self] in self?.needsDisplay = true }) else { return }
                 self.drawWave(wave, in: box.insetBy(dx: 6, dy: max(3, box.height * 0.2)), alpha: 0.3) { t in map.output(t) - from }
             }
@@ -908,10 +915,26 @@ final class TimelineView: NSView {
         path.stroke()
     }
 
-    private func stroke(_ r: CGRect, selected: Bool) {
+    static func shape(_ r: CGRect, radius: CGFloat, square: (Bool, Bool)) -> NSBezierPath {
+        let k = max(0, min(radius, r.width / 2, r.height / 2)), l = square.0 ? 0 : k, g = square.1 ? 0 : k
+        let p = NSBezierPath()
+        p.move(to: CGPoint(x: r.minX + l, y: r.minY))
+        p.line(to: CGPoint(x: r.maxX - g, y: r.minY))
+        if g > 0 { p.appendArc(from: CGPoint(x: r.maxX, y: r.minY), to: CGPoint(x: r.maxX, y: r.minY + g), radius: g) }
+        p.line(to: CGPoint(x: r.maxX, y: r.maxY - g))
+        if g > 0 { p.appendArc(from: CGPoint(x: r.maxX, y: r.maxY), to: CGPoint(x: r.maxX - g, y: r.maxY), radius: g) }
+        p.line(to: CGPoint(x: r.minX + l, y: r.maxY))
+        if l > 0 { p.appendArc(from: CGPoint(x: r.minX, y: r.maxY), to: CGPoint(x: r.minX, y: r.maxY - l), radius: l) }
+        p.line(to: CGPoint(x: r.minX, y: r.minY + l))
+        if l > 0 { p.appendArc(from: CGPoint(x: r.minX, y: r.minY), to: CGPoint(x: r.minX + l, y: r.minY), radius: l) }
+        p.close()
+        return p
+    }
+
+    private func stroke(_ r: CGRect, selected: Bool, square: (Bool, Bool) = (false, false)) {
         guard selected else { return }
         NSColor.white.setStroke()
-        let p = NSBezierPath(roundedRect: r.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
+        let p = Self.shape(r.insetBy(dx: 1, dy: 1), radius: 6, square: square)
         p.lineWidth = 2
         p.stroke()
     }
@@ -1264,7 +1287,7 @@ final class TimelineView: NSView {
         switch e.keyCode {
         case 51, 117: editor.deleteSelected()            // Delete, Forward Delete
         case 49: editor.togglePlay()                      // Space
-        case 1: editor.splitClip()                        // S
+        case 1: e.modifierFlags.contains(.shift) ? editor.splitAll() : editor.split()   // S, ⇧S
         case 123: editor.seek(source: editor.playhead - (e.modifierFlags.contains(.shift) ? 1 : 1.0 / 30))
         case 124: editor.seek(source: editor.playhead + (e.modifierFlags.contains(.shift) ? 1 : 1.0 / 30))
         default: super.keyDown(with: e)

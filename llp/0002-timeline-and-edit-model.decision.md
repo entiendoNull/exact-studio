@@ -90,11 +90,37 @@ Decided by Jacob on 2026-11-13, when added sounds came:
   video. A start in a removed part plays from the next kept moment.
 - Two sounds on one lane never play at once. Each has its own volume and fades.
 
+## Split
+
+Decided by Jacob on 2026-11-18. Before, "Split Here" cut a block with no join: a split zoom dipped
+to 1×, a split text played its exit and entrance at the cut.
+
+- **Every split keeps the video the same.** Split only makes two blocks you can change apart.
+- A split marks the halves: the first gets `joinEnd`, the second `joinStart`. The second keeps the
+  first's settings and gets a fresh id (`z1` → `z1-2`). Old files have no joins; a missing key is not joined.
+- Two blocks are joined while both say so, they are the same kind on the same lane, and the second
+  starts where the first ends. A sound must also be the same file and start where the first stops in the video.
+- The renderer draws a joined run as one block: eases, a text's entrance and exit, a 3D turn and
+  an orbit use the whole run's start and end. Only the half under the playhead draws, with its own
+  settings. So a text's loop keeps its phase, and a zoom stays in.
+- An image's halves share their moves and effects: each half keeps those that land in its time,
+  and the run plays them all. Its own effects that cross the cut split and join too.
+- A split sound plays on from the same moment of its file (`offset`); it fades in at the run's
+  start and out at its end, never where the halves meet.
+- A mask never fades, but where its halves meet it drops the few milliseconds of slack at each end,
+  so it is never drawn twice.
+- **A join breaks when the halves stop touching.** Move or resize one away, put it on another lane
+  or make it another kind, and the app drops both marks on the next change. Each half then eases
+  and animates on its own, as any block does. `validate` reports a mark without its partner.
+- Moves are points in time (a landing and a travel before it). They are never cut.
+- Speed has no ease, so a split speed changes nothing; it is still marked.
+- On the timeline a joined edge is square: the block goes on.
+
 ## Undo
 
 Asked for by Jacob on 2026-11-18. Before, only a template could be taken back.
 
-- Every change to the edit, the look or the crop is one step: a split, an add, a remove, a drag,
+- Every change to the edit, the look or the crop is one step: a split (named "Split Text", "Split All Lanes"…), an add, a remove, a drag,
   an inspector setting, a template, Clear Edits, Find a Device.
 - ⌘Z undoes, ⇧⌘Z and ⌘Y redo. Edit ▸ Undo names the step ("Undo Split Clip"); so do the two
   arrow buttons beside Play.

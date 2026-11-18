@@ -243,3 +243,44 @@ describe('verbs that change a recording leave it valid', () => {
     expect(run(lib, 'show', 'latest').out).toStartWith('Empty window  (window, empty)');
   });
 });
+
+describe('split cuts and joins, and the video stays the same', () => {
+  let lib = '';
+  beforeAll(() => {
+    lib = library('valid', true);
+  }, 300_000);
+  afterAll(() => drop(lib));
+
+  const frames = (id: string, times: number[]) =>
+    times.map((t) => {
+      const out = join(lib, `frame-${t}.png`);
+      expect(run(lib, 'frame', id, String(t), '--source', '--out', out).code).toBe(0);
+      return readFileSync(out).toString('base64');
+    });
+
+  test('split --all at three times renders the same frames, byte for byte', () => {
+    const times = [1.2, 1.3, 1.31, 2.2, 2.7, 4.6, 5.5, 6.5, 8.7, 8.72];
+    const before = frames('full', times);
+    for (const t of ['1.3', '2.7', '8.7']) {
+      const r = run(lib, 'split', 'full', t, '--all');
+      expect(r.code).toBe(0);
+      expect(r.out).toStartWith(`split all lanes of full at 0:0${t}`);
+    }
+    expect(run(lib, 'validate', 'full').out).toBe('ok\n');
+    expect(frames('full', times)).toEqual(before);
+    const edits = JSON.parse(readFileSync(join(lib, 'full/edits.json'), 'utf8'));
+    expect(edits.segments.filter((s: any) => s.joinEnd).map((s: any) => s.id)).toEqual(['z1', 'sp1', 'spot', 't3', 'mask1', 'mask1-2', 'txt', 'img']);
+  }, 120_000);
+
+  test('split names one item; a move or an edge is refused with a reason', () => {
+    const r = run(lib, 'split', 'joined', '5', 'i-2:p-2');
+    expect(r.out).toBe('split i-2:p-2 of joined at 0:05.00 (edits.json): i-2:p-2 → i-2:p-3, joined\n');
+    expect(run(lib, 'split', 'joined', '2', 't').out).toBe('split t of joined at 0:02.00 (edits.json): t → t-3, joined\n');
+    expect(run(lib, 'validate', 'joined').out).toBe('ok\n');
+    const edge = run(lib, 'split', 'joined', '1.05', 'z');
+    expect(edge.code).toBe(1);
+    expect(edge.err).toBe('Put the playhead inside it, at least 0.1 s from each end.\n');
+    expect(run(lib, 'split', 'joined', '5', 'm').err).toBe('no segment, sound or image effect m in joined\n');
+    expect(run(lib, 'split', 'joined', '3.5').err).toBe('The clip is already split there.\n');
+  });
+});

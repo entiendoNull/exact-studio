@@ -1,0 +1,24 @@
+{
+  "clicks" : [
+    2,
+    6.5
+  ],
+  "folder" : "<library>/joined",
+  "id" : "joined",
+  "kind" : "display",
+  "length" : 10,
+  "name" : "Joined halves",
+  "parts" : [
+    {
+      "end" : 3.5,
+      "removed" : false,
+      "start" : 0
+    },
+    {
+      "end" : 10,
+      "removed" : false,
+      "start" : 3.5
+    }
+  ],
+  "recorded" : 10
+}

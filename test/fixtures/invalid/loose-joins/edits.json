@@ -1,0 +1,66 @@
+{
+  "lanes": 2,
+  "textLanes": 0,
+  "imageLanes": 1,
+  "frameLanes": 0,
+  "soundLanes": 1,
+  "segments": [
+    {
+      "id": "z",
+      "kind": "zoom",
+      "start": 1,
+      "end": 2,
+      "level": 2,
+      "joinEnd": true
+    },
+    {
+      "id": "z-2",
+      "kind": "zoom",
+      "start": 2.5,
+      "end": 3,
+      "level": 2,
+      "joinStart": true
+    },
+    {
+      "id": "b",
+      "kind": "blur",
+      "start": 4,
+      "end": 5,
+      "lane": 0,
+      "joinEnd": true
+    },
+    {
+      "id": "b-2",
+      "kind": "mono",
+      "start": 5,
+      "end": 6,
+      "lane": 0,
+      "joinStart": true
+    },
+    {
+      "id": "i",
+      "kind": "image",
+      "start": 1,
+      "end": 4,
+      "file": "images/logo.png",
+      "effects": [
+        {
+          "id": "p",
+          "kind": "pulse",
+          "start": 2,
+          "end": 3,
+          "joinStart": true
+        }
+      ]
+    }
+  ],
+  "sounds": [
+    {
+      "id": "s",
+      "file": "sounds/beep.wav",
+      "start": 1,
+      "length": 1,
+      "joinEnd": true
+    }
+  ]
+}

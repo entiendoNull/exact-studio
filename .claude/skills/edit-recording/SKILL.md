@@ -76,6 +76,13 @@ Rules that keep an edit looking good:
 - Keep an image small and near a corner unless it is the subject: a logo at `size` 0.08–0.15, a
   picture that carries a moment at 0.3–0.5. Look at a frame after placing it.
 - An id must be unique within its list and hold no colon; any other string works.
+- To change a block partway (a text's words, a zoom's level, a sound's volume), split it first:
+  `./exact-studio split <id> <t> <item>` (an image's effect: `<image>:<effect>`), or `--all` to cut
+  the clip and every block at `<t>`. The halves are joined (`joinEnd`, `joinStart`), so the video
+  stays the same until you change one; then nothing eases or animates where they meet. To make a
+  half ease or animate on its own, move it apart, or remove both join keys. `validate` reports a
+  join without its partner. Never hand-cut a block into two touching ones without the join keys:
+  each would ease out and in at the cut.
 
 ## Hiding a secret with a mask
 

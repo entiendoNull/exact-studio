@@ -114,6 +114,11 @@ shape Summary
   edge: string
   zoomed: bool
   wheelZoom: bool
+  splitLabel: string
+  canSplit: bool
+  splitWhy: string
+  canSplitAll: bool
+  splitAllWhy: string
 
 shape Reply
   ok: bool
@@ -618,10 +623,10 @@ component ExactStudio
                     column width=56 height=5 border-radius=3 background-color="-exact-tertiary-label"
                   row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" resize=lowerBarSized testId="timeline-bar"
                     row gap=8 align-items="center"
-                      button press=editDo("split-clip") buttonStyle="bordered" title="Split the Clip at the playhead (S)" testId="split-clip"
+                      button press=editDo("split") disabled=(not summary.canSplit) buttonStyle="bordered" title=(summary.canSplit ? `${summary.splitLabel} at the playhead (S)` : summary.splitWhy) testId="split-clip"
                         image "symbol:sf/scissors"
-                        text "Split Clip"
-                      button press=editDo("split-all") disabled=true buttonStyle="bordered" title="Coming soon" testId="split-all"
+                        text summary.splitLabel
+                      button press=editDo("split-all") disabled=(not summary.canSplitAll) buttonStyle="bordered" title=(summary.canSplitAll ? "Split the clip and every block under the playhead (⇧S)" : summary.splitAllWhy) testId="split-all"
                         image "symbol:sf/rectangle.split.3x1"
                         text "Split All Lanes"
                       column width=1 height=22 background-color="-exact-separator"
@@ -1251,7 +1256,7 @@ component SettingsCard
       else
         if sel.kind != "recorded"
           row gap=8
-            if sel.kind != "move" and sel.kind != "imove" and sel.kind != "ifx" and sel.kind != "sound"
+            if sel.kind != "move" and sel.kind != "imove"
               button press=editDo("split") buttonStyle="bordered" flex=1 testId="segment-split"
                 text "Split Here"
             button press=editDo("delete") buttonStyle="bordered" flex=1 testId="segment-delete"

@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CoreImage.CIFilterBuiltins
 
 setvbuf(stdout, nil, _IOLBF, 0)
 _ = NSApplication.shared
@@ -401,6 +402,104 @@ test("the motion paths are never in a rendered frame: the preview alone draws th
 
 // MARK: The editor
 
+
+// MARK: Seamless splits
+
+test("a split's halves join: both say so, the second gets a fresh id, an image's moves and effects go with their time") {
+    var e = try decode("""
+    { "imageLanes": 1, "segments": [
+      { "id": "z1", "kind": "zoom", "start": 1, "end": 3, "level": 2 },
+      { "id": "i", "kind": "image", "start": 1, "end": 5, "file": "images/logo.png",
+        "moves": [{ "id": "a", "t": 2, "to": {} }, { "id": "b", "t": 4, "to": {} }],
+        "effects": [{ "id": "p", "kind": "pulse", "start": 1.5, "end": 4 }, { "id": "q", "kind": "blur", "start": 4, "end": 5 }] } ] }
+    """)
+    let made = try e.splitSegment("z1", at: 2)
+    eq(made, "z1-2")
+    eq(e.segments.map(\.id), ["z1", "z1-2", "i"], "the second half follows the first, so the drawing order stays")
+    eq(e.segments[0].end, 2); eq(e.segments[0].joinEnd, true); eq(e.segments[0].joinStart, nil)
+    eq(e.segments[1].start, 2); eq(e.segments[1].joinStart, true); eq(e.segments[1].joinEnd, nil)
+    expect(e.segments[0].joins(e.segments[1]), "the halves join")
+    eq(try e.splitSegment("z1-2", at: 2.5), "z1-3", "a second split counts on")
+    eq(Joins.run(e.segments[1], in: e.segments).map(\.id), ["z1", "z1-2", "z1-3"])
+    try e.splitSegment("i", at: 3)
+    let left = e.segments.first { $0.id == "i" }!, right = e.segments.first { $0.id == "i-2" }!
+    eq(left.moves?.map(\.id), ["a"]); eq(right.moves?.map(\.id), ["b"])
+    eq(left.effects?.map(\.id), ["p"]); eq(right.effects?.map(\.id), ["p-2", "q"])
+    eq(left.effects?.first?.joinEnd, true); eq(right.effects?.first?.joinStart, true)
+    let whole = Joins.whole(right, run: Joins.run(right, in: e.segments))
+    eq(whole.start, 1); eq(whole.end, 5); eq(whole.moves?.map(\.id), ["a", "b"]); eq(whole.effects?.map(\.id), ["p", "p-2", "q"])
+    do { try e.splitSegment("i", at: 2.95); expect(false, "a piece shorter than 0.1 s") } catch let r as SplitRefused { expect(r.why.contains("0.1 s"), r.why) }
+}
+
+test("a split sound plays on from the same moment of its file, and keeps its fades at the run's ends") {
+    var e = try decode("""
+    { "splits": [2, 3], "removed": [2], "soundLanes": 1,
+      "sounds": [{ "id": "s", "file": "sounds/beep.wav", "start": 1, "length": 4, "offset": 0.5, "fadeIn": 0.6, "fadeOut": 1.5 }] }
+    """)
+    let map = TimeMap(duration: 10, edits: e)
+    let whole = e.sounds[0], (a, b) = whole.playing(map)
+    try e.splitSound("s", at: 4, map: map)
+    let l = e.sounds[0], r = e.sounds[1]
+    eq(r.id, "s-2"); eq(r.start, 4)
+    near(l.playing(map).end, map.output(4)); near(r.playing(map).start, map.output(4)); near(r.playing(map).end, b)
+    near(r.offset, l.offset + l.length, "the second half plays on from where the first stopped")
+    eq(Joins.run(r, in: e.sounds, map: map).map(\.id), ["s", "s-2"])
+    func level(_ ramps: [(start: Double, end: Double, from: Double, to: Double)], _ x: Double) -> Double? {
+        ramps.first { x >= $0.start && x <= $0.end }.map { $0.from + ($0.to - $0.from) * ($0.end > $0.start ? (x - $0.start) / ($0.end - $0.start) : 0) }
+    }
+    let before = Sound.ramps(a, b, run: a, b, fadeIn: whole.fadeIn, fadeOut: whole.fadeOut)
+    let left = Sound.ramps(l.playing(map).start, l.playing(map).end, run: a, b, fadeIn: l.fadeIn, fadeOut: r.fadeOut)
+    let right = Sound.ramps(r.playing(map).start, r.playing(map).end, run: a, b, fadeIn: l.fadeIn, fadeOut: r.fadeOut)
+    for x in stride(from: a, through: b, by: 0.05) {
+        let after = x < l.playing(map).end ? level(left, x) : level(right, x)
+        near(after ?? -1, level(before, x) ?? -2, "the volume at \(x)", within: 0.0001)
+    }
+    near(level(left, l.playing(map).end) ?? 0, 1, "no fade out where the halves meet")
+    near(level(right, r.playing(map).start) ?? 0, 1, "no fade in where they meet")
+}
+
+test("Split All Lanes cuts the clip and every block under the playhead; moves never") {
+    var e = try decode("""
+    { "lanes": 2, "textLanes": 1, "soundLanes": 1,
+      "segments": [{ "id": "z", "kind": "zoom", "start": 1, "end": 4, "level": 2 }, { "id": "sp", "kind": "speed", "start": 2, "end": 6, "lane": 1, "rate": 2 },
+                   { "id": "t", "kind": "text", "start": 0, "end": 9, "text": "Hi" }, { "id": "late", "kind": "blur", "start": 5, "end": 6 },
+                   { "id": "edge", "kind": "mono", "start": 2.95, "end": 4, "lane": 1 }],
+      "moves": [{ "id": "m", "t": 3, "to": { "x": 0.3 } }],
+      "sounds": [{ "id": "s", "file": "sounds/beep.wav", "start": 0, "length": 5 }] }
+    """)
+    let before = e, map = TimeMap(duration: 10, edits: e)
+    let cut = try e.splitAll(at: 3, duration: 10, map: map)
+    eq(cut, ["clip", "zoom z → z-2", "speed sp → sp-2", "text t → t-2", "sound s → s-2"])
+    eq(e.splits, [3]); eq(e.moves, before.moves); eq(e.segments.count, 8)
+    eq(TimeMap(duration: 10, edits: e).outputDuration, map.outputDuration, "a split speed keeps the timing")
+    expect(e.looseJoins(map: map).isEmpty, "\(e.looseJoins(map: map))")
+    var again = e
+    do { try again.splitAll(at: 3, duration: 10, map: map); expect(false, "nothing is left to cut there") } catch let r as SplitRefused {
+        eq(r.why, "Nothing under the playhead can be split there.")
+    }
+}
+
+test("joins survive saving; a file without them loads unjoined; a half moved away loses its join") {
+    var e = Edits(segments: [seg("z", "zoom", 1, 3)])
+    try e.splitSegment("z", at: 2)
+    let back = try JSONDecoder().decode(Edits.self, from: JSONEncoder().encode(e))
+    eq(back, e); eq(back.segments.map(\.joinEnd), [true, nil]); eq(back.segments.map(\.joinStart), [nil, true])
+    let text = String(data: try JSONEncoder().encode(Edits(segments: [seg("y", "zoom", 1, 3)])), encoding: .utf8)!
+    expect(!text.contains("join"), "an unjoined segment writes no join keys: \(text)")
+    eq(try decode("{ \"segments\": [{ \"id\": \"z\", \"kind\": \"zoom\", \"start\": 1, \"end\": 2, \"level\": 2 }] }").segments[0].joinStart, nil)
+    var moved = e
+    moved.segments[1].start = 2.5; moved.segments[1].end = 3.5
+    let map = TimeMap(duration: 10, edits: moved)
+    eq(moved.looseJoins(map: map), ["zoom z: joinEnd, but no zoom on its lane starts where it ends with joinStart",
+                                    "zoom z-2: joinStart, but no zoom on its lane ends where it starts with joinEnd"])
+    moved.dropLooseJoins(map: map)
+    eq(moved.segments.map(\.joinEnd), [nil, nil]); eq(moved.segments.map(\.joinStart), [nil, nil])
+    var lane = e
+    lane.segments[1].lane = 1
+    lane.dropLooseJoins(map: map)
+    eq(lane.segments[0].joinEnd, nil, "another lane is no longer joined")
+}
+
 print("editor")
 
 let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("exact-studio-model-\(getpid())")
@@ -531,7 +630,7 @@ test("typed times are checked; delete removes the selection") {
     eq(e.problem, "Start must come at least 0.1 s before end, inside 0:00–\(Editor.stamp(e.duration)).")
     e.setTimes(start: 2, end: 5)
     near(e.selectedSegment?.start ?? -1, 2); near(e.selectedSegment?.end ?? -1, 5)
-    at(e, 3); e.splitSelected()
+    at(e, 3); e.split()
     eq(e.edits.effects.count, 2)
     e.deleteSelected()
     eq(e.edits.effects.count, 1); eq(e.selected, "")
@@ -834,6 +933,119 @@ test("a text or an image with no animation set shows the one it plays: Pop or Fa
     eq(e.selection["animIn"] as? String, "none", "an unknown entrance plays none"); eq(e.selection["loop"] as? String, "none")
     e.select("i1")
     eq(e.selection["animIn"] as? String, "fade"); eq(e.selection["animOut"] as? String, "fade")
+}
+
+// MARK: Seamless splits, rendered
+
+let renderContext = CIContext(options: [.cacheIntermediates: false])
+func pixels(_ f: Framing, _ frame: CIImage, at t: Double) -> [UInt8] {
+    let w = Int(f.canvas.width), h = Int(f.canvas.height)
+    var out = [UInt8](repeating: 0, count: w * h * 4)
+    renderContext.render(f.render(frame, at: t), toBitmap: &out, rowBytes: w * 4, bounds: CGRect(x: 0, y: 0, width: w, height: h),
+                         format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+    return out
+}
+func differ(_ a: [UInt8], _ b: [UInt8]) -> (most: Int, count: Int) {
+    var most = 0, count = 0
+    for i in a.indices where a[i] != b[i] { most = max(most, abs(Int(a[i]) - Int(b[i]))); count += 1 }
+    return (most, count)
+}
+
+test("every split keeps the rendered video the same: zooms, texts with loops, effects, 3D turns, images with moves and effects, masks") {
+    let e = open("full")
+    var base = e.edits
+    var wave = seg("t2", "text", 3, 7.6)
+    wave.text = "Wave"; wave.loop = "wave"; wave.animIn = "drop"; wave.animOut = "fall"; wave.y = 0.85; wave.style = "box"
+    var turn = seg("hold", "3d", 2.6, 4.2, lane: 2)
+    turn.style = "hold"; turn.tilt = 20; turn.turn = -30
+    var blur = seg("vb", "blur", 5.6, 7.4, lane: 2)
+    blur.scope = nil
+    var rounded = base.segments.first { $0.id == "mask1" }!
+    rounded.id = "mask3"; rounded.radius = 0.4; rounded.start = 5; rounded.end = 9; rounded.lane = 0; rounded.rect = UnitRect(x: 0.4, y: 0.5, w: 0.3, h: 0.2)
+    base.segments += [wave, turn, blur, rounded]
+    base.textLanes = 2
+    base.three.on = false
+    let cuts = [1.3, 2.7, 3.4, 4.5, 6.5, 6.9, 8.7]
+    var split = base
+    for c in cuts { try split.splitAll(at: c, duration: e.duration, map: TimeMap(duration: e.duration, edits: split)) }
+    expect(split.segments.count >= base.segments.count + 12, "only \(split.segments.count - base.segments.count) blocks were cut")
+    expect(split.looseJoins(map: TimeMap(duration: e.duration, edits: split)).isEmpty, "\(split.looseJoins(map: TimeMap(duration: e.duration, edits: split)))")
+    let checker = CIFilter.checkerboardGenerator()
+    checker.width = 12; checker.color0 = CIColor(red: 0.9, green: 0.4, blue: 0.1); checker.color1 = CIColor(red: 0.1, green: 0.3, blue: 0.8)
+    let frame = checker.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: e.meta.width, height: e.meta.height))
+    let one = Framing(meta: e.meta, look: e.look, edits: base, cursor: e.cursor, folder: e.folder)
+    let two = Framing(meta: e.meta, look: e.look, edits: split, cursor: e.cursor, folder: e.folder)
+    var naive = split
+    naive.segments = naive.segments.map { var s = $0; s.joinStart = nil; s.joinEnd = nil
+        s.effects = s.effects?.map { var x = $0; x.joinStart = nil; x.joinEnd = nil; return x }; return s }
+    let three = Framing(meta: e.meta, look: e.look, edits: naive, cursor: e.cursor, folder: e.folder)
+    let times = cuts.flatMap { c in [-0.3, -0.05, -1.0 / 60, 0, 1.0 / 60, 0.05, 0.3].map { c + $0 } } + stride(from: 0.1, to: 9.9, by: 0.7).map { $0 }
+    var naiveDiffers = 0
+    for t in times {
+        let a = pixels(one, frame, at: t)
+        let d = differ(a, pixels(two, frame, at: t))
+        expect(d.most <= 1, "at \(t): \(d.count) bytes differ, by up to \(d.most)")
+        if cuts.contains(where: { abs($0 - t) < 0.06 }), differ(a, pixels(three, frame, at: t)).most > 8 { naiveDiffers += 1 }
+    }
+    expect(naiveDiffers >= 6, "without the joins only \(naiveDiffers) frames by a cut changed: the test can't tell")
+    base.three.on = true
+    split.three.on = true
+    let deep = [Framing(meta: e.meta, look: e.look, edits: base, cursor: e.cursor, folder: e.folder),
+                Framing(meta: e.meta, look: e.look, edits: split, cursor: e.cursor, folder: e.folder)]
+    for t in [2.7, 3.4, 4.2 - 1.0 / 60, 8.7, 8.7 + 1.0 / 60] {
+        let d = differ(pixels(deep[0], frame, at: t), pixels(deep[1], frame, at: t))
+        expect(d.most <= 1, "in 3D at \(t): \(d.count) bytes differ, by up to \(d.most)")
+    }
+}
+
+test("Split follows the selection and names itself; the clip when nothing is selected; each split is one undo step") {
+    let e = open("full")
+    at(e, 1.3)
+    e.select("")
+    eq(e.splitLabel, "Split Clip"); eq(e.summary["canSplit"] as? Bool, true); eq(e.summary["splitLabel"] as? String, "Split Clip")
+    e.select("txt")
+    eq(e.splitLabel, "Split Text")
+    e.split()
+    eq(e.problem, ""); eq(e.undoName, "Split Text"); eq(e.selected, "txt-2", "the second half is selected")
+    eq(e.edits.splits, [3, 4.5, 7], "the clip is not cut")
+    e.select("z1"); eq(e.splitLabel, "Split Zoom")
+    e.select("img"); eq(e.splitLabel, "Split Image")
+    e.select("snd:sound1"); eq(e.splitLabel, "Split Sound")
+    e.select("ie:img:e1"); eq(e.splitLabel, "Split Image Effect")
+    eq(e.summary["canSplit"] as? Bool, false, "the playhead is off that effect"); expect((e.summary["splitWhy"] as? String ?? "").contains("0.1 s"), "says why")
+    e.split()
+    expect(e.problem.contains("0.1 s"), e.problem)
+    e.select("m:m1"); eq(e.splitLabel, "Split Clip", "a move is a point in time, so the clip is cut")
+    e.undo()
+    eq(e.edits.texts.count, 1)
+}
+
+test("Split All Lanes is one undo step, and undo restores exactly") {
+    let e = open("full")
+    let before = e.edits
+    at(e, 1.3)
+    eq(e.summary["canSplitAll"] as? Bool, true)
+    e.splitAll()
+    eq(e.problem, ""); eq(e.undoName, "Split All Lanes")
+    expect(e.edits.splits.contains { abs($0 - 1.3) < 0.01 }, "the clip is cut"); eq(e.edits.moves, before.moves)
+    expect(e.edits.segments.count > before.segments.count + 3, "every lane was cut"); eq(e.edits.sounds.count, 2)
+    eq(onDisk(e), e.edits, "saved with its joins")
+    e.undo()
+    eq(e.edits, before); eq(onDisk(e), before, "written back")
+    e.redo()
+    expect(e.edits.segments.count > before.segments.count + 3, "redo cuts again")
+}
+
+test("a half dragged away from the other is no longer joined") {
+    let e = open("full")
+    at(e, 1.8)
+    e.select("z1"); e.split()
+    let right = e.selected
+    eq(e.edits.segments.first { $0.id == "z1" }?.joinEnd, true)
+    e.drag(right, start: 2.0, end: 2.7, lane: 0)
+    e.endDrag()
+    eq(e.problem, "")
+    eq(e.edits.segments.first { $0.id == "z1" }?.joinEnd, nil); eq(e.selectedSegment?.joinStart, nil)
 }
 
 print("\(passed) passed, \(failed.count) failed")

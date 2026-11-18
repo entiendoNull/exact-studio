@@ -42,6 +42,10 @@ exact-studio — edit Exact Studio recordings from the command line
                                             from <t> seconds of the recording (default 0) for <seconds> (default 4), at
                                             full strength throughout; it follows the video through zooms, moves and 3D;
                                             on the first effect lane free then (else a new one); prints the new segment
+  exact-studio split <id> <t> [<item>]      cuts at <t> seconds of the recording: the clip, or the segment or sound whose
+                                            id is <item> (an image's effect: <image>:<effect>); its halves join, so the
+                                            video looks and sounds the same; prints what it cut
+  exact-studio split <id> <t> --all         Split All Lanes: the clip and every block under <t>; moves are never cut
   exact-studio schema                       prints where the docs and JSON Schemas are
 
 Recording, through the Exact Studio app (opened when it is not running):
@@ -165,6 +169,14 @@ func maskProblems(_ s: Segment) -> [String] {
     return out
 }
 
+func joinWords(_ before: String?, _ after: String?) -> String {
+    [before.map { "  joined after \($0)" }, after.map { "  joined before \($0)" }].compactMap { $0 }.joined()
+}
+
+func joins(_ s: Segment, _ pool: [Segment]) -> String {
+    joinWords(pool.first { $0.joins(s) }?.id, pool.first { s.joins($0) }?.id)
+}
+
 /// Problems with a recording's edits, each a line; empty when it is fine.
 func problems(_ r: Recording) -> [String] {
     var out = r.unreadable
@@ -229,6 +241,8 @@ func problems(_ r: Recording) -> [String] {
     let ends = e.pieces(d).map { Edits.key($0.end) }
     for k in e.transitions.keys where !ends.contains(k) { out.append("transition at \(k) ms: not the end of a clip part") }
     if e.pieces(d).allSatisfy(\.removed) { out.append("every clip part is removed") }
+    // @ref LLP 0002#split
+    out += e.looseJoins(map: map)
     return out
 }
 
@@ -373,19 +387,21 @@ case "show":
             }
         default: if s.coversFrame { what += s.scope == "all" ? " (whole frame, texts too)" : " (whole frame)" }
         }
-        print("  \(["e", "t", "i", "f"][s.space])\(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]")
+        print("  \(["e", "t", "i", "f"][s.space])\(s.lane): \(stamp(s.start))–\(stamp(s.end))  \(what)  [\(s.id)]\(joins(s, r.edits.segments))")
         // An image's own moves and effects, under it.
         for m in (s.moves ?? []).sorted(by: { $0.t < $1.t }) {
             print("        move lands \(stamp(m.t)) after \(m.duration)s \(m.style): x \(m.to.x) y \(m.to.y) scale \(m.to.scale)  [\(m.id)]")
         }
         for fx in (s.effects ?? []).sorted(by: { $0.start < $1.start }) {
-            print("        effect \(fx.kind)\(fx.kind == "fade" ? " to \(fx.level ?? 0.3)" : "") \(stamp(fx.start))–\(stamp(fx.end))  [\(fx.id)]")
+            let pool = Joins.whole(s, run: Joins.run(s, in: r.edits.segments)).effects ?? []
+            print("        effect \(fx.kind)\(fx.kind == "fade" ? " to \(fx.level ?? 0.3)" : "") \(stamp(fx.start))–\(stamp(fx.end))  [\(fx.id)]\(joins(fx, pool))")
         }
     }
     if !r.edits.sounds.isEmpty { print("sounds (added over the video; each plays straight through from its start, not cut by the cuts):") }
     for s in r.edits.sounds.sorted(by: { ($0.lane, $0.start) < ($1.lane, $1.start) }) {
         let (a, b) = s.playing(map)
-        print("  s\(s.lane): from \(stamp(s.start)) for \(s.length)s (video \(stamp(a))–\(stamp(b)))  \(s.file) from \(s.offset)s  volume \(s.volume) fade in \(s.fadeIn)s out \(s.fadeOut)s  [\(s.id)]")
+        let before = r.edits.sounds.first { $0.joins(s, map: map) }, after = r.edits.sounds.first { s.joins($0, map: map) }
+        print("  s\(s.lane): from \(stamp(s.start)) for \(s.length)s (video \(stamp(a))–\(stamp(b)))  \(s.file) from \(s.offset)s  volume \(s.volume) fade in \(s.fadeIn)s out \(s.fadeOut)s  [\(s.id)]\(joinWords(before?.id, after?.id))")
     }
     if !r.edits.moves.isEmpty { print("moves:") }
     for m in r.edits.moves.sorted(by: { $0.t < $1.t }) {
@@ -602,6 +618,33 @@ case "record":
     default:
         fail("record takes start, status or stop. `exact-studio` alone prints the help.")
     }
+
+case "split":
+    let every = flag("--all")
+    guard args.count >= 2, let t = Double(args[1]) else { fail(usage) }
+    var r = open(args[0])
+    let d = r.meta.duration, map = TimeMap(duration: d, edits: r.edits)
+    do {
+        if every {
+            let cut = try r.edits.splitAll(at: t, duration: d, map: map)
+            write(r.edits, r.folder.appendingPathComponent("edits.json"))
+            print("split all lanes of \(r.id) at \(stamp(t)) (edits.json):")
+            cut.forEach { print("  \($0)") }
+        } else if args.count < 3 {
+            try r.edits.splitClip(at: t, duration: d)
+            write(r.edits, r.folder.appendingPathComponent("edits.json"))
+            print("split the clip of \(r.id) at \(stamp(t)) (edits.json)")
+        } else {
+            let item = args[2], parts = item.split(separator: ":", maxSplits: 1).map(String.init)
+            let made: String
+            if parts.count == 2 { made = parts[0] + ":" + (try r.edits.splitImageEffect(image: parts[0], effect: parts[1], at: t)) }
+            else if r.edits.segments.contains(where: { $0.id == item }) { made = try r.edits.splitSegment(item, at: t) }
+            else if r.edits.sounds.contains(where: { $0.id == item }) { made = try r.edits.splitSound(item, at: t, map: map) }
+            else { fail("no segment, sound or image effect \(item) in \(r.id)", code: 1) }
+            write(r.edits, r.folder.appendingPathComponent("edits.json"))
+            print("split \(item) of \(r.id) at \(stamp(t)) (edits.json): \(item) → \(made), joined")
+        }
+    } catch let refused as SplitRefused { fail(refused.why, code: 1) } catch { fail("\(error)") }
 
 case "schema":
     let root = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
