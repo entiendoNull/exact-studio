@@ -62,7 +62,7 @@ test('tools/list offers every tool, each with a schema', async () => {
   expect(result.tools.map((t: any) => t.name)).toEqual([
     'list_sources', 'start_recording', 'recording_status', 'stop_recording', 'list_recordings', 'show_recording',
     'read_edits', 'write_edits', 'write_look', 'validate_recording', 'render_frame', 'export_video', 'apply_template',
-    'add_image', 'add_sound', 'add_mask', 'edit_format',
+    'add_image', 'add_sound', 'add_mask', 'edit_format', 'directing_guide', 'feedback_guide',
   ]);
   for (const t of result.tools) expect(t.inputSchema.type).toBe('object');
 });
