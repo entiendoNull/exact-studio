@@ -295,6 +295,110 @@ test("mask colours: a hex or a text colour's name, else refused") {
     eq(Segment.maskHex("teal"), nil)
 }
 
+// MARK: Motion paths
+
+func pathFraming(_ edits: String, aspect: String = "16:9", kind: String = "area") throws -> Framing {
+    let meta = try JSONDecoder().decode(RecordingMeta.self, from: Data("""
+    {"id":"m","name":"m","kind":"\(kind)","created":0,"duration":10,"width":1600,"height":1000,
+     "crop":{"x":0,"y":0,"w":1,"h":1},"clicks":[],"cursorBaked":true}
+    """.utf8))
+    var look = Look()
+    look.aspect = aspect; look.shadow = false; look.background = "custom"; look.customA = "#000000"; look.customB = "#101010"; look.radius = 0
+    return Framing(meta: meta, look: look, edits: try decode(edits), cursor: [])
+}
+
+let pathContext = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
+
+func drawnBounds(_ f: Framing, at t: Double) -> CGRect {
+    let w = Int(f.canvas.width), h = Int(f.canvas.height)
+    let source = CIImage(color: CIColor(red: 1, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 1600, height: 1000))
+    let image = f.render(source, at: t, texts: false)
+    var px = [UInt8](repeating: 0, count: w * h * 4)
+    pathContext.render(image, toBitmap: &px, rowBytes: w * 4, bounds: CGRect(x: 0, y: 0, width: w, height: h), format: .RGBA8, colorSpace: nil)
+    var x0 = w, x1 = -1, y0 = h, y1 = -1
+    for y in 0..<h { for x in 0..<w {
+        let o = (y * w + x) * 4
+        if px[o] > 200 && px[o + 1] < 60 && px[o + 2] > 200 { x0 = min(x0, x); x1 = max(x1, x); y0 = min(y0, y); y1 = max(y1, y) }
+    } }
+    guard x1 >= 0 else { return .null }
+    return CGRect(x: CGFloat(x0) / CGFloat(w), y: CGFloat(y0) / CGFloat(h), width: CGFloat(x1 - x0 + 1) / CGFloat(w), height: CGFloat(y1 - y0 + 1) / CGFloat(h))
+}
+
+func sameBox(_ drawn: CGRect, _ path: [CGPoint], _ what: String, pixels: Double = 3, canvas: CGSize, line: Int = #line) {
+    let b = MotionPath.bounds(path).intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+    expect(!drawn.isNull, "\(what): nothing drawn", line: line)
+    let px = pixels / Double(canvas.width), py = pixels / Double(canvas.height)
+    near(drawn.minX, b.minX, "\(what) left", within: px, line: line); near(drawn.maxX, b.maxX, "\(what) right", within: px, line: line)
+    near(drawn.minY, b.minY, "\(what) top", within: py, line: line); near(drawn.maxY, b.maxY, "\(what) bottom", within: py, line: line)
+}
+
+let pathMoves = """
+{"base":{"x":0.5,"y":0.5,"scale":0.9},"moves":[
+ {"id":"a","t":2,"to":{"x":0.3,"y":0.4,"scale":0.6}},
+ {"id":"b","t":4,"to":{"x":0.72,"y":0.62,"scale":0.8},"style":"spring","duration":1.2},
+ {"id":"c","t":6,"to":{"x":0.5,"y":0.45,"scale":1.1},"style":"linear"}]%@}
+"""
+
+test("each dashed landing frame is where the renderer puts the video at that move's time") {
+    let f = try pathFraming(pathMoves.replacingOccurrences(of: "%@", with: ""))
+    let path = f.motionPath(at: 1)!
+    eq(path.landings.map(\.id), ["a", "b", "c"])
+    eq(path.landings.map(\.label), ["1 · Smooth · 0:02.0", "2 · Spring · 0:04.0", "3 · Linear · 0:06.0"])
+    for l in path.landings { sameBox(drawnBounds(f, at: l.t), l.corners, "move \(l.id)", canvas: f.canvas) }
+    sameBox(drawnBounds(f, at: 1), path.now, "now", canvas: f.canvas)
+    near(path.start.x, 0.5); near(path.start.y, 0.5)
+}
+
+test("a landing frame follows the frame shape, the padding and a zoom at its time") {
+    let zoomed = pathMoves.replacingOccurrences(of: "%@", with: #","segments":[{"id":"z","kind":"zoom","start":3,"end":5,"level":1.5}]"#)
+    for aspect in ["9:16", "1:1"] {
+        let f = try pathFraming(zoomed, aspect: aspect)
+        for l in f.motionPath(at: 0)!.landings { sameBox(drawnBounds(f, at: l.t), l.corners, "\(aspect) move \(l.id)", canvas: f.canvas) }
+    }
+}
+
+test("in 3D a landing frame is the turned face the renderer draws") {
+    let flat3D = pathMoves.replacingOccurrences(of: "%@", with: #","three":{"on":true}"#)
+    let f = try pathFraming(flat3D)
+    for l in f.motionPath(at: 0)!.landings { sameBox(drawnBounds(f, at: l.t), l.corners, "3D at 0° move \(l.id)", canvas: f.canvas) }
+    let turned = """
+    {"three":{"on":true,"thickness":0.02},"moves":[
+     {"id":"a","t":2,"to":{"x":0.45,"y":0.5,"scale":1},"angles":{"tilt":12,"turn":-24,"roll":0}},
+     {"id":"b","t":4,"to":{"x":0.55,"y":0.5,"scale":0.8},"angles":{"tilt":4,"turn":14,"roll":3}}]}
+    """
+    let g = try pathFraming(turned)
+    for l in g.motionPath(at: 0)!.landings {
+        eq(l.radius, 0, "a turned frame has no rounded corners")
+        sameBox(drawnBounds(g, at: l.t), l.corners, "turned move \(l.id)", pixels: 4, canvas: g.canvas)
+    }
+}
+
+test("an image's path: its box at each landing, turned with it; nothing without moves") {
+    let f = try pathFraming(#"{"imageLanes":1,"segments":[{"id":"i","kind":"image","start":0,"end":8,"lane":0,"x":0.2,"y":0.3,"size":0.2,"rotation":90,"moves":[{"id":"m","t":3,"to":{"x":0.8,"y":0.7,"scale":0.5}}]}]}"#)
+    let image = f.edits.segments[0]
+    let path = f.motionPath(image: image, at: 0)!
+    let box = f.imageFrame(image, at: 3)
+    let b = MotionPath.bounds(path.landings[0].corners)
+    near(b.midX, box.x + box.w / 2); near(b.midY, box.y + box.h / 2)
+    near(b.height, box.w * f.canvas.width / f.canvas.height, "turned a quarter, its width stands up")
+    near(path.start.x, 0.2); near(path.start.y, 0.3)
+    expect(try pathFraming("{}").motionPath(at: 0) == nil, "no moves, no path")
+}
+
+test("the motion paths are never in a rendered frame: the preview alone draws them") {
+    let f = try pathFraming(pathMoves.replacingOccurrences(of: "%@", with: ""))
+    let w = Int(f.canvas.width), h = Int(f.canvas.height)
+    let source = CIImage(color: CIColor(red: 1, green: 0, blue: 1)).cropped(to: CGRect(x: 0, y: 0, width: 1600, height: 1000))
+    var px = [UInt8](repeating: 0, count: w * h * 4)
+    pathContext.render(f.render(source, at: 3, texts: true), toBitmap: &px, rowBytes: w * 4, bounds: CGRect(x: 0, y: 0, width: w, height: h), format: .RGBA8, colorSpace: nil)
+    var lit = 0
+    for i in stride(from: 0, to: px.count, by: 4) where px[i] > 230 && px[i + 1] > 230 && px[i + 2] > 230 { lit += 1 }
+    eq(lit, 0, "no white dashed frame, label or diamond in the render")
+    var teal = 0
+    for i in stride(from: 0, to: px.count, by: 4) where px[i] < 140 && px[i + 1] > 150 && px[i + 2] > 180 { teal += 1 }
+    eq(teal, 0, "no teal path or arrow in the render")
+}
+
 // MARK: The editor
 
 print("editor")
@@ -615,6 +719,21 @@ test("the inspector's selection says what is selected") {
     e.select("m:m1")
     eq(e.selection["kind"] as? String, "move"); eq(e.selection["moveStyle"] as? String, "spring")
     eq(e.summary["parts"] as? Int, 4); eq(e.summary["images"] as? Int, 1)
+}
+
+test("dragging a landing frame moves where that move lands, as one named undo step") {
+    let e = open("full")
+    e.setLanding("m1", x: 0.62, y: 0.3, live: true)
+    e.setLanding("m1", x: 0.7, y: 0.35, live: true)
+    e.setLanding("m1", x: 0.7, y: 0.35, live: false)
+    eq(onDisk(e).moves[0].to, Placement(x: 0.7, y: 0.35, scale: 1.1))
+    eq(e.undoName, "Move Landing")
+    e.undo()
+    eq(onDisk(e).moves[0].to, Placement(x: 0.4, y: 0.5, scale: 1.1))
+    eq(e.undoName, "")
+    e.setLanding("im1", image: "img", x: 0.6, y: 0.4, live: false)
+    eq(onDisk(e).segments.first { $0.id == "img" }?.moves?[0].to, Placement(x: 0.6, y: 0.4, scale: 0.5))
+    eq(e.undoName, "Move Landing")
 }
 
 print("\(passed) passed, \(failed.count) failed")

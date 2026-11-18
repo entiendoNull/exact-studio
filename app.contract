@@ -171,6 +171,7 @@ component ExactStudio
   state exportOpen = false
   // The preview shows the whole recorded frame with the crop's grid and handles.
   state cropping = false
+  state showMotionPaths = true persist
   state panelX = 24 persist
   // The timeline's height, set by dragging the handle under the preview; the preview takes the rest.
   state timelineH = 330 persist
@@ -269,6 +270,8 @@ component ExactStudio
     cropping = false
   action toggleCrop
     cropping = not cropping
+  action toggleMotionPaths
+    showMotionPaths = not showMotionPaths
   action endCrop
     cropping = false
   action openIt
@@ -560,7 +563,7 @@ component ExactStudio
                   text "Pick a display, a window, an area or a Simulator in the sidebar. A Simulator or an emulator is cropped to its bezel, nothing more." color="-exact-secondary-label" text-align="center" max-width="28rem"
               case some(rec)
                 column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease" resize=stageSized
-                  studio-preview clip=rec.id look=look cropping=(cropping ? "true" : "") aria-label="Preview" flex=1 min-height=200 testId="preview"
+                  studio-preview clip=rec.id look=look cropping=(cropping ? "true" : "") paths=(showMotionPaths ? "true" : "false") aria-label="Preview" flex=1 min-height=200 testId="preview"
                   if cropping
                     row gap=10 align-items="center" padding="8px 12px" border-radius=12 background-color="-exact-tertiary-background" testId="crop-bar"
                       image "symbol:sf/crop" color="-exact-secondary-label" aria-hidden=true
@@ -604,6 +607,9 @@ component ExactStudio
                     button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
                       image "symbol:sf/crop"
                       text "Crop"
+                    button press=toggleMotionPaths -exact-menu="view" aria-label="Show Motion Paths" aria-pressed=showMotionPaths aria-selected=showMotionPaths title="Show how the video and the selected image move" buttonStyle="bordered" testId="motion-paths"
+                      image "symbol:sf/point.topleft.down.to.point.bottomright.curvepath"
+                      text "Motion Paths"
                     // The zoom buttons and the length: one unit at the right end, wrapping together.
                     row flex-grow=1 flex-shrink=0 gap=8 align-items="center" justify-content="flex-end"
                       // Zoom the timeline; the last button says whether the mouse wheel zooms it too.
