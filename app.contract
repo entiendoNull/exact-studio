@@ -121,6 +121,7 @@ shape Summary
   edge: string
   zoomed: bool
   wheelZoom: bool
+  showEmptyLanes: bool
   splitLabel: string
   canSplit: bool
   splitWhy: string
@@ -742,6 +743,9 @@ component ExactStudio
                       text "Clear Edits…"
                     button press=askRemove(selected) -exact-menu="file" aria-label="Delete Recording…" testId="menu-delete"
                       text "Delete Recording…"
+                    // @ref LLP 0002#rows — a view setting, as Motion Paths is
+                    button press=zoomTimeline("empty-lanes") -exact-menu="view" aria-label="Show Empty Lanes" aria-pressed=summary.showEmptyLanes aria-selected=summary.showEmptyLanes testId="menu-empty-lanes"
+                      text "Show Empty Lanes"
                     // @ref LLP 0005#depth — Exact adds no menu of its own, so the arrange commands sit in Edit
                     button press=arrange("forward") -exact-menu="edit" disabled=(not sel.canForward) aria-label="Bring Forward" testId="menu-arrange-forward"
                       text "Bring Forward"

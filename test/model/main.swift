@@ -99,7 +99,7 @@ print("edit model")
 
 test("an empty file takes every default") {
     let e = try decode("{}")
-    eq(e.lanes, 1); eq(e.textLanes, 0); eq(e.imageLanes, 0); eq(e.frameLanes, 0); eq(e.soundLanes, 0)
+    eq(e.lanes, 0); eq(e.textLanes, 0); eq(e.imageLanes, 0); eq(e.frameLanes, 0); eq(e.soundLanes, 0)
     eq(e.volume, 1); eq(e.three.on, false); eq(e.base, Placement()); eq(e.segments.count, 0)
 }
 
@@ -279,13 +279,38 @@ test("a new segment takes the first lane free then, else one past the last") {
     eq(e.lanes, 3, "fitLanes opens the lane")
 }
 
-test("pack lays segments on the fewest lanes and keeps the images' lanes") {
+test("pack lays segments on the fewest lanes and keeps the images' order") {
     var e = Edits()
     e.lanes = 4; e.textLanes = 3
     e.pack([seg("t1", "text", 0, 2, lane: 2), seg("t2", "text", 1, 3, lane: 2), seg("z", "zoom", 0, 2, lane: 3), seg("i", "image", 0, 2, lane: 1)])
     eq(e.segments.first { $0.id == "t1" }?.lane, 0); eq(e.segments.first { $0.id == "t2" }?.lane, 1)
-    eq(e.segments.first { $0.id == "z" }?.lane, 0); eq(e.segments.first { $0.id == "i" }?.lane, 1)
-    eq(e.lanes, 1); eq(e.textLanes, 2); eq(e.imageLanes, 2)
+    eq(e.segments.first { $0.id == "z" }?.lane, 0); eq(e.segments.first { $0.id == "i" }?.lane, 0)
+    eq(e.lanes, 1); eq(e.textLanes, 2); eq(e.imageLanes, 1)
+}
+
+test("the lane counts are derived: an empty lane in a file goes, the rest close up in order, and the draw order stays") {
+    let e = try decode("""
+    { "lanes": 5, "textLanes": 4, "imageLanes": 4, "soundLanes": 3,
+      "segments": [
+        { "id": "z", "kind": "zoom", "start": 1, "end": 2, "lane": 3 },
+        { "id": "t1", "kind": "text", "start": 1, "end": 3, "lane": 1, "text": "a" },
+        { "id": "t2", "kind": "text", "start": 2, "end": 4, "lane": 3, "text": "b" },
+        { "id": "i1", "kind": "image", "start": 0, "end": 5, "lane": 3, "file": "images/a.png" },
+        { "id": "i2", "kind": "image", "start": 0, "end": 5, "lane": 1, "file": "images/b.png" }
+      ],
+      "sounds": [{ "id": "s", "file": "sounds/beep.wav", "start": 0, "length": 1, "lane": 2 }] }
+    """)
+    eq(e.lanes, 1); eq(e.textLanes, 2); eq(e.imageLanes, 2); eq(e.soundLanes, 1)
+    eq(e.segments.map(\.lane), [0, 0, 1, 1, 0])
+    eq(e.sounds.map(\.lane), [0])
+    eq(e.overlays(at: 1).map(\.id), ["i1", "i2", "t1"], "lane 1 still in front of lane 3, now lanes 0 and 1")
+    let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(e)) as! [String: Any]
+    eq(written["lanes"] as? Int, 1, "the app writes the number in use")
+    eq(written["textLanes"] as? Int, 2)
+    let counted = try decode(#"{"segments":[{"id":"a","kind":"image","start":0,"end":2,"file":"images/a.png"},{"id":"b","kind":"image","start":3,"end":5,"file":"images/b.png"}]}"#)
+    eq(counted.images.map(\.lane), [0, 0], "counts left out: images in sequence share lane 0"); eq(counted.imageLanes, 1)
+    let old = try decode(#"{"textLanes":0,"segments":[{"id":"a","kind":"image","start":0,"end":4,"file":"images/a.png"},{"id":"b","kind":"image","start":1,"end":5,"file":"images/b.png"}]}"#)
+    eq(old.images.map(\.lane), [0, 1], "an old file's images at once on one row keep a lane each, the first in front"); eq(old.imageLanes, 2)
 }
 
 test("the time map skips removed parts and stretches slow parts") {
@@ -749,7 +774,12 @@ test("a drag that makes two zooms overlap is put back, and says why") {
     near(e.selectedSegment?.start ?? -1, 6, "back where it was"); eq(e.edits.lanes, 1)
     e.drag(id, start: 4.5, end: 7.5, lane: 1)
     e.endDrag()
-    eq(e.problem, ""); eq(e.selectedSegment?.lane, 1); eq(e.edits.lanes, 2, "a drop one past the last lane opens it")
+    eq(e.problem, ""); eq(e.selectedSegment?.lane, 0, "lane 0 has room, so it goes up to it"); eq(e.edits.lanes, 1, "no lane opens for it")
+    at(e, 4.6); e.add("spotlight")
+    let spot = e.selected
+    e.drag(spot, start: 4.6, end: 6, lane: 0)
+    e.endDrag()
+    eq(e.problem, ""); eq(e.edits.segments.first { $0.id == spot }?.lane, 1); eq(e.edits.lanes, 2, "dropped over the zoom, it opens Effects 2")
 }
 
 test("typed times are checked; delete removes the selection") {
@@ -899,14 +929,55 @@ test("each recording has its own history") {
     b.undo(); eq(a.edits.zooms.count, 1)
 }
 
-test("lanes: add one, delete one with what it holds, never the last effect lane") {
+test("lanes come from use: an overlap of one kind opens a lane, and it goes when it is no longer needed") {
     let e = open("empty")
-    e.addLane(); eq(e.edits.lanes, 2)
-    e.addLane(space: 1); eq(e.edits.textLanes, 1)
-    e.deleteLane(1, space: 0); eq(e.edits.lanes, 1)
-    e.deleteLane(0, space: 0); eq(e.edits.lanes, 1, "the last effect lane")
+    eq(e.edits.lanes, 0, "a new recording has no effect lane")
+    at(e, 2); e.add("text")
+    eq(e.edits.textLanes, 1)
+    e.add("text")
+    let second = e.selected
+    eq(e.edits.texts.map(\.lane), [0, 1]); eq(e.edits.textLanes, 2, "Text 2 opens for the overlap")
+    e.drag(second, start: 6, end: 9, lane: 1)
+    e.endDrag()
+    eq(e.problem, ""); eq(e.edits.texts.map(\.lane), [0, 0], "dropped clear of the other, it takes the first free lane")
+    eq(e.edits.textLanes, 1, "Text 2 goes")
+    at(e, 7); e.add("text")
+    eq(e.edits.textLanes, 2)
+    e.deleteSelected()
+    eq(e.edits.textLanes, 1, "deleting the overlap closes its lane"); eq(onDisk(e).textLanes, 1)
+    at(e, 1); e.add("zoom-in")
+    eq(e.edits.lanes, 1)
+    e.deleteSelected()
+    eq(e.edits.lanes, 0, "no lane has to stay"); eq(onDisk(e).lanes, 0)
+}
+
+test("a lane is deleted with what it holds, and no lane has to stay") {
+    let e = open("empty")
+    at(e, 1); e.add("zoom-in")
+    e.deleteLane(0, space: 0)
+    eq(e.edits.lanes, 0); eq(e.edits.zooms.count, 0)
     at(e, 1); e.add("text")
     e.deleteLane(0, space: 1); eq(e.edits.textLanes, 0); eq(e.edits.texts.count, 0, "its text went with it")
+}
+
+test("Show Empty Lanes shows one empty row of each kind as a target; it is a view setting, never in edits.json") {
+    let e = open("empty")
+    let view = timeline(e, height: 2000)
+    func lanes(_ space: Int) -> [Int] { view.rows.compactMap { if case let .lane(sp, l) = $0.kind, sp == space { return l } else { return nil } } }
+    eq(lanes(0), []); eq(lanes(1), [])
+    e.setShowEmptyLanes(true)
+    defer { e.setShowEmptyLanes(false) }
+    eq(Settings.store.bool(forKey: Settings.emptyLanesKey), true)
+    for space in [0, 1, 2, Edits.soundSpace] { eq(lanes(space), [0], "one empty row in space \(space)") }
+    at(e, 1)
+    guard case let .direct(add)? = TimelineMenus.plus(.lane(1, 0), e) else { return problems.append("an empty text row's + adds a text") }
+    add()
+    eq(e.edits.textLanes, 1); eq(lanes(1), [0, 1], "the text took the row, and one more empty one shows")
+    let saved = try String(contentsOf: e.folder.appendingPathComponent("edits.json"), encoding: .utf8)
+    expect(!saved.contains("mpty"), "the setting is not in edits.json")
+    e.setShowEmptyLanes(false)
+    eq(lanes(1), [0])
+    view.detach()
 }
 
 func menu(_ row: TimelineRow, _ e: Editor) -> [MenuEntry] {
@@ -930,17 +1001,18 @@ test("a + menu holds items only, grouped, under a line that says where they land
         expect(!menu(row, e).choices.contains { $0.contains("Lane") }, "\(row)'s + offers a lane")
     }
     guard case .direct? = TimelineMenus.plus(.header("sound"), e) else { return problems.append("the Sound +, with one choice, should add at once") }
-    expect(TimelineMenus.plus(.lane(1, 0), e) == nil, "a lane that does not exist has no +")
+    expect(TimelineMenus.plus(.lane(1, 1), e) == nil, "a lane past the one that may open has no +")
 }
 
 test("a lane's + adds on that lane; with no room there, on the first free lane of its kind, else a new one") {
     let e = open("empty")
-    e.addLane()
+    at(e, 5); e.add("spotlight")
     at(e, 1)
     expect(menu(.lane(0, 1), e).run("Zoom › Zoom In"), "Zoom In is in the Zoom submenu")
     eq(e.edits.zooms.first?.lane, 1, "on the lane whose + it was")
     menu(.lane(0, 1), e).run("Look › Blur")
     eq(e.edits.segments.first { $0.kind == "blur" }?.lane, 0, "no room on lane 2, so the first free lane")
+    eq(e.edits.lanes, 2)
     menu(.header("top"), e).run("Text")
     eq(e.edits.textLanes, 1)
     guard case let .direct(add)? = TimelineMenus.plus(.lane(1, 0), e) else { return problems.append("a text lane's + adds a text at once") }
@@ -950,45 +1022,41 @@ test("a lane's + adds on that lane; with no room there, on the first free lane o
     eq(e.undoName, "Add Text")
 }
 
-test("a lane's ⋯ makes lanes above and below and moves it up and down; each is one undo step") {
+test("a lane's ⋯ moves it up and down and deletes it; it makes no empty lane; each is one undo step") {
     let e = open("empty")
     at(e, 1)
     menu(.header("top"), e).run("Text")
+    menu(.header("top"), e).run("Text")
+    let first = e.edits.texts[0].id
     let lanes = { TimelineMenus.lane(1, $0, e) { _, _, run in run() } }
     eq(lanes(0).titles, ["Text 1 · Sits on top of the video"])
-    eq(lanes(0).choices, ["New Text Lane Above", "New Text Lane Below", "Move Lane Up", "Move Lane Down", "Delete Lane and Its 1 Text…"])
+    eq(lanes(0).choices, ["Move Lane Up", "Move Lane Down", "Delete Lane and Its 1 Text…", "Show Empty Lanes"])
+    expect(!lanes(0).choices.contains { $0.hasPrefix("New") }, "a lane is never made empty")
     expect(!lanes(0).run("Move Lane Up"), "the top lane can't move up")
-    lanes(0).run("New Text Lane Above")
-    eq(e.edits.textLanes, 2); eq(e.edits.texts.first?.lane, 1, "the text moved down with its lane")
-    eq(e.undoName, "New Text Lane")
     lanes(1).run("Move Lane Up")
-    eq(e.edits.texts.first?.lane, 0, "lane order is draw order, so the text moves with its lane")
+    eq(e.edits.texts.first { $0.id == first }?.lane, 1, "lane order is draw order, so the text moves with its lane")
     eq(e.undoName, "Move Lane Up")
-    lanes(0).run("New Text Lane Below")
-    eq(e.edits.textLanes, 3); eq(e.edits.texts.first?.lane, 0)
-    e.undo(); e.undo()
-    eq(e.edits.texts.first?.lane, 1); eq(e.edits.textLanes, 2)
-    eq(TimelineMenus.group("top", e).choices, ["New Text Lane", "New Image Lane"])
-    eq(TimelineMenus.group("sound", e).choices, ["New Sound Lane"])
-    TimelineMenus.group("frame", e).run("New Whole Frame Lane")
-    eq(e.edits.frameLanes, 1)
+    e.undo()
+    eq(e.edits.texts.first { $0.id == first }?.lane, 0)
+    lanes(0).run("Show Empty Lanes")
+    eq(e.showEmptyLanes, true)
+    lanes(0).run("Show Empty Lanes")
+    eq(e.showEmptyLanes, false)
 }
 
-test("Delete Lane says what goes with it, asks when it holds items, and never takes the last Effects lane") {
+test("Delete Lane says what goes with it and asks when it holds items; the last Effects lane goes too") {
     let e = open("empty")
-    eq(TimelineMenus.lane(0, 0, e) { _, _, run in run() }.reason("Delete Lane"), "One Effects lane stays.\nIt is the last one.")
     at(e, 1); e.add("zoom-in")
-    e.addLane()
-    eq(TimelineMenus.lane(0, 1, e) { _, _, _ in }.choices.last, "Delete Lane", "an empty lane goes at once")
     var question = ""
     let first = TimelineMenus.lane(0, 0, e) { title, _, run in question = title; run() }
-    eq(first.choices.last, "Delete Lane and Its 1 Effect…")
+    expect(first.choices.contains("Delete Lane and Its 1 Effect…"), "\(first.choices)")
+    eq(first.reason("Delete Lane"), nil, "no lane has to stay")
     first.run("Delete Lane and Its 1 Effect…")
     eq(question, "Delete Effects 1 and its 1 effect?")
-    eq(e.edits.lanes, 1); eq(e.edits.zooms.count, 0)
+    eq(e.edits.lanes, 0); eq(e.edits.zooms.count, 0)
     eq(e.undoName, "Delete Lane")
     e.undo()
-    eq(e.edits.lanes, 2); eq(e.edits.zooms.first?.lane, 0)
+    eq(e.edits.lanes, 1); eq(e.edits.zooms.first?.lane, 0)
     let declined = TimelineMenus.lane(0, 0, e) { _, _, _ in }
     declined.run("Delete Lane and Its 1 Effect…")
     eq(e.edits.zooms.count, 1, "Cancel keeps it")
@@ -1250,7 +1318,7 @@ test("an edits.json the app can't read is never saved over; fixed on disk, it op
     let file = e.folder.appendingPathComponent("edits.json")
     expect(e.unreadable["edits.json"]?.hasPrefix("edits.json can’t be read (lanes: Expected to decode Int") == true, "\(e.unreadable)")
     eq(e.selection["problem"] as? String, e.unreadable["edits.json"], "the inspector shows it")
-    at(e, 1); e.add("zoom-in"); e.splitClip(); e.setVolume(0.5); e.autoZoom(); e.clearAll(); e.addLane()
+    at(e, 1); e.add("zoom-in"); e.splitClip(); e.setVolume(0.5); e.autoZoom(); e.clearAll()
     eq(e.problem, e.unreadable["edits.json"]); eq(e.edits, Edits())
     eq(try String(contentsOf: file, encoding: .utf8), bad, "the file is untouched")
     e.select("p:0")
@@ -1679,7 +1747,7 @@ func json(_ e: Edits) -> String { String(data: try! JSONEncoder().encode(e), enc
 
 test("test/rules.json covers every rule a file can break") {
     let covered = Set(ruleCases.map(\.rule))
-    for (id, _) in Rules.all where !["room-at-playhead", "last-effects-lane"].contains(id) { expect(covered.contains(id), "no case for \(id)") }
+    for (id, _) in Rules.all where id != "room-at-playhead" { expect(covered.contains(id), "no case for \(id)") }
     for c in ruleCases { eq(Rules.line1(c.rule), c.line1, c.rule) }
 }
 

@@ -6,6 +6,7 @@ enum MenuEntry {
     case title(String)
     case item(String, () -> Void)
     case off(String, String)
+    case check(String, Bool, () -> Void)
     case dim(String)
     case sub(String, [MenuEntry])
     case line
@@ -92,7 +93,7 @@ enum TimelineMenus {
         case .header:
             return nil
         case let .lane(space, lane):
-            guard lane < editor.edits.laneCount(space: space) else { return nil }
+            guard lane <= editor.edits.laneCount(space: space) else { return nil }
             switch space {
             case 1: return .direct { editor.onLane(lane) { editor.add("text") } }
             case 2: return .direct { Pictures.pick { url in editor.onLane(lane) { editor.addImage(url) } } }
@@ -127,16 +128,12 @@ extension TimelineMenus {
     static func lane(_ space: Int, _ lane: Int, _ editor: Editor, confirm: @escaping (String, String, @escaping () -> Void) -> Void) -> [MenuEntry] {
         let count = editor.edits.laneCount(space: space)
         guard lane < count else { return [] }
-        let kind = kindName(space), name = laneName(space, lane), items = editor.laneItems(lane, space: space)
-        var out: [MenuEntry] = [.title("\(name) · \(scope(space))"), .line,
-                                .item("New \(kind) Lane Above") { editor.insertLane(space: space, at: lane) },
-                                .item("New \(kind) Lane Below") { editor.insertLane(space: space, at: lane + 1) }, .line]
+        let name = laneName(space, lane), items = editor.laneItems(lane, space: space)
+        var out: [MenuEntry] = [.title("\(name) · \(scope(space))"), .line]
         out.append(lane > 0 ? .item("Move Lane Up") { editor.moveLane(lane, space: space, by: -1) } : .dim("Move Lane Up"))
         out.append(lane < count - 1 ? .item("Move Lane Down") { editor.moveLane(lane, space: space, by: 1) } : .dim("Move Lane Down"))
         out.append(.line)
-        if space == 0 && count == 1 {
-            out.append(.off("Delete Lane", Conflict(rule: "last-effects-lane", item: nil, Rules.line1("last-effects-lane"), "It is the last one.").menuText))
-        } else if items == 0 {
+        if items == 0 {
             out.append(.item("Delete Lane") { editor.deleteLane(lane, space: space) })
         } else {
             let what = noun(space, items)
@@ -144,12 +141,8 @@ extension TimelineMenus {
                 confirm("Delete \(name) and its \(what.lowercased())?", "You can undo this with ⌘Z.") { editor.deleteLane(lane, space: space) }
             })
         }
+        out += [.line, .check("Show Empty Lanes", editor.showEmptyLanes) { editor.setShowEmptyLanes(!editor.showEmptyLanes) }]
         return out
-    }
-
-    static func group(_ key: String, _ editor: Editor) -> [MenuEntry] {
-        let spaces = key == "video" ? [0] : key == "top" ? [1, 2] : key == "sound" ? [Edits.soundSpace] : key == "frame" ? [3] : []
-        return spaces.map { space in .item("New \(kindName(space)) Lane") { editor.insertLane(space: space, at: editor.edits.laneCount(space: space)) } }
     }
 }
 
@@ -157,7 +150,7 @@ extension Array where Element == MenuEntry {
     var choices: [String] {
         flatMap { entry -> [String] in
             switch entry {
-            case let .item(title, _), let .off(title, _), let .dim(title): return [title]
+            case let .item(title, _), let .off(title, _), let .dim(title), let .check(title, _, _): return [title]
             case let .sub(title, inner): return inner.choices.map { "\(title) › \($0)" }
             default: return []
             }
@@ -172,6 +165,7 @@ extension Array where Element == MenuEntry {
         for entry in self {
             switch entry {
             case let .item(title, run) where parts.count == 1 && title == parts[0]: run(); return true
+            case let .check(title, _, run) where parts.count == 1 && title == parts[0]: run(); return true
             case let .sub(title, inner) where parts.count > 1 && title == parts[0]: return inner.run(parts.dropFirst().joined(separator: " › "))
             default: continue
             }

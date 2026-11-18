@@ -136,10 +136,10 @@ final class Studio: ExactModule {
         "layer": "", "canForward": false, "canBackward": false, "canFront": false, "canBack": false,
     ]
     private static let emptySummary: [String: Any] = [
-        "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "images": 0, "moves": 0, "length": 0, "source": 0, "playing": false,
+        "parts": 1, "removed": 0, "effects": 0, "lanes": 0, "images": 0, "moves": 0, "length": 0, "source": 0, "playing": false,
         "device": false, "found": false, "cursorDrawn": false, "baseScale": 100, "undoName": "", "redoName": "",
         "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "angleMove": "", "thickness": 5, "edge": "metal",
-        "zoomed": false, "wheelZoom": true,
+        "zoomed": false, "wheelZoom": true, "showEmptyLanes": false,
         "splitLabel": "Split Clip", "canSplit": false, "splitWhy": "", "canSplitAll": false, "splitAllWhy": "",
     ]
 
@@ -295,7 +295,6 @@ final class Studio: ExactModule {
         case "remove": e.toggleRemoved()
         case "join-prev": e.join(-1)
         case "join-next": e.join(1)
-        case "add-lane": e.addLane()
         case "transition": e.setTransition(r["kind"] as? String ?? "cut")
         case "text": e.setText(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "move": e.setMoveField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
@@ -324,6 +323,7 @@ final class Studio: ExactModule {
             case "zoom-out": e.zoomStep(1 / 1.5)
             case "zoom-fit": e.setZoom(1, start: 0)
             case "wheel": e.setWheelZoom(!e.wheelZoom)
+            case "empty-lanes": e.setShowEmptyLanes(!e.showEmptyLanes)
             default: break
             }
         default: break

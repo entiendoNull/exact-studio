@@ -11,7 +11,7 @@ test "a recording opens with its preview, timeline, inspector and look"
   expect state summary.parts == 4
   expect state summary.removed == 1
   expect state summary.effects == 10
-  expect state summary.lanes == 6
+  expect state summary.lanes == 7
   expect state summary.moves == 1
   expect state background == "custom"
   expect state aspect == "9:16"
@@ -23,7 +23,7 @@ test "an empty recording has one clip part and nothing on it"
   expect state summary.parts == 1
   expect state summary.removed == 0
   expect state summary.effects == 0
-  expect state summary.lanes == 1
+  expect state summary.lanes == 0
   expect state summary.moves == 0
 
 test "a click on a zoom selects it; the inspector sets its level and deletes it"
@@ -43,7 +43,7 @@ test "a click on a zoom selects it; the inspector sets its level and deletes it"
   expect state summary.parts == 4
   expect state summary.removed == 1
   expect state summary.effects == 9
-  expect state summary.lanes == 6
+  expect state summary.lanes == 7
   expect state summary.moves == 1
 
 test "a typed time that clashes says why under its field; Return refuses it and the field goes back"
@@ -97,7 +97,7 @@ test "Split Clip with the playhead at the start is off and says why"
   expect state summary.parts == 1
   expect state summary.removed == 0
   expect state summary.effects == 0
-  expect state summary.lanes == 1
+  expect state summary.lanes == 0
   expect state summary.moves == 0
 
 test "Split follows the selection; Split All Lanes is off at the start and says why"
@@ -146,7 +146,7 @@ test "a template replaces the edit; Undo and Redo take it back and forth"
   expect state summary.parts == 4
   expect state summary.removed == 1
   expect state summary.effects == 10
-  expect state summary.lanes == 6
+  expect state summary.lanes == 7
   expect state summary.moves == 1
   expect state summary.redoName == "Template"
   tap "redo"
@@ -197,7 +197,7 @@ test "Clear Edits asks first, names the recording, and can be undone"
   expect state summary.parts == 4
   expect state summary.removed == 1
   expect state summary.effects == 10
-  expect state summary.lanes == 6
+  expect state summary.lanes == 7
   expect state summary.moves == 1
   tap "inspector-more"
   tap "clear"
@@ -208,7 +208,7 @@ test "Clear Edits asks first, names the recording, and can be undone"
   expect state summary.parts == 1
   expect state summary.removed == 0
   expect state summary.effects == 0
-  expect state summary.lanes == 1
+  expect state summary.lanes == 0
   expect state summary.moves == 0
   expect state summary.undoName == "Clear Edits"
   tap "undo"
@@ -216,7 +216,7 @@ test "Clear Edits asks first, names the recording, and can be undone"
   expect state summary.parts == 4
   expect state summary.removed == 1
   expect state summary.effects == 10
-  expect state summary.lanes == 6
+  expect state summary.lanes == 7
   expect state summary.moves == 1
 
 test "Delete asks first and names the recording; Cancel keeps it"
@@ -477,3 +477,10 @@ test "Export refuses unfilled lines and lists them; Show First focuses the first
   tap "export"
   clock until state exportLine == "Saved." within 60000
   expect text "export-line" == "Saved."
+
+test "View › Show Empty Lanes is a view setting, off by default"
+  tap "recording-empty"
+  clock data
+  expect state summary.lanes == 0
+  expect state summary.showEmptyLanes == false
+  expect tree has "menu-empty-lanes"

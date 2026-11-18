@@ -4,6 +4,12 @@ import Foundation
 enum Settings {
     private(set) static var store = UserDefaults.standard
     static let foldedKey = "ExactStudio.foldedGroups"
+    static let emptyLanesKey = "ExactStudio.showEmptyLanes"
+
+    static var showEmptyLanes: Bool {
+        get { store.bool(forKey: emptyLanesKey) }
+        set { store.set(newValue, forKey: emptyLanesKey) }
+    }
 
     static func isolate(in folder: URL) {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

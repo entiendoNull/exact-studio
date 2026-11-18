@@ -43,7 +43,6 @@ enum Rules {
         ("image-inside", "Keep it inside the image."), ("image-effect-kind", "No such image effect."),
         ("text-one-each", "One of each per text."), ("text-inside", "Keep it inside the text."), ("text-effect-kind", "No such text effect."),
         ("room-at-playhead", "No room at the playhead."), ("min-length", "Too short."), ("keep-a-part", "Keep one clip part."),
-        ("last-effects-lane", "One Effects lane stays."),
     ]
     static func line1(_ id: String) -> String { all.first { $0.id == id }?.line1 ?? "" }
 

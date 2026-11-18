@@ -93,13 +93,15 @@ final class TimelineView: NSView {
         func add(_ kind: Kind, _ height: CGFloat) { out.append(Row(kind: kind, y: y, height: height)); y += height + Self.laneGap }
         guard let editor else { add(.lane(0, 0), laneH); return out }
         if !editor.videoOpen { y = Self.videoTop + Self.headerHeight + Self.laneGap }
-        let e = editor.edits, dragged = draggedSpace
+        let e = editor.edits, dragged = draggedSpace, empty = editor.showEmptyLanes
+        // @ref LLP 0002#rows — lanes come from use; one more as a target while a block of its kind is dragged, or when shown
+        func extra(_ space: Int) -> Int { dragged == space || empty ? 1 : 0 }
         out.append(Row(kind: .header("video"), y: Self.videoTop, height: Self.headerHeight))
         if editor.videoOpen {
             // @ref LLP 0002#sound — the recorded sound is part of the clip, so it sits with it
             if editor.hasSound { add(.sound, laneH) }
             add(.position, motionH)
-            for l in 0..<e.lanes + (dragged == 0 ? 1 : 0) { add(.lane(0, l), laneH) }
+            for l in 0..<e.lanes + extra(0) { add(.lane(0, l), laneH) }
         }
         add(.header("top"), Self.headerHeight)
         if !editor.folded.contains("top") {
@@ -109,13 +111,13 @@ final class TimelineView: NSView {
                 for l in 0..<lanes { add(.imageEffects(item.id, l), laneH) }
             }
             // @ref LLP 0002#where-an-effect-applies — a text's own effects fold under its lane, as an image's do
-            for l in 0..<e.textLanes + (dragged == 1 ? 1 : 0) {
+            for l in 0..<e.textLanes + extra(1) {
                 add(.lane(1, l), laneH)
                 guard l < e.textLanes, editor.openTextLanes.contains(l), let text = editor.currentItem(space: 1, lane: l) else { continue }
                 effectRows(text)
             }
             // @ref LLP 0002#images — an open lane shows one image's own rows at a time
-            for l in 0..<e.imageLanes + (dragged == 2 ? 1 : 0) {
+            for l in 0..<e.imageLanes + extra(2) {
                 add(.lane(2, l), laneH)
                 guard l < e.imageLanes, editor.openImageLanes.contains(l), let image = editor.currentImage(lane: l) else { continue }
                 add(.imagePosition(image.id), motionH)
@@ -124,11 +126,11 @@ final class TimelineView: NSView {
         }
         add(.header("sound"), Self.headerHeight)
         if !editor.folded.contains("sound") {
-            for l in 0..<e.soundLanes + (dragged == Edits.soundSpace ? 1 : 0) { add(.lane(Edits.soundSpace, l), laneH) }
+            for l in 0..<e.soundLanes + extra(Edits.soundSpace) { add(.lane(Edits.soundSpace, l), laneH) }
         }
         add(.header("frame"), Self.headerHeight)
         if !editor.folded.contains("frame") {
-            for l in 0..<e.frameLanes + (dragged == 3 ? 1 : 0) { add(.lane(3, l), laneH) }
+            for l in 0..<e.frameLanes + extra(3) { add(.lane(3, l), laneH) }
         }
         return out
     }
@@ -442,7 +444,6 @@ final class TimelineView: NSView {
     private func hasMore(_ r: Row) -> Bool {
         switch r.kind {
         case let .lane(space, lane): return real(space, lane)
-        case .header: return true
         default: return false
         }
     }
@@ -814,14 +815,10 @@ final class TimelineView: NSView {
                 drawLabel("\(name) \(lane + 1)", symbol: symbol, y: r.y, height: r.height, attrs: label, tint: NSColor(white: 1, alpha: 0.5),
                           open: folds ? editor.isOpen(space: space, lane: lane) : nil, indent: (space == 1 || space == 2) && !folds ? 14 : 0, plus: hasPlus(r))
                 bed(r, alpha: real(space, lane) ? 0.05 : 0.025)
-                let empty = space == Edits.soundSpace ? editor.edits.sounds.isEmpty : !segments.contains(where: { $0.space == space })
-                if lane == 0, real(space, lane), empty {
-                    let words = space == 1 ? "Texts go here. They sit on top of the video."
-                        : space == 2 ? "Images go here. Image 1 shows in front of Image 2."
-                        : space == Edits.soundSpace ? "Press + to add music or another sound."
-                        : space == 3 ? "A blur or black and white here covers the whole picture."
-                        : "Press + to add an effect that changes the video: zoom, speed, blur and more."
-                    drawHint(words, in: r)
+                // A row shown only as a target says what its + adds; it is not stored.
+                if !real(space, lane), draggedSpace != space {
+                    drawHint(space == 1 ? "+ adds a text" : space == 2 ? "+ adds an image" : space == Edits.soundSpace ? "+ adds music or a sound"
+                        : space == 3 ? "+ adds a blur over the whole frame" : "+ adds an effect", in: r)
                 }
             case let .imagePosition(id):
                 guard let image = images.first(where: { $0.id == id }) else { continue }
@@ -1125,6 +1122,12 @@ final class TimelineView: NSView {
                 item.target = self
                 item.representedObject = Act(run)
                 menu.addItem(item)
+            case let .check(title, on, run):
+                let item = NSMenuItem(title: title, action: #selector(picked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = Act(run)
+                item.state = on ? .on : .off
+                menu.addItem(item)
             case let .off(title, why):
                 let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
                 item.isEnabled = false
@@ -1153,7 +1156,6 @@ final class TimelineView: NSView {
         switch r.kind {
         case let .lane(space, lane):
             return TimelineMenus.lane(space, lane, editor) { [weak self] title, detail, run in self?.confirm(title, detail, run) }
-        case let .header(key): return TimelineMenus.group(key, editor)
         default: return []
         }
     }

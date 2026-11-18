@@ -404,7 +404,6 @@ way: "start at" later, "end by" earlier.
 | `min-length` | Every item lasts 0.1 s or more. | Too short. | An item lasts at least 0.1 s, inside 0:00–0:42.0. |
 | `keep-a-part` | At least one clip part is kept. | Keep one clip part. | The video needs at least one kept part. |
 | `room-at-playhead` | The app only: an add needs 0.3 s free of its kind at the playhead. | (its kind's line 1) | A zoom runs here until 0:16.0. Move the playhead past it. |
-| `last-effects-lane` | The app only: one effect lane always stays. | One Effects lane stays. | It is the last one. |
 
 Texts, images and masks on separate lanes overlap freely. Taste (a spotlight with a zoom, zooms back
 to back, a key point under a blur) is advice in [effects.md](effects.md), never a rule.

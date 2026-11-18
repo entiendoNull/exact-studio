@@ -345,8 +345,9 @@ struct Edits: Codable, Equatable {
     /// How the video passes from a kept part into the next across removed
     /// ones, keyed by the kept part's end in milliseconds: "crossfade" or "fade".
     var transitions: [String: String] = [:]
-    /// Effect lanes, at least one; a lane may stay empty. They hold what changes the video.
-    var lanes: Int = 1
+    /// Effect lanes: they hold what changes the video. Every count is how many lanes of its kind are in use.
+    // @ref LLP 0002#rows — lanes come from use: the app writes the counts and drops an empty lane
+    var lanes: Int = 0
     /// Text lanes: they hold the texts drawn over the video. A text's `lane` counts these.
     // @ref LLP 0002#rows — effects change the video; texts and images sit on top of it
     var textLanes: Int = 0
@@ -367,7 +368,10 @@ struct Edits: Codable, Equatable {
     /// Sound lanes: a sound's `lane` counts these.
     var soundLanes: Int = 0
 
-    init(segments: [Segment] = []) { self.segments = segments }
+    init(segments: [Segment] = []) {
+        self.segments = segments
+        compactLanes()
+    }
 
     enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, imageLanes, frameLanes, base, moves, three, volume, sounds, soundLanes }
     init(from decoder: Decoder) throws {
@@ -376,7 +380,7 @@ struct Edits: Codable, Equatable {
         splits = try c.decodeIfPresent([Double].self, forKey: .splits) ?? []
         removed = try c.decodeIfPresent([Double].self, forKey: .removed) ?? []
         transitions = try c.decodeIfPresent([String: String].self, forKey: .transitions) ?? [:]
-        lanes = try c.decodeIfPresent(Int.self, forKey: .lanes) ?? 1
+        lanes = try c.decodeIfPresent(Int.self, forKey: .lanes) ?? 0
         base = try c.decodeIfPresent(Placement.self, forKey: .base) ?? Placement()
         moves = try c.decodeIfPresent([Move].self, forKey: .moves) ?? []
         volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1
@@ -391,31 +395,22 @@ struct Edits: Codable, Equatable {
         segments.removeAll { $0.kind == "cut" }
         splits = Array(Set(splits.filter { $0 > 0.001 })).sorted()
         frameLanes = try c.decodeIfPresent(Int.self, forKey: .frameLanes) ?? 0
-        if let n = try c.decodeIfPresent(Int.self, forKey: .textLanes) {
-            textLanes = n
-        } else {
-            // Texts and whole-frame effects once shared the effect lanes: each lane that held one
-            // becomes a lane of its own kind, in the same order, and the effect lanes close up.
-            for space in [1, 3, 0] {
-                let used = Array(Set(segments.filter { $0.space == space }.map(\.lane))).sorted()
-                segments = segments.map { s in
-                    guard s.space == space, let i = used.firstIndex(of: s.lane) else { return s }
-                    var m = s; m.lane = i; return m
-                }
-                if space == 0 { lanes = used.count }
-            }
-        }
+        textLanes = try c.decodeIfPresent(Int.self, forKey: .textLanes) ?? 0
+        // Texts and whole-frame effects once shared the effect lanes; each kind's lanes now close up on their own,
+        // which is what the counts left out mean too.
         if let n = try c.decodeIfPresent(Int.self, forKey: .imageLanes) {
             imageLanes = n
         } else {
-            // Each image was once a row of its own, the top row in front, read in that order:
-            // each keeps a lane of its own, so the picture stacks as it did.
+            // Each image was once a row of its own, the top row in front, read in that order. Only such a file has two
+            // images on one lane at once: each keeps a lane of its own, so the picture stacks as it did.
             // @ref LLP 0002#images — old files keep one image to a lane
-            let order = segments.enumerated().filter { $0.element.kind == "image" }.sorted { ($0.element.lane, $0.offset) < ($1.element.lane, $1.offset) }
-            for (row, item) in order.enumerated() { segments[item.offset].lane = row }
-            imageLanes = order.count
+            let all = segments.filter { $0.kind == "image" }
+            if all.contains(where: { a in all.contains { $0.id != a.id && $0.lane == a.lane && $0.overlaps(a) } }) {
+                let order = segments.enumerated().filter { $0.element.kind == "image" }.sorted { ($0.element.lane, $0.offset) < ($1.element.lane, $1.offset) }
+                for (row, item) in order.enumerated() { segments[item.offset].lane = row }
+            }
         }
-        fitLanes()
+        compactLanes()
     }
 
     /// How many rows there are in a space (`Segment.space`), or of sound lanes (`Edits.soundSpace`).
@@ -423,13 +418,38 @@ struct Edits: Codable, Equatable {
     /// The sound lanes, counted as one more space after the segments' own.
     static let soundSpace = 4
 
-    /// Enough lanes of each kind for the segments, and at least one effect lane.
+    /// Enough lanes of each kind for the segments, keeping empty ones: while a block is dragged.
     mutating func fitLanes() {
-        lanes = max(lanes, (segments.filter { $0.space == 0 }.map(\.lane).max() ?? -1) + 1, 1)
+        lanes = max(lanes, (segments.filter { $0.space == 0 }.map(\.lane).max() ?? -1) + 1, 0)
         textLanes = max(textLanes, (texts.map(\.lane).max() ?? -1) + 1, 0)
         imageLanes = max(imageLanes, (images.map(\.lane).max() ?? -1) + 1, 0)
         frameLanes = max(frameLanes, (segments.filter { $0.space == 3 }.map(\.lane).max() ?? -1) + 1, 0)
         soundLanes = max(soundLanes, (sounds.map(\.lane).max() ?? -1) + 1, 0)
+    }
+
+    /// Only the lanes in use, in their order, each count the number of them: an empty lane goes and the
+    /// ones under it move up. Order is kept, so images keep their draw order.
+    // @ref LLP 0002#rows — lanes come from use
+    mutating func compactLanes() {
+        func squeeze(_ used: [Int]) -> [Int: Int] {
+            Dictionary(uniqueKeysWithValues: Array(Set(used)).sorted().enumerated().map { ($1, $0) })
+        }
+        for space in [0, 1, 2, 3] {
+            let to = squeeze(segments.filter { $0.space == space }.map(\.lane))
+            segments = segments.map { s in
+                guard s.space == space, let l = to[s.lane] else { return s }
+                var m = s; m.lane = l; return m
+            }
+            switch space {
+            case 1: textLanes = to.count
+            case 2: imageLanes = to.count
+            case 3: frameLanes = to.count
+            default: lanes = to.count
+            }
+        }
+        let to = squeeze(sounds.map(\.lane))
+        sounds = sounds.map { var m = $0; m.lane = to[$0.lane] ?? $0.lane; return m }
+        soundLanes = to.count
     }
 
     func fits(_ s: Segment) -> Bool {
@@ -456,7 +476,7 @@ struct Edits: Codable, Equatable {
             }
             segments.append(seg)
         }
-        fitLanes()
+        compactLanes()
     }
 
     static func same(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 0.0015 }
