@@ -35,10 +35,15 @@ step "MCP server (test/mcp.test.ts)" bun test test/mcp.test.ts
 step "effects reference (test/effects.test.ts)" bun test test/effects.test.ts
 step "no other app named (test/no-other-apps.test.ts)" bun test test/no-other-apps.test.ts
 if [ "$fast" = 0 ]; then
+  domain=$(bun -e 'console.log(require("./app.json").app.id)')
+  mkdir -p .exact/test
+  defaults export "$domain" - > .exact/test/defaults-before.plist 2>/dev/null || true
+  untouched() { defaults export "$domain" - 2>/dev/null | diff -u .exact/test/defaults-before.plist - ; }
   step "macOS UI, no recordings (app.test.contract)" bun exact.mjs test macos app.test.contract
   library=$(bun test/library.ts)
   step "macOS UI, fixture recordings (test/ui)" env EXACT_STUDIO_FIXTURES="$library" bun exact.mjs test macos test/ui/*.test.contract
   rm -rf "$library"
+  step "the UI tests left the person's settings alone (defaults $domain)" untouched
 fi
 
 echo

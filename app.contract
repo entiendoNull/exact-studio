@@ -140,8 +140,8 @@ shape Done
 
 fn pad2(n: number): string = n < 10 ? `0${n}` : `${n}`
 fn mmss(s: number): string = `${floor(s / 60)}:${pad2(floor(s) % 60)}`
-fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:sf/iphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
-fn sourceSymbol(k: string): string = k == "pick-display" ? "symbol:sf/display" : k == "pick-window" ? "symbol:sf/macwindow" : k == "area" ? "symbol:sf/rectangle.dashed" : "symbol:sf/iphone"
+fn kindSymbol(kind: string): string = kind == "simulator" or kind == "emulator" ? "symbol:smartphone" : kind == "display" ? "symbol:sf/display" : "symbol:sf/macwindow"
+fn sourceSymbol(k: string): string = k == "pick-display" ? "symbol:sf/display" : k == "pick-window" ? "symbol:sf/macwindow" : k == "area" ? "symbol:sf/rectangle.dashed" : "symbol:smartphone"
 fn sourceLabel(k: string): string = k == "pick-display" ? "Display" : k == "pick-window" ? "Window" : k == "area" ? "Area" : "Simulator"
 fn sourceCaption(k: string): string = k == "pick-display" ? "A whole screen" : k == "pick-window" ? "Its real shape" : k == "area" ? "Drag a rectangle" : "Only the phone"
 fn sourceTestId(k: string): string = k == "pick-display" ? "record-display" : k == "pick-window" ? "record-pick-window" : k == "area" ? "record-area" : "record-simulator"
@@ -479,7 +479,7 @@ component ExactStudio
                     text templateName(t)
                     text templateLine(t)
               button press=openExport buttonStyle="filled" margin-left=6 testId="export-open"
-                image "symbol:sf/square.and.arrow.up"
+                image "symbol:share"
                 text "Export"
           row flex=1 min-height=0
             // ── The sidebar: what to record, and what has been recorded.
@@ -531,16 +531,16 @@ component ExactStudio
                           button press=toggleSection("sims") appearance="none" aria-expanded=openSims testId="sec-sims" flex=1 padding-top=2 padding-bottom=2
                             row align-items="center" gap=6 flex=1
                               text "SIMULATORS" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
-                              image (openSims ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
+                              image (openSims ? "symbol:sf/chevron.down" : "symbol:forward-chevron") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
                               view flex=1
                           button press=refresh aria-label="Refresh sources" testId="refresh"
                             image "symbol:refresh"
                         if openSims
                           for s in devices key=s.id
-                            button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color="-exact-tertiary-background"
+                            button press=record(s.id) disabled=pending(started) testId=`source-${s.id}` appearance="none" padding=10 border-radius=12 background-color="-exact-tertiary-background"
                               row gap=10 align-items="center" min-width=0 flex=1
                                 column width=34 height=34 border-radius=9 background-color="-exact-system-blue" align-items="center" justify-content="center"
-                                  image "symbol:sf/iphone" color="white" aria-hidden=true
+                                  image "symbol:smartphone" color="white" aria-hidden=true
                                 column min-width=0 flex=1 align-items="flex-start"
                                   text s.name line-clamp=1 font-weight=500 text-align="left" align-self="stretch"
                                   text `${s.app} · fits the bezel` font="-exact-caption1" color="-exact-system-teal" line-clamp=1
@@ -550,7 +550,7 @@ component ExactStudio
                       button press=toggleSection("library") appearance="none" aria-expanded=openLibrary testId="sec-library" flex=1 padding-top=2 padding-bottom=2
                         row align-items="center" gap=6 flex=1
                           text "LIBRARY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 text-align="left"
-                          image (openLibrary ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
+                          image (openLibrary ? "symbol:sf/chevron.down" : "symbol:forward-chevron") font="-exact-caption2" color="-exact-tertiary-label" aria-hidden=true
                           view flex=1
                       // Also File ▸ Open Recording… ⌘O in the menu bar.
                       button "Open…" press=openIt disabled=pending(opened) -exact-menu="file" aria-label="Open Recording…" aria-keyshortcuts="Meta+O" appearance="none" font="-exact-footnote" color="-exact-secondary-label" testId="open-recording"
@@ -563,7 +563,7 @@ component ExactStudio
                       if library.items.length == 0
                         text "Nothing recorded yet." color="-exact-tertiary-label" testId="no-recordings"
                       for r in library.items key=r.id
-                        button press=choose(r.id) contextmenu=aimRecording(r.id) contextPopover="library-menu" aria-pressed=(r.id == selected) testId=`recording-${r.id}` appearance="none" justify-content="flex-start" padding=10 border-radius=12 background-color=(r.id == selected ? "-exact-tertiary-background" : "transparent")
+                        button press=choose(r.id) contextmenu=aimRecording(r.id) contextPopover="library-menu" aria-pressed=(r.id == selected) testId=`recording-${r.id}` appearance="none" padding=10 border-radius=12 background-color=(r.id == selected ? "-exact-tertiary-background" : "transparent")
                           row gap=10 align-items="center" min-width=0 flex=1
                             column width=34 height=34 border-radius=9 background-color=(r.id == selected ? "-exact-system-blue" : "-exact-tertiary-fill") align-items="center" justify-content="center"
                               image kindSymbol(r.kind) color=(r.id == selected ? "white" : "-exact-secondary-label") aria-hidden=true
@@ -674,7 +674,7 @@ component ExactStudio
                     text "Frame" font="-exact-headline" flex=1 testId="inspector-title"
                     // @ref LLP 0005#calm-by-default
                     button popovertarget="inspector-menu" aria-label="More" testId="inspector-more"
-                      image "symbol:sf/ellipsis.circle"
+                      image "symbol:more"
                     column id="inspector-menu" popover="auto" role="menu" aria-label="Inspector"
                       button popovertarget="show-settings-menu" testId="panel-menu-button"
                         text "Show Settings"
@@ -696,7 +696,7 @@ component ExactStudio
                     button press=toggleSection("bg") appearance="none" aria-expanded=openBg testId="sec-bg" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "BACKGROUND" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
-                        image (openBg ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                        image (openBg ? "symbol:sf/chevron.down" : "symbol:forward-chevron") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
                     if openBg
                       row gap=12 flex-wrap="wrap" role="radiogroup" aria-label="Background" appearance="none"
                         for b in gradients key=b
@@ -735,7 +735,7 @@ component ExactStudio
                     button press=toggleSection("frame") appearance="none" aria-expanded=openFrame testId="sec-frame" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "FRAME" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
-                        image (openFrame ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                        image (openFrame ? "symbol:sf/chevron.down" : "symbol:forward-chevron") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
                     if openFrame
                       row role="radiogroup" aria-label="Shape"
                         for a in ["16:9", "9:16", "1:1", "4:3", "auto"] key=a
@@ -760,7 +760,7 @@ component ExactStudio
                     button press=toggleSection("3d") appearance="none" aria-expanded=open3d testId="sec-3d" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "3D" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
-                        image (open3d ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                        image (open3d ? "symbol:sf/chevron.down" : "symbol:forward-chevron") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
                     if open3d
                       row align-items="center"
                         text "Show in 3D" flex=1
@@ -803,7 +803,7 @@ component ExactStudio
                     button press=toggleSection("cursor") appearance="none" aria-expanded=openCursor testId="sec-cursor" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "CURSOR" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
-                        image (openCursor ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                        image (openCursor ? "symbol:sf/chevron.down" : "symbol:forward-chevron") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
                     if openCursor
                       if summary.cursorDrawn
                         row align-items="center"
@@ -828,11 +828,11 @@ component ExactStudio
                     button press=toggleSection("device") appearance="none" aria-expanded=openDevice testId="sec-device" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
                         text "DEVICE" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6 flex=1 text-align="left"
-                        image (openDevice ? "symbol:sf/chevron.down" : "symbol:sf/chevron.right") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
+                        image (openDevice ? "symbol:sf/chevron.down" : "symbol:forward-chevron") font="-exact-caption1" color="-exact-tertiary-label" aria-hidden=true
                     if openDevice
                       row gap=8
                         button press=editDo("find-device") buttonStyle="bordered" flex=1 testId="find-device"
-                          image "symbol:sf/iphone"
+                          image "symbol:smartphone"
                           text (summary.device ? "Fit to the Phone" : "Find a Device")
                         if summary.found
                           button press=editDo("forget-device") buttonStyle="bordered" testId="forget-device"
@@ -852,7 +852,7 @@ component ExactStudio
                     text "Export" font="-exact-title2" font-weight=700
                     text `${match current { case some(r) => r.name, case none => "" }} · ${mmss(summary.length)}` font="-exact-subheadline" color="-exact-secondary-label" testId="export-what"
                   button press=closeExport aria-label="Close" testId="export-close"
-                    image "symbol:sf/xmark"
+                    image "symbol:close"
 
                 column gap=10
                   text "QUALITY" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
@@ -930,7 +930,7 @@ component SettingsCard
         if sel.kind == "clip" and sel.removed
           text "Removed" font="-exact-footnote" color="-exact-system-red"
         button popovertarget="panel-place" aria-label="Show Settings" testId="panel-place-button"
-          image "symbol:sf/ellipsis.circle"
+          image "symbol:more"
         column id="panel-place" popover="auto" role="menu" aria-label="Show Settings"
           for m in ["dock", "float", "overlay", "left"] key=m
             button press=setPanel(m) popovertarget="panel-place" popovertargetaction="hide" role="menuitemradio" aria-checked=(mode == m) testId=`panel-${m}`
@@ -946,7 +946,7 @@ component SettingsCard
         text "Type a time like 1.25 or 0:01.25 and press Return." font="-exact-caption1" color="-exact-tertiary-label"
       if sel.kind == "recorded"
         row align-items="center" gap=8
-          image (sel.volume == 0 ? "symbol:sf/speaker.slash" : "symbol:sf/speaker.wave.2") color="-exact-secondary-label" aria-hidden=true
+          image (sel.volume == 0 ? "symbol:speaker-mute" : "symbol:speaker") color="-exact-secondary-label" aria-hidden=true
           text "Mute" flex=1
           input type="checkbox" switch checked=(sel.volume == 0) change=soundBool("mute") aria-label="Mute" testId="mute"
         column gap=4

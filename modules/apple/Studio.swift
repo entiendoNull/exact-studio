@@ -50,7 +50,7 @@ final class Studio: ExactModule {
     private var clock: Timer?
     private var recordingSince = Date()
     /// System sound for new recordings. The module owns it, so the sidebar's switch and the
-    /// menu bar's item are one setting. Kept in UserDefaults, except under the agent.
+    /// menu bar's item are one setting. Kept in `Settings.store`.
     private var sound = true
     private static let soundKey = "ExactStudio.recordSound"
     /// Why the last start failed ("" when it did not), wherever it was asked from; the sidebar shows it.
@@ -97,20 +97,17 @@ final class Studio: ExactModule {
         if context.agent {
             Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true)
             Pictures.mayAsk = false
-            let pinned: [String: Any] = ["ExactStudio.folded": [String](), "ExactStudio.wheelZoom": true, "ExactStudio.lastLook": Data(),
-                                         "ExactStudio.laneSize": 0, "ExactStudio.timelineExtra": 0.0]
-            UserDefaults.standard.setVolatileDomain(UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain).merging(pinned) { $1 },
-                                                    forName: UserDefaults.argumentDomain)
+            Settings.isolate(in: context.data)
             if let f = ProcessInfo.processInfo.environment["EXACT_STUDIO_FIXTURES"], let ids = try? FileManager.default.contentsOfDirectory(atPath: f) {
                 try? FileManager.default.createDirectory(at: Library.recordings, withIntermediateDirectories: true)
                 for id in ids { try? FileManager.default.copyItem(at: URL(fileURLWithPath: f).appendingPathComponent(id), to: Library.recordings.appendingPathComponent(id)) }
             }
             print("exact-studio library: \(Library.root.path)")
         } else {
-            sound = UserDefaults.standard.object(forKey: Self.soundKey) as? Bool ?? true
             // An automated run gets no menu bar item: it would outlive nothing and only clutter the bar.
             DispatchQueue.main.async { [weak self] in self?.installStatusItem() }
         }
+        sound = Settings.store.object(forKey: Self.soundKey) as? Bool ?? true
         // Under the agent, the control folder is the scratch library's, so a drive never answers the person's tools.
         let root = context.agent ? Library.root.appendingPathComponent("control", isDirectory: true) : Control.folder
         DispatchQueue.main.async { [weak self] in self?.serve(root) }
@@ -401,7 +398,7 @@ final class Studio: ExactModule {
     private func setSound(_ on: Bool) {
         guard on != sound else { return }
         sound = on
-        if !context.agent { UserDefaults.standard.set(on, forKey: Self.soundKey) }
+        Settings.store.set(on, forKey: Self.soundKey)
         soundItem?.state = on ? .on : .off
         context.changed("status")
     }
@@ -1341,6 +1338,81 @@ final class PlayerHost: NSView {
         editor.addImage(url, at: CGPoint(x: min(max(u.x, 0), 1), y: min(max(u.y, 0), 1)))
         return true
     }
+}
+
+final class PlayClock: ExactNativeInstance {
+    private let label = NSTextField(labelWithString: "")
+    private let studio: Studio
+    private var clip = ""
+    private weak var editor: Editor?
+    private weak var player: AVPlayer?
+    private var observer: Any?
+
+    init(_ studio: Studio, _ props: [String: String], _ events: ExactNativeEvents) {
+        self.studio = studio
+        super.init(events: events)
+        label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .center
+        events.intrinsicSize(CGSize(width: 112, height: 20))
+        try? setProps(props)
+    }
+
+    override var view: ExactNativeView { label }
+
+    override func setProps(_ props: [String: String]) throws {
+        let next = props["clip"] ?? ""
+        guard next != clip else { return }
+        clip = next
+        attach(studio.editor(next))
+    }
+
+    private func attach(_ next: Editor?) {
+        editor?.unlisten(self)
+        if let player, let observer { player.removeTimeObserver(observer) }
+        observer = nil
+        editor = next
+        player = next?.player
+        guard let next else { label.stringValue = ""; return }
+        next.listen(self) { [weak self] in self?.show() }
+        observer = next.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] _ in self?.show() }
+        show()
+    }
+
+    private func show() {
+        guard let editor else { return }
+        let map = editor.map, total = map.outputDuration
+        label.stringValue = "\(TimelineMenus.clock(min(map.output(editor.playhead), total))) / \(TimelineView.clock(total, tenths: false))"
+    }
+
+    override func destroy() { attach(nil) }
+}
+
+/// The view Exact places; its height follows the lanes.
+final class Timeline: ExactNativeInstance {
+    private let strip = TimelineView()
+    private let studio: Studio
+    private var clip = ""
+
+    init(_ studio: Studio, _ props: [String: String], _ events: ExactNativeEvents) {
+        self.studio = studio
+        super.init(events: events)
+        strip.onHeight = { h in events.intrinsicSize(CGSize(width: 800, height: h)) }
+        strip.clipsToBounds = true
+        events.intrinsicSize(CGSize(width: 800, height: TimelineView.height(lanes: 1)))
+        try? setProps(props)
+    }
+
+    override var view: ExactNativeView { strip }
+
+    override func setProps(_ props: [String: String]) throws {
+        let next = props["clip"] ?? ""
+        guard next != clip else { return }
+        clip = next
+        strip.attach(studio.editor(next))
+    }
+
+    override func destroy() { strip.detach() }
 }
 #else
 final class Studio: ExactModule {}

@@ -505,6 +505,7 @@ print("editor")
 let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("exact-studio-model-\(getpid())")
 defer { try? FileManager.default.removeItem(at: scratch) }
 Library.scratch = scratch
+Settings.isolate(in: scratch)
 Pictures.mayAsk = false
 let video = scratch.appendingPathComponent("capture.mov")
 try FileManager.default.createDirectory(at: Library.recordings, withIntermediateDirectories: true)
@@ -526,7 +527,7 @@ func open(_ fixture: String, edits: String? = nil, look: String? = nil) -> Edito
     try! JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
     if let edits { try! Data(edits.utf8).write(to: folder.appendingPathComponent("edits.json")) }
     if let look { try! Data(look.utf8).write(to: folder.appendingPathComponent("look.json")) }
-    UserDefaults.standard.removeObject(forKey: "ExactStudio.folded")
+    Settings.store.removeObject(forKey: Settings.foldedKey)
     let e = Editor(id: id)!
     expect(wait { e.player.currentItem?.status == .readyToPlay }, "the player never got ready")
     return e
@@ -1046,6 +1047,85 @@ test("a half dragged away from the other is no longer joined") {
     e.endDrag()
     eq(e.problem, "")
     eq(e.edits.segments.first { $0.id == "z1" }?.joinEnd, nil); eq(e.selectedSegment?.joinStart, nil)
+}
+
+test("the old folds move to the new key once: the old Clip fold is dropped, the others stay folded") {
+    expect(Settings.store != UserDefaults.standard, "the tests keep their settings apart from the person's")
+    Settings.store.set(["video", "top", "sound"], forKey: "ExactStudio.folded")
+    Settings.store.set(true, forKey: "ExactStudio.videoClosed")
+    let e = open("full")
+    eq(e.folded, ["top", "sound"])
+    expect(e.videoOpen, "VIDEO starts open")
+    expect(Settings.store.object(forKey: "ExactStudio.folded") == nil, "the old key is gone")
+    expect(Settings.store.object(forKey: "ExactStudio.videoClosed") == nil, "the old Clip key is gone")
+    e.toggle(group: "video")
+    Settings.store.set(["frame"], forKey: "ExactStudio.folded")
+    eq(Settings.folded, ["top", "sound", "video"], "the new key wins over a later old one")
+}
+
+test("folding VIDEO hides the Clip too; selecting a clip part, a move, the sound or an effect opens it again") {
+    let e = open("full")
+    let text = e.edits.segments.first { $0.space == 1 }!.id, zoom = e.edits.segments.first { $0.space == 0 }!.id
+    for id in [e.pieces[0].id, "m:" + e.edits.moves[0].id, Editor.recordedSound, zoom] {
+        e.select("")
+        e.toggle(group: "video")
+        expect(!e.videoOpen, "folded before selecting \(id)")
+        e.select(id)
+        expect(e.videoOpen, "selecting \(id) opens VIDEO")
+    }
+    e.select("")
+    e.toggle(group: "top")
+    e.select(text)
+    expect(!e.folded.contains("top"), "selecting a text opens ON TOP")
+}
+
+func timeline(_ e: Editor, height: CGFloat) -> TimelineView {
+    let view = TimelineView(frame: CGRect(x: 0, y: 0, width: 1100, height: height))
+    view.attach(e)
+    return view
+}
+
+test("VIDEO folded is one summary line: the Clip and its rows go, ON TOP moves up under it") {
+    let e = open("full")
+    let view = timeline(e, height: 2000)
+    let open = view.rows
+    eq(open.first?.kind, .header("video"))
+    let clipEnd = open.first { $0.kind == .position }!.y
+    expect(clipEnd > open[0].maxY + 40, "open, the Clip sits between VIDEO and its rows")
+    e.toggle(group: "video")
+    let folded = view.rows
+    eq(folded.map(\.kind).filter { [.position, .lane(0, 0), .sound].contains($0) }, [], "folded, no row of the video's")
+    eq(folded[1].kind, .header("top"))
+    near(Double(folded[1].y - folded[0].maxY), 8, "ON TOP sits right under the VIDEO line")
+    e.toggle(group: "video")
+    eq(view.rows.map(\.y), open.map(\.y), "unfolded, every row is back where it was")
+    view.detach()
+}
+
+test("a fold or unfold keeps the header clicked where it was, however far the rows are scrolled") {
+    let e = open("full")
+    let view = timeline(e, height: 150)
+    func screen(_ kind: TimelineView.Kind) -> CGFloat? { view.rows.first { $0.kind == kind }.map { $0.y - view.scrollY } }
+    func scroll(to kind: TimelineView.Kind) {
+        view.scrollY = view.rows.first { $0.kind == kind }!.y - 60
+        expect(view.scrollY + view.bounds.height < view.rows.last!.maxY, "the rows scroll as far as \(kind)")
+    }
+    for group in ["top", "sound"] {
+        scroll(to: .header(group))
+        let before = screen(.header(group))
+        e.toggle(group: group)
+        eq(screen(.header(group)), before, "folding \(group)")
+        e.toggle(group: group)
+        eq(screen(.header(group)), before, "unfolding \(group)")
+    }
+    scroll(to: .header("sound"))
+    let sound = screen(.header("sound"))
+    e.toggle(group: "video")
+    eq(screen(.header("sound")), sound, "VIDEO folded out of sight leaves the rows in sight where they were")
+    e.select(e.pieces[0].id)
+    expect(e.videoOpen, "selecting a clip part opens VIDEO")
+    eq(screen(.header("sound")), sound, "VIDEO opened out of sight leaves the rows in sight where they were")
+    view.detach()
 }
 
 print("\(passed) passed, \(failed.count) failed")

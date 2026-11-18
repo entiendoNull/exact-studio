@@ -62,6 +62,7 @@ Do not edit `exact.mjs` or the generated block at the top of `AGENTS.md`. `bun e
 | MCP server | Its tools and a `write_edits` round trip | `test/mcp.test.ts` |
 | Effects reference | Every effect, style and animation name the code accepts has an entry in `docs/effects.md`; its picture strips exist | `test/effects.test.ts`, `docs/effects/` |
 | macOS UI | The empty app; the editor on fixture recordings: the timeline, the inspector, templates | `app.test.contract`, `test/ui/*.test.contract` |
+| Your settings | The UI tests left the app's real defaults (`defaults export <app id>`) as they were | `check` |
 
 ### Add a test
 
