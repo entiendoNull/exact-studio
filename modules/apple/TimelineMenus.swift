@@ -32,14 +32,13 @@ enum TimelineMenus {
 
     // @ref LLP 0002#rows — plain names; a second row of a kind adds a number, one row has none
     static func kindName(_ space: Int) -> String {
-        space == 1 ? "Text" : space == 2 ? "Images" : space == 3 ? "Whole Frame" : space == Edits.soundSpace ? "Music & Sound" : "Effects"
+        space == 1 ? "Text" : space == 2 ? "Images" : space == Edits.soundSpace ? "Music & Sound" : "Effects"
     }
 
     static func laneName(_ space: Int, _ lane: Int) -> String { lane == 0 ? kindName(space) : "\(kindName(space)) \(lane + 1)" }
 
     static func scope(_ space: Int) -> String {
-        space == 1 || space == 2 ? "Sits on top of the video" : space == 3 ? "Changes the whole picture"
-            : space == Edits.soundSpace ? "Plays over the video" : "Changes the video only"
+        space == 1 || space == 2 ? "Sits on top of the video" : space == Edits.soundSpace ? "Plays over the video" : "Changes the video only"
     }
 
     static func plus(_ row: TimelineRow, _ editor: Editor) -> Plus? {
@@ -53,7 +52,6 @@ enum TimelineMenus {
             .item("Mask") { editor.add("mask") },
             .item("3D Turn") { editor.add("3d") },
         ]
-        let frame: [MenuEntry] = [.item("Blur") { editor.add("blur-frame") }, .item("Black & White") { editor.add("mono-frame") }]
         // @ref LLP 0005#refusals — the + checks the playhead first: an item that would be refused is off, with its reason
         func checked(_ entries: [MenuEntry]) -> [MenuEntry] {
             entries.map { entry in
@@ -90,7 +88,7 @@ enum TimelineMenus {
             case 2: return .direct { Pictures.pick { url in editor.onLane(lane) { editor.addImage(url) } } }
             case Edits.soundSpace: return .direct { Sounds.pick { url in editor.onLane(lane) { editor.addSound(url) } } }
             default:
-                return .menu(checked([.title("Add to \(laneName(space, lane)) at \(at) · \(scope(space))"), .line] + on(lane, space == 3 ? frame : effects)))
+                return .menu(checked([.title("Add to \(laneName(space, lane)) at \(at) · \(scope(space))"), .line] + on(lane, effects)))
             }
         case let .imagePosition(id):
             return .direct { editor.select(id); editor.addImageMove() }

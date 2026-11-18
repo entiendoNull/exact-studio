@@ -175,10 +175,10 @@ describe('where an effect applies', () => {
       expect(run(dir, 'validate', 'empty').out).toBe('ok\n');
       const shown = run(dir, 'show', 'empty').out;
       expect(shown).toContain('e0: 0:01.00–0:02.00  blur  [v]');
-      expect(shown).toContain('f0: 0:03.00–0:04.00  mono (the background only)  [background]');
-      expect(shown).toContain('f0: 0:04.50–0:05.50  mono (the video and the background)  [scene]');
-      expect(shown).toContain('f0: 0:06.00–0:07.00  mono (whole frame)  [frame]');
-      expect(shown).toContain('f0: 0:07.50–0:08.50  mono (whole frame, texts too)  [all]');
+      expect(shown).toContain('e0: 0:03.00–0:04.00  mono (the background only)  [background]');
+      expect(shown).toContain('e0: 0:04.50–0:05.50  mono (the video and the background)  [scene]');
+      expect(shown).toContain('e0: 0:06.00–0:07.00  mono (whole frame)  [frame]');
+      expect(shown).toContain('e0: 0:07.50–0:08.50  mono (whole frame, texts too)  [all]');
       expect(shown).toContain('effect blur 0:02.00–0:03.00  [tb]');
       expect(shown).toContain('effect fade to 0.5 0:04.00–0:05.00  [tf]');
     } finally {

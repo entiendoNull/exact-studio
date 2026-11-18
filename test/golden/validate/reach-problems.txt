@@ -4,4 +4,3 @@ text t (0:01.00–0:04.00): its blur effect o: text-inside: Keep it inside the t
   “Hi” shows 0:01.0–0:04.0. Start and end it there.
 text t (0:01.00–0:04.00): its pulse effect p: text-effect-kind: No such text effect.
   A text takes blur, mono or fade.
-note: frameLanes is 1; 0 are in use. Leave the counts out: lanes come from use.

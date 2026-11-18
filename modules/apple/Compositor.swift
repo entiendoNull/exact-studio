@@ -155,9 +155,10 @@ struct Segment: Codable, Equatable {
     /// Drawn over the finished picture: a text or an image.
     var isOverlay: Bool { kind == "text" || kind == "image" }
     var isBehind: Bool { isOverlay && layer == "behind" }
-    /// Which rows its `lane` counts: 0 the video's effect lanes, 1 the text lanes, 2 the image
-    /// lanes, 3 the whole-frame effect lanes.
-    var space: Int { kind == "text" ? 1 : kind == "image" ? 2 : coversFrame ? 3 : 0 }
+    /// Which rows its `lane` counts: 0 the effect lanes (a blur's reach is its `scope`, not its row), 1 the text
+    /// lanes, 2 the image lanes.
+    // @ref LLP 0002#where-an-effect-applies — every reach sits on the Effects rows
+    var space: Int { kind == "text" ? 1 : kind == "image" ? 2 : 0 }
 
     func overlaps(_ o: Segment) -> Bool { start < o.end - 0.0001 && o.start < end - 0.0001 }
 }
@@ -354,8 +355,6 @@ struct Edits: Codable, Equatable {
     /// Image lanes: they hold the images drawn over the video. An image's `lane` counts these;
     /// images on one lane never overlap, and a lower lane is in front.
     var imageLanes: Int = 0
-    /// Whole-frame lanes: they hold the blurs and black-and-whites that cover the whole picture.
-    var frameLanes: Int = 0
     /// Where the subject sits before any move.
     var base = Placement()
     var moves: [Move] = []
@@ -373,7 +372,9 @@ struct Edits: Codable, Equatable {
         compactLanes()
     }
 
-    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, imageLanes, frameLanes, base, moves, three, volume, sounds, soundLanes }
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, imageLanes, base, moves, three, volume, sounds, soundLanes }
+    /// Read from old files only: the whole-frame lanes, whose blurs now sit on the effect lanes.
+    enum Legacy: String, CodingKey { case frameLanes }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         segments = try c.decodeIfPresent([Segment].self, forKey: .segments) ?? []
@@ -394,7 +395,19 @@ struct Edits: Codable, Equatable {
         }
         segments.removeAll { $0.kind == "cut" }
         splits = Array(Set(splits.filter { $0 > 0.001 })).sorted()
-        frameLanes = try c.decodeIfPresent(Int.self, forKey: .frameLanes) ?? 0
+        // @ref LLP 0002#where-an-effect-applies — a file's whole-frame lanes: each of their items takes the first effect lane with room
+        if try decoder.container(keyedBy: Legacy.self).decodeIfPresent(Int.self, forKey: .frameLanes) != nil {
+            let frame = segments.indices.filter { segments[$0].coversFrame }.sorted { (segments[$0].lane, segments[$0].start) < (segments[$1].lane, segments[$1].start) }
+            let video = segments.indices.filter { !segments[$0].coversFrame && segments[$0].space == 0 }.map(\.self)
+            lanes = (video.map { segments[$0].lane }.max() ?? -1) + 1
+            var placed = video
+            for i in frame {
+                var lane = 0
+                while placed.contains(where: { segments[$0].lane == lane && segments[$0].overlaps(segments[i]) }) { lane += 1 }
+                segments[i].lane = lane
+                placed.append(i)
+            }
+        }
         textLanes = try c.decodeIfPresent(Int.self, forKey: .textLanes) ?? 0
         // Texts and whole-frame effects once shared the effect lanes; each kind's lanes now close up on their own,
         // which is what the counts left out mean too.
@@ -414,7 +427,7 @@ struct Edits: Codable, Equatable {
     }
 
     /// How many rows there are in a space (`Segment.space`), or of sound lanes (`Edits.soundSpace`).
-    func laneCount(space: Int) -> Int { space == 1 ? textLanes : space == 2 ? imageLanes : space == 3 ? frameLanes : space == Edits.soundSpace ? soundLanes : lanes }
+    func laneCount(space: Int) -> Int { space == 1 ? textLanes : space == 2 ? imageLanes : space == Edits.soundSpace ? soundLanes : lanes }
     /// The sound lanes, counted as one more space after the segments' own.
     static let soundSpace = 4
 
@@ -423,7 +436,6 @@ struct Edits: Codable, Equatable {
         lanes = max(lanes, (segments.filter { $0.space == 0 }.map(\.lane).max() ?? -1) + 1, 0)
         textLanes = max(textLanes, (texts.map(\.lane).max() ?? -1) + 1, 0)
         imageLanes = max(imageLanes, (images.map(\.lane).max() ?? -1) + 1, 0)
-        frameLanes = max(frameLanes, (segments.filter { $0.space == 3 }.map(\.lane).max() ?? -1) + 1, 0)
         soundLanes = max(soundLanes, (sounds.map(\.lane).max() ?? -1) + 1, 0)
     }
 
@@ -434,7 +446,7 @@ struct Edits: Codable, Equatable {
         func squeeze(_ used: [Int]) -> [Int: Int] {
             Dictionary(uniqueKeysWithValues: Array(Set(used)).sorted().enumerated().map { ($1, $0) })
         }
-        for space in [0, 1, 2, 3] {
+        for space in [0, 1, 2] {
             let to = squeeze(segments.filter { $0.space == space }.map(\.lane))
             segments = segments.map { s in
                 guard s.space == space, let l = to[s.lane] else { return s }
@@ -443,7 +455,6 @@ struct Edits: Codable, Equatable {
             switch space {
             case 1: textLanes = to.count
             case 2: imageLanes = to.count
-            case 3: frameLanes = to.count
             default: lanes = to.count
             }
         }
@@ -467,7 +478,7 @@ struct Edits: Codable, Equatable {
     /// Images keep their lanes: a template knows nothing of them.
     mutating func pack(_ made: [Segment]) {
         segments = []
-        lanes = 0; textLanes = 0; frameLanes = 0
+        lanes = 0; textLanes = 0
         for var seg in made.sorted(by: { $0.start < $1.start }) {
             if seg.kind != "image" {
                 var lane = 0

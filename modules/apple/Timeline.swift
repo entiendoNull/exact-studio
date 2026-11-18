@@ -93,7 +93,6 @@ final class TimelineView: NSView {
         func extra(_ space: Int) -> Int { dragged == space || empty ? 1 : 0 }
         add(.position, motionH)
         for l in 0..<e.lanes + extra(0) { add(.lane(0, l), laneH) }
-        for l in 0..<e.frameLanes + (dragged == 3 ? 1 : 0) { add(.lane(3, l), laneH) }
         func effectRows(_ item: Segment) {
             var lanes = max(1, ((item.effects ?? []).map(\.lane).max() ?? -1) + 1)
             if case let .fx(id, _, 0, _, _, _, _) = drag, id == item.id { lanes += 1 }
@@ -755,7 +754,7 @@ final class TimelineView: NSView {
                 }
                 for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) { draw(move: m, in: r, selected: editor.selected == "m:" + m.id, threeD: m.angles != nil, ref: .move(m)) }
             case let .lane(space, lane):
-                let symbol = space == 1 ? "textformat" : space == 2 ? "photo" : space == 3 ? "rectangle.inset.filled" : space == Edits.soundSpace ? "music.note" : "wand.and.stars"
+                let symbol = space == 1 ? "textformat" : space == 2 ? "photo" : space == Edits.soundSpace ? "music.note" : "wand.and.stars"
                 // An image or text lane with items folds its current item's own rows; an empty one keeps its name in line.
                 let folds = (space == 1 || space == 2) && segments.contains { $0.space == space && $0.lane == lane }
                 drawLabel(TimelineMenus.laneName(space, lane), symbol: symbol, y: r.y, height: r.height, attrs: label, tint: NSColor(white: 1, alpha: 0.5),
@@ -764,7 +763,7 @@ final class TimelineView: NSView {
                 // A row shown only as a target says what its + adds; it is not stored.
                 if !real(space, lane), draggedSpace != space {
                     drawHint(space == 1 ? "+ adds a text" : space == 2 ? "+ adds an image" : space == Edits.soundSpace ? "+ adds music or a sound"
-                        : space == 3 ? "+ adds a blur over the whole frame" : "+ adds an effect", in: r)
+                        : "+ adds an effect", in: r)
                 }
             case let .imagePosition(id):
                 guard let image = images.first(where: { $0.id == id }) else { continue }

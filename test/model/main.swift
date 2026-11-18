@@ -99,7 +99,7 @@ print("edit model")
 
 test("an empty file takes every default") {
     let e = try decode("{}")
-    eq(e.lanes, 0); eq(e.textLanes, 0); eq(e.imageLanes, 0); eq(e.frameLanes, 0); eq(e.soundLanes, 0)
+    eq(e.lanes, 0); eq(e.textLanes, 0); eq(e.imageLanes, 0); eq(e.soundLanes, 0)
     eq(e.volume, 1); eq(e.three.on, false); eq(e.base, Placement()); eq(e.segments.count, 0)
 }
 
@@ -142,16 +142,16 @@ test("a file that truly can't be read says where, and a missing file is no file"
     }
 }
 
-test("an old file: cuts become splits, texts and whole-frame effects get lanes of their own, each image keeps a lane") {
+test("an old file: cuts become splits, texts get lanes of their own, a whole-frame effect stays an effect, each image keeps a lane") {
     let e = try JSONDecoder().decode(Edits.self, from: Data(contentsOf: fixtures.appendingPathComponent("valid/old-format/edits.json")))
     eq(e.splits, [4, 5]); eq(e.removed, [4])
     expect(!e.segments.contains { $0.kind == "cut" }, "a cut segment is left")
     eq(e.segments.first { $0.id == "t" }?.lane, 0, "text lane")
-    eq(e.segments.first { $0.id == "m" }?.lane, 0, "whole-frame lane")
+    eq(e.segments.first { $0.id == "m" }?.lane, 1, "the whole-frame effect keeps its own row among the effects")
     eq(e.segments.first { $0.id == "z" }?.lane, 0, "zoom lane")
     eq(e.segments.first { $0.id == "i2" }?.lane, 0, "the image on the old top row is in front")
     eq(e.segments.first { $0.id == "i1" }?.lane, 1)
-    eq(e.lanes, 1); eq(e.textLanes, 1); eq(e.frameLanes, 1); eq(e.imageLanes, 2)
+    eq(e.lanes, 2); eq(e.textLanes, 1); eq(e.imageLanes, 2)
 }
 
 test("a file written and read back is the same edit") {
@@ -769,7 +769,7 @@ test("add a zoom at the playhead; a second zoom there is refused; one before it 
     eq(e.edits.speeds.count, 1); eq(e.selectedSegment?.lane, 1, "a speed under a zoom takes the next lane"); eq(e.edits.lanes, 2)
 }
 
-test("texts stack on new text lanes; a whole-frame blur goes to its own row, and never over a video blur (P2)") {
+test("texts stack on new text lanes; a whole-frame blur sits on the Effects lanes, and never over a video blur (P2)") {
     let e = open("empty")
     at(e, 2); e.add("text"); e.add("text")
     eq(e.edits.texts.map(\.lane), [0, 1]); eq(e.edits.textLanes, 2)
@@ -778,7 +778,8 @@ test("texts stack on new text lanes; a whole-frame blur goes to its own row, and
     eq(e.edits.segments.filter { $0.kind == "blur" }.map(\.space), [0], "refused: one blur at a time")
     eq(e.refusal?.rule, "room-at-playhead")
     at(e, 6); e.add("blur-frame")
-    eq(e.edits.segments.filter { $0.kind == "blur" }.map(\.space), [0, 3]); eq(e.edits.frameLanes, 1)
+    eq(e.edits.segments.filter { $0.kind == "blur" }.map(\.scope), [nil, "frame"]); eq(e.edits.segments.filter { $0.kind == "blur" }.map(\.lane), [0, 0])
+    eq(e.edits.lanes, 1, "the two blurs never meet, so one Effects lane holds both")
     e.add("mask")
     let m = e.selectedSegment
     eq(m?.kind, "mask"); eq(m?.style, "blur"); expect(m?.rect != nil, "a mask has its rect")
@@ -1014,10 +1015,9 @@ test("a + menu holds items only, grouped, under a line that says where they land
     eq(effects.titles, ["Add to Effects at 0:01.0 · Changes the video only"])
     eq(effects.choices, ["Zoom › Zoom In", "Zoom › Zoom Out", "Zoom › Zoom on Clicks", "Speed › Slow Down", "Speed › Speed Up",
                          "Look › Spotlight", "Look › Cursor Highlight", "Look › Blur", "Look › Black & White", "Mask", "3D Turn"])
-    eq(menu(.lane(3, 0), e).choices, ["Blur", "Black & White"])
     eq(menu(.position, e).choices.count, 11)
     eq(menu(.position, e).titles, ["Move the video at 0:01.0", "Then drag the video where it should go."])
-    for row in [TimelineRow.lane(0, 0), .lane(3, 0), .position] {
+    for row in [TimelineRow.lane(0, 0), .position] {
         expect(!menu(row, e).choices.contains { $0.contains("Lane") }, "\(row)'s + offers a lane")
     }
     guard case .direct? = TimelineMenus.plus(.lane(Edits.soundSpace, 0), e) else { return problems.append("the Sound +, with one choice, should add at once") }
@@ -1083,22 +1083,37 @@ test("Delete Lane says what goes with it and asks when it holds items; the last 
     eq(e.edits.zooms.count, 1, "Cancel keeps it")
 }
 
-test("a blur's reach moves it between the video's lanes and the whole frame's") {
+test("a file's whole-frame lanes move onto the effect lanes on read, each item on the first with room; frameLanes is never written") {
+    let e = try decode("""
+    { "lanes": 1, "textLanes": 0, "imageLanes": 0, "frameLanes": 2,
+      "segments": [
+        { "id": "z", "kind": "zoom", "start": 1, "end": 4, "lane": 0, "level": 2 },
+        { "id": "f1", "kind": "mono", "start": 2, "end": 5, "lane": 0, "scope": "frame" },
+        { "id": "f2", "kind": "blur", "start": 6, "end": 8, "lane": 1, "scope": "all" }
+      ] }
+    """)
+    eq(e.segments.map(\.lane), [0, 1, 0], "f1 meets the zoom, so Effects 2; f2 meets nothing, so Effects")
+    eq(e.lanes, 2)
+    let written = String(data: try JSONEncoder().encode(e), encoding: .utf8)!
+    expect(!written.contains("frameLanes"), "frameLanes is read from old files only")
+}
+
+test("a blur's reach changes what it covers, never its row") {
     let e = open("empty")
     at(e, 1); e.add("blur")
     e.setSegment("scope", "frame")
-    eq(e.selectedSegment?.space, 3); eq(e.edits.frameLanes, 1)
+    eq(e.selectedSegment?.space, 0); eq(e.selectedSegment?.lane, 0); eq(e.edits.lanes, 1)
     e.setSegment("scope", "video")
     eq(e.selectedSegment?.space, 0)
 }
 
-test("every reach of a blur or black and white sits on its own lanes; no scope, or an unknown one, is the video's") {
-    for (scope, space) in [(nil, 0), ("video", 0), ("background", 3), ("scene", 3), ("frame", 3), ("all", 3), ("nonsense", 0)] as [(String?, Int)] {
+test("every reach of a blur or black and white sits on the Effects lanes; no scope, or an unknown one, is the video's") {
+    for (scope, covers) in [(nil, false), ("video", false), ("background", true), ("scene", true), ("frame", true), ("all", true), ("nonsense", false)] as [(String?, Bool)] {
         for kind in ["blur", "mono"] {
             var s = seg("b", kind, 1, 3)
             s.scope = scope
-            eq(s.space, space, "\(kind) \(scope ?? "none")")
-            eq(s.coversFrame, space == 3, "\(kind) \(scope ?? "none")")
+            eq(s.space, 0, "\(kind) \(scope ?? "none")")
+            eq(s.coversFrame, covers, "\(kind) \(scope ?? "none")")
         }
     }
     var spot = seg("s", "spotlight", 1, 3)
@@ -1107,12 +1122,12 @@ test("every reach of a blur or black and white sits on its own lanes; no scope, 
     eq(Segment.scopes, ["video", "background", "scene", "frame", "all"])
 }
 
-test("the inspector's reach: each value lands on its lanes; a spotlight drops it; a text never takes one") {
+test("the inspector's reach: each value stays on its Effects lane; a spotlight drops it; a text never takes one") {
     let e = open("empty")
     at(e, 1); e.add("mono")
-    for (scope, space) in [("background", 3), ("scene", 3), ("frame", 3), ("all", 3), ("video", 0)] {
+    for scope in ["background", "scene", "frame", "all", "video"] {
         e.setSegment("scope", scope)
-        eq(e.selectedSegment?.scope, scope == "video" ? nil : scope); eq(e.selectedSegment?.space, space, scope)
+        eq(e.selectedSegment?.scope, scope == "video" ? nil : scope); eq(e.selectedSegment?.space, 0, scope)
     }
     e.setSegment("scope", "nonsense")
     eq(e.selectedSegment?.scope, nil, "an unknown reach is ignored")
@@ -1421,6 +1436,30 @@ func differ(_ a: [UInt8], _ b: [UInt8]) -> (most: Int, count: Int) {
     return (most, count)
 }
 
+test("an old file with whole-frame lanes draws exactly as before, frame for frame") {
+    let e = open("full")
+    let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("valid/full/edits.json"))) as! [String: Any]
+    expect(raw["frameLanes"] != nil, "the fixture is a file with whole-frame lanes")
+    let lanes = Dictionary(uniqueKeysWithValues: (raw["segments"] as! [[String: Any]]).map { ($0["id"] as! String, $0["lane"] as? Int ?? 0) })
+    let read = e.edits
+    var asWritten = read
+    asWritten.segments = asWritten.segments.map { var s = $0; s.lane = lanes[s.id] ?? s.lane; return s }
+    expect(asWritten.segments.map(\.lane) != read.segments.map(\.lane), "reading moved the whole-frame blur to an effect lane")
+    let checker = CIFilter.checkerboardGenerator()
+    checker.width = 12; checker.color0 = CIColor(red: 0.9, green: 0.4, blue: 0.1); checker.color1 = CIColor(red: 0.1, green: 0.3, blue: 0.8)
+    let frame = checker.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: e.meta.width, height: e.meta.height))
+    let before = Framing(meta: e.meta, look: e.look, edits: asWritten, cursor: e.cursor, folder: e.folder)
+    let after = Framing(meta: e.meta, look: e.look, edits: read, cursor: e.cursor, folder: e.folder)
+    for t in stride(from: 0.25, to: 10, by: 0.5) {
+        expect(pixels(before, frame, at: t) == pixels(after, frame, at: t), "at \(t) the frames differ")
+    }
+    var unblurred = read
+    unblurred.segments.removeAll { $0.coversFrame }
+    let plain = Framing(meta: e.meta, look: e.look, edits: unblurred, cursor: e.cursor, folder: e.folder)
+    expect(pixels(plain, frame, at: 9.5) != pixels(after, frame, at: 9.5), "the comparison sees the whole-frame blur")
+}
+
+
 test("every split keeps the rendered video the same: zooms, texts with loops, effects, 3D turns, images with moves and effects, masks") {
     let e = open("full")
     var base = e.edits
@@ -1710,7 +1749,7 @@ test("the rows keep a fixed kind order under the Clip, with plain names; a secon
         case .imageEffects: return "image Effects"
         }
     }
-    eq(order, ["Moves", "Effects", "Effects 2", "Effects 3", "Whole Frame", "Text", "Images", "Music & Sound"])
+    eq(order, ["Moves", "Effects", "Effects 2", "Effects 3", "Text", "Images", "Music & Sound"])
     expect(view.rows[0].y > 48 + 58, "the first row sits under the Clip")
     e.select(e.edits.images[0].id)
     expect(view.rows.contains { $0.kind == .imagePosition(e.edits.images[0].id) }, "selecting an image opens its own rows under its lane")

@@ -1234,7 +1234,6 @@ final class Editor {
     /// a visual effect) another visual kind.
     func setValue(number: Double?, kind: String?) {
         guard var s = selectedSegment else { return }
-        let was = s.space
         if s.kind == "zoom", let n = number { s.level = n }
         if s.kind == "speed", let n = number { s.rate = n }
         if Segment.visual.contains(s.kind), let k = kind, Segment.visual.contains(k) {
@@ -1242,19 +1241,8 @@ final class Editor {
             // Spotlight and cursor highlight follow the cursor on the video: they have no reach.
             if k != "blur" && k != "mono" { s.scope = nil }
         }
-        s.space != was ? relaneTo(s) : replace(s)
+        replace(s)
         sampleSegment(s, part: "in")
-    }
-
-    /// Put `s` on the first free lane of its space, as when its reach takes it to the other lanes.
-    private func relaneTo(_ segment: Segment) {
-        var s = segment
-        var next = edits
-        next.segments.removeAll { $0.id == s.id }
-        s.lane = next.freeLane(for: s)
-        next.segments.append(s)
-        next.fitLanes()
-        apply(next)
     }
 
     /// Set one field of the selected text, or ("add-effect") give it an effect of its own.
@@ -1476,12 +1464,9 @@ final class Editor {
         let n = Double(value)
         switch field {
         case "scope":
-            // Between the video's lanes and the whole-frame lanes: it lands on the first free one there.
-            // @ref LLP 0002#where-an-effect-applies
+            // @ref LLP 0002#where-an-effect-applies — a reach changes what it covers, never its row
             guard s.kind == "blur" || s.kind == "mono", Segment.scopes.contains(value) else { return }
-            let was = s.space
             s.scope = value == "video" ? nil : value
-            if s.space != was { return relaneTo(s) }
         case "pose": let a = Editor.pose(value); s.tilt = a.tilt; s.turn = a.turn; s.roll = a.roll
         case "tilt": if let n { s.tilt = min(max(n, -80), 80) }
         case "turn": if let n { s.turn = min(max(n, -80), 80) }
@@ -1828,7 +1813,7 @@ final class Editor {
         guard let origin = dragOrigin else { return moved }
         moved.segments = moved.segments.map { $0.isOverlay ? Editor.tidy($0) : $0 }
         moved.lanes = origin.lanes; moved.textLanes = origin.textLanes; moved.imageLanes = origin.imageLanes
-        moved.frameLanes = origin.frameLanes; moved.soundLanes = origin.soundLanes
+        moved.soundLanes = origin.soundLanes
         if let ref = dragCheck?.item { Editor.fall(&moved, ref, map: TimeMap(duration: duration, edits: moved)) }
         moved.fitLanes()
         return moved
@@ -2013,7 +1998,7 @@ final class Editor {
 
     var summary: [String: Any] {
         let parts = pieces
-        return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes + edits.textLanes + edits.imageLanes + edits.frameLanes + edits.soundLanes, "images": edits.images.count,
+        return ["parts": parts.count, "removed": parts.filter(\.removed).count, "effects": edits.segments.count, "lanes": edits.lanes + edits.textLanes + edits.imageLanes + edits.soundLanes, "images": edits.images.count,
                 "moves": edits.moves.count, "length": map.outputDuration, "source": duration, "playing": isPlaying,
                 "device": meta.isDevice, "found": meta.device == true, "cursorDrawn": meta.drawsCursor,
                 "baseScale": (edits.base.scale * 100).rounded(), "undoName": undoName, "redoName": redoName,
@@ -2158,7 +2143,7 @@ enum History {
         }
         if e == ["removed"] { return b.edits.removed.count > a.edits.removed.count ? "Remove Part" : "Restore Part" }
         if e == ["transitions"] { return "Transition" }
-        if e.isSubset(of: ["segments", "lanes", "textLanes", "imageLanes", "frameLanes"]) {
+        if e.isSubset(of: ["segments", "lanes", "textLanes", "imageLanes"]) {
             let c = changed(a.edits.segments, b.edits.segments, id: \.id)
             if c.added.count == 1, c.removed.isEmpty, c.changed.count == 1, c.changed[0].1.kind == c.added[0].kind { return "Split " + kindName(c.added[0].kind) }
             if c.added.count == 1, c.removed.isEmpty { return "Add " + kindName(c.added[0].kind) }
@@ -2167,7 +2152,7 @@ enum History {
                 let (x, y) = c.changed[0]
                 return segmentName(x, y)
             }
-            if c.added.isEmpty, c.removed.isEmpty, c.changed.isEmpty { return b.edits.lanes + b.edits.textLanes + b.edits.imageLanes + b.edits.frameLanes > a.edits.lanes + a.edits.textLanes + a.edits.imageLanes + a.edits.frameLanes ? "Add Lane" : "Remove Lane" }
+            if c.added.isEmpty, c.removed.isEmpty, c.changed.isEmpty { return b.edits.lanes + b.edits.textLanes + b.edits.imageLanes > a.edits.lanes + a.edits.textLanes + a.edits.imageLanes ? "Add Lane" : "Remove Lane" }
             return "Edit"
         }
         if e == ["moves"] || e == ["moves", "three"] {
