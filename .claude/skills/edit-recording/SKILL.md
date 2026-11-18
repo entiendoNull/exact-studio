@@ -46,7 +46,9 @@ The loop, from this repository's root:
 1. `./exact-studio list`, then `./exact-studio show <id>`: what the recording is and holds now.
 2. Edit `edits.json` / `look.json` directly. Times are **seconds of the recording**, not of the
    video as it plays (cuts and speed changes make them differ; `show` prints both lengths).
-   `./exact-studio template <id> launch|hero|tour|teaser` is a quick start to adjust from.
+   `./exact-studio template <id> <name>` is a quick start to adjust from (`template --list`; docs/edits.md
+   says what each does). It prints its `[bracketed]` lines to fill; `validate` and `export` refuse them
+   until you write them or delete the text.
    To put a picture on the video, run `./exact-studio image <id> <picture> --at <t> --for <seconds>`:
    it copies the file into the recording and prints the new `image` segment, on the first image
    lane free at that time. Then edit that segment's place, size, moves and effects in `edits.json`. Never point `file` outside the

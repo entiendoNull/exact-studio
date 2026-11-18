@@ -356,5 +356,24 @@ the window's own corner radius (a share of its width), measured from its alpha.
 ## Templates
 
 `./exact-studio template <id> <name>` replaces the texts, effects, zooms and moves with a ready-made
-edit (`launch`, `hero`, `tour`, `teaser`) laid out for `look.json`'s `aspect`, and keeps the cuts,
-transitions, 3D settings, images, masks and sounds. A good start to adjust from.
+edit, and keeps the cuts, speed changes, transitions, 3D settings, images, masks and sounds. Each
+template fits the recording: its length as it plays (after cuts), its clicks, and the frame's shape
+and background from `look.json`. `./exact-studio template --list` prints them.
+
+| Name | Title | What it does | For |
+|---|---|---|---|
+| `clean` | Clean Demo | A zoom around the busiest clicks, no text; refused when no click leaves room for a zoom | A demo the screen explains |
+| `hero` | Hero Angle | Opens at a slight 3D angle (tilt 8°, turn under 20°), then zooms on clicks | A page header or a loop |
+| `before-after` | Before / After | "Before" then "After" beside the video, split at the cut nearest the middle, else at the click followed by the longest pause | A fix or a redesign |
+| `spotlight` | Feature Spotlight | One zoom on the key click (the one followed by the longest pause), then one line to fill | One feature |
+| `social` | Social Hook | A hook line to fill in the first seconds, then zooms on clicks | A feed |
+| `steps` | Tutorial Steps | A numbered line to fill for each step, started by the clicks, at most five | A how-to |
+| `launch` | Product Launch | A title and, from 14 s, a pitch over a blurred opening, zooms, then a closing line beside the video; 10 s at least | A launch |
+
+The copy never makes a claim. A template either writes no text, or writes an obvious placeholder in
+brackets (`[Hook line]`, `1. [What to do]`). A text with `[` … `]` in it is **unfilled**: `show`
+marks it `UNFILLED`, `validate` reports it and exits 1, and `export` refuses until it is written or
+deleted. The app selects the first one after a template, ready to type. Each line has time on screen
+for a six-word line by the reading-speed rule (`1.0 s + 0.3 s` a word, plus its animations), and
+texts are one placement, style and animation, white on a dark background and black on a light one (a title over the blurred opening on a pill).
+Zooms (1.6×, at least 2.5 s, 1 s apart) and the 3D turn never share a moment with a text.

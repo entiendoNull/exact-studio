@@ -42,9 +42,28 @@ silhouette in LLP 0001. Other recordings become a slab.
 
 ## Templates
 
-Each frame shape (16:9, 9:16, 1:1, 4:3) has its own versions of the templates (launch, hero,
-tour, teaser): texts, effects, zooms and moves laid out so texts stay clear of the video. A
-template keeps your cuts and can be undone once.
+Seven templates, each with one purpose: Clean Demo, Hero Angle, Before / After (no text to
+write), Feature Spotlight, Social Hook, Tutorial Steps, Product Launch (lines to fill). Reviewed
+against the `direct-recording` skill on 2026-11-18; Launch, Hero, Tour and Teaser were retired:
+they shipped claims ("Built for speed", "Available now"), stand-ins that read as real copy ("Your
+App", "Link in bio"), loops, spins and an orbit that showed the device's back, at fixed shares of
+the length whatever happened on screen.
+
+- A template fits the recording: its length as it plays, its clicks (in output time, cut ones
+  dropped), its cuts, and the frame's shape. The layout comes from `Framing.layout`, so the text
+  sits beside the video when that leaves it larger, else above it.
+- The copy never makes a claim. A template writes no text, plain labels ("Before", "After"), or
+  placeholders in brackets. A bracketed text is unfilled: `validate` reports it and `export`
+  refuses it, so a placeholder cannot ship by mistake.
+- Each line gets the reading-speed time of a six-word line: `1.0 s + 0.3 s` a word, never under
+  1.5 s, plus 1 s for its animations.
+- One emphasis at a time: zooms (1.6×, at least 2.5 s, 1 s apart, one per 8 s at most), the 3D
+  turn and texts never overlap. A blur only sits under the opening title.
+- Texts share one placement, weight, style and calm animation, and their colour follows the
+  background (black on light, white on dark). A title over the blurred opening sits on a pill,
+  since the blur can be light or dark.
+- A template keeps the cuts, speed changes, transitions, 3D settings, images, masks and sounds, and
+  is one undo step.
 
 ## Demos
 

@@ -1347,19 +1347,14 @@ final class Editor {
 
     // MARK: Templates
 
-    /// Replace the texts, effects, zooms and moves with a ready-made edit laid out for the
-    /// frame's shape. The clip's parts and the 3D settings stay.
     func applyTemplate(_ name: String) {
-        let map = self.map
-        guard let made = Templates.make(name, duration: map.outputDuration, source: { map.source($0) }, aspect: look.aspect,
-                                        clicks: meta.clicks, three: edits.three) else { return }
-        var next = edits
-        // The images and masks stay: a template knows nothing of them, and a mask hides something.
-        next.pack(made.segments + edits.images + edits.masks)
-        next.moves = made.moves
-        next.base = made.base
+        guard let info = Templates.info(name) else { return }
+        guard let made = Templates.make(name, map: map, meta: meta, look: look, keep: Templates.kept(edits)) else {
+            return refuse(Templates.refusal(info, duration: map.outputDuration))
+        }
+        let next = Templates.apply(made, to: edits)
         named("Template") { apply(next) }
-        select("")
+        select(next.texts.sorted { $0.start < $1.start }.first(where: \.isPlaceholder)?.id ?? "")
     }
 
     func clearAll() {

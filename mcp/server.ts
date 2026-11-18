@@ -238,10 +238,14 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'apply_template',
-    description: 'Replaces the texts, effects and moves with a template laid out for the recording\'s aspect. Cuts stay.',
+    description:
+      'Replaces the texts, effects, zooms and moves with a template fitted to the recording\'s length, clicks and frame. Cuts, speed changes, images, masks and sounds stay. ' +
+      'clean: zooms on clicks, no text. hero: a slight 3D angle to open, then zooms. before-after: "Before" and "After" labels around the change. ' +
+      'spotlight: one zoom on the key click, then one line. social: a hook line, then zooms. steps: a numbered line per step. launch: a title over a blurred opening, zooms, a closing line (10 s at least). ' +
+      'A [bracketed] text is a line to fill: the result lists them, and validate_recording and export_video refuse them until they are written or deleted. Review the frames afterwards.',
     inputSchema: {
       type: 'object',
-      properties: { id, name: { type: 'string', enum: ['launch', 'hero', 'tour', 'teaser'] } },
+      properties: { id, name: { type: 'string', enum: ['clean', 'hero', 'before-after', 'spotlight', 'social', 'steps', 'launch'] } },
       required: ['id', 'name'],
     },
     call: async (a) => outOf(await run(['template', a.id, a.name])),

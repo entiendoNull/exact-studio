@@ -212,18 +212,85 @@ describe('verbs that change a recording leave it valid', () => {
   });
   afterAll(() => drop(lib));
 
-  test('template: each one replaces the edit and validates', () => {
-    for (const name of ['launch', 'hero', 'tour', 'teaser']) {
+  const templates = ['clean', 'hero', 'before-after', 'spotlight', 'social', 'steps', 'launch'];
+  const filled = (id: string) => {
+    const file = join(lib, id, 'edits.json');
+    const edits = JSON.parse(readFileSync(file, 'utf8'));
+    for (const s of edits.segments) if (s.kind === 'text') s.text = s.text.replace(/\[[^\]]*\]/g, 'Line');
+    writeFileSync(file, JSON.stringify(edits));
+  };
+
+  test('template --list matches test/golden/template/list.txt', () => {
+    const r = run(lib, 'template', '--list');
+    expect(r.code).toBe(0);
+    expect(r.out.split('\n').filter(Boolean).map((l) => l.split(' ')[0])).toEqual(templates);
+    matches('template/list.txt', r.out);
+  });
+
+  test('template: each one keeps the cuts, images and masks, flags its lines to fill, and validates once they are filled', () => {
+    for (const name of templates) {
       const r = run(lib, 'template', 'full', name);
+      if (name === 'launch') {
+        expect(r.code).toBe(1);
+        expect(r.err).toBe('Product Launch needs a video at least 10 s long. This one plays 0:09.40.\n');
+        continue;
+      }
       expect(r.code).toBe(0);
-      expect(r.out).toMatch(new RegExp(`^${name} applied to full: \\d+ segments, \\d+ moves \\(edits.json\\)\\n$`));
-      expect(run(lib, 'validate', 'full').out).toBe('ok\n');
+      expect(r.out).toMatch(/^[A-Z][^\n]* applied to full: \d+ segments, \d+ moves \(edits.json\)\n/);
       const edits = JSON.parse(readFileSync(join(lib, 'full/edits.json'), 'utf8'));
       expect(edits.segments.filter((s: any) => s.kind === 'image').map((s: any) => s.id)).toEqual(['img']);
       expect(edits.segments.filter((s: any) => s.kind === 'mask').map((s: any) => s.id).sort()).toEqual(['mask1', 'mask2']);
       expect(edits.splits).toEqual([3, 4.5, 7]);
+      expect(edits.segments.filter((s: any) => s.kind === 'speed').length).toBe(1);
+      const v = run(lib, 'validate', 'full');
+      const unfilled = edits.segments.filter((s: any) => s.kind === 'text' && /\[[^\]]*\]/.test(s.text));
+      expect(r.out.split('\n').filter((l) => l.startsWith('  to fill: ')).length).toBe(unfilled.length);
+      if (unfilled.length) {
+        expect(v.code).toBe(1);
+        expect(v.out.split('\n').filter(Boolean).every((l) => /: unfilled “[^”]*\[/.test(l))).toBe(true);
+        expect(run(lib, 'show', 'full').out).toContain('UNFILLED');
+        filled('full');
+      }
+      expect(run(lib, 'validate', 'full').out).toBe('ok\n');
     }
-    expect(run(lib, 'template', 'full', 'nope').err).toBe('no template nope; one of launch, hero, tour, teaser\n');
+    expect(run(lib, 'template', 'full', 'nope').err).toBe(`no template nope; one of ${templates.join(', ')}\n`);
+  });
+
+  test('template: every one on every frame shape and recording length validates, and show matches its golden', () => {
+    const base = JSON.parse(readFileSync(join(lib, 'empty/meta.json'), 'utf8'));
+    for (const seconds of [6, 12, 30, 90]) {
+      for (const aspect of ['16:9', '9:16', '1:1']) {
+        const id = `len${seconds}-${aspect.replace(':', 'x')}`;
+        mkdirSync(join(lib, id), { recursive: true });
+        const clicks = Array.from({ length: Math.floor(seconds / 4) }, (_, i) => ({ t: 1.5 + i * 4, x: 0.4, y: 0.5 }));
+        writeFileSync(join(lib, id, 'meta.json'), JSON.stringify({ ...base, id, duration: seconds, clicks, created: 1600000000 + seconds }));
+        for (const name of templates) {
+          writeFileSync(join(lib, id, 'look.json'), JSON.stringify({ aspect, background: 'graphite' }));
+          writeFileSync(join(lib, id, 'edits.json'), '{}');
+          const r = run(lib, 'template', id, name);
+          if (r.code === 1) {
+            expect(seconds < 10 && name === 'launch').toBe(true);
+            continue;
+          }
+          expect(r.code).toBe(0);
+          filled(id);
+          expect(`${name} ${id}: ${run(lib, 'validate', id).out}`).toBe(`${name} ${id}: ok\n`);
+          if (seconds === 30 && aspect === '16:9') matches(`template/${name}.txt`, run(lib, 'show', id).out);
+        }
+        drop(join(lib, id));
+      }
+    }
+  }, 300_000);
+
+  test('export refuses a template line still to fill', () => {
+    const file = join(lib, 'empty/edits.json');
+    const before = existsSync(file) ? readFileSync(file, 'utf8') : '{}';
+    expect(run(lib, 'template', 'empty', 'spotlight').code).toBe(0);
+    const r = run(lib, 'export', 'empty', '--out', join(lib, 'out.mp4'));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(': unfilled “[Name the feature]”; write the line or delete the text');
+    expect(existsSync(join(lib, 'out.mp4'))).toBe(false);
+    writeFileSync(file, before);
   });
 
   test('image, sound and mask add a segment on a free lane and validate', () => {

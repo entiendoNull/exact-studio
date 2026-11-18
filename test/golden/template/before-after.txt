@@ -1,0 +1,8 @@
+Empty window  (window, len30-16x9)
+recorded 0:30.00, plays as 0:30.00; 7 clicks; folder <library>/len30-16x9
+look: graphite background, 16:9, padding 8%, 3D off
+clip parts:
+  0:00.00–0:30.00
+segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front), f a whole-frame lane):
+  t0: 0:00.20–0:25.35  text “Before” shadow in:rise out:fade  [before-after-t1]
+  t0: 0:25.75–0:30.00  text “After” shadow in:rise out:fade  [before-after-t2]
