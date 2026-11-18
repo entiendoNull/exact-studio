@@ -55,6 +55,34 @@ Asked for by Jacob on 2026-11-13: four sources, each picked on the screen.
 - The **Simulators** list stays: one click on a named device records it. That is the main use.
 - An agent names a source instead and gets no picker (LLP 0007). It records through the same paths.
 
+## Out of the way
+
+Asked for by Jacob on 2026-11-18: the app must not cover what you pick. A target is often a window
+behind it.
+
+- When a picker opens, every Exact Studio window fades out (0.15 s): the main window, its sheets and
+  child windows. The pickers' overlays and the menu bar item stay.
+- The windows are ordered out, not hidden with `NSApp.hide`. The pickers are this app's windows too,
+  and activating a hidden app unhides it.
+- A cancelled picker (Escape, right-click, Cancel) brings them back as they were: the same frames, the
+  same order, the same key window, the same selection. They fade in.
+- A start that fails brings them back too, and the card says why.
+- While recording, the app stays out of the way. There is no countdown and no window: the red menu bar
+  mark with the time is the only sign, and one click on it stops. Then the windows come back.
+- A start with no picker (a row in the Simulators list, an agent's `record start`) does the same, for
+  every kind of source. An agent's recording then does not cover its target.
+- The app keeps running with no window shown (`host.macos.window.keepRunning` in app.json). Without
+  it, Exact quits the app when its last window is ordered out, so a recording would end the app. So
+  the red close button now hides the window too; the menu bar's Open Exact Studio or the Dock brings
+  it back, and Quit (⌘Q or the menu bar) quits.
+- Under `bun exact.mjs agent` (a drive of the app itself) nothing moves: its window is off screen,
+  and the drive ends when that window goes.
+- An app that was in front comes back in front. One that was behind (an agent started it while the
+  person worked in another app) comes back behind, without taking the focus.
+- The app's windows are never candidates, nor another running copy's (the same bundle id), and never
+  in the picture: a window recording takes only its window; a display or an area excludes this app,
+  found among all apps, since with its windows ordered out it is missing from the on-screen list.
+
 ## Menu bar
 
 - An Exact Studio mark sits in the menu bar while the app runs: a rounded frame around a dot.

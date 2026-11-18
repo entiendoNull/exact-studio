@@ -112,7 +112,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   {
     name: 'start_recording',
     description:
-      'Step 2 of recording. Starts recording one source at once, with no picker, in the Exact Studio app: the app shows its red mark with the time in the menu bar, as when a person records. Then drive the app or page you are recording with your other tools, and call stop_recording when done. Refused (nothing starts) when a recording is already running (it is never stopped or replaced), when the source matches nothing or more than one source (the candidates are listed: pick one and call again), or when Exact Studio lacks the Screen Recording permission (a person must allow it). Set max_seconds in case you cannot call stop_recording.',
+      'Step 2 of recording. Starts recording one source at once, with no picker, in the Exact Studio app: the app shows its red mark with the time in the menu bar, as when a person records. Its own windows fade out while it records, so they never cover the source, and come back when it stops. Then drive the app or page you are recording with your other tools, and call stop_recording when done. Refused (nothing starts) when a recording is already running (it is never stopped or replaced), when the source matches nothing or more than one source (the candidates are listed: pick one and call again), or when Exact Studio lacks the Screen Recording permission (a person must allow it). Set max_seconds in case you cannot call stop_recording.',
     inputSchema: {
       type: 'object',
       properties: {

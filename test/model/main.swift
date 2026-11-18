@@ -1216,5 +1216,104 @@ test("a fold or unfold keeps the header clicked where it was, however far the ro
     view.detach()
 }
 
+// MARK: The curtain: the app's own windows out of the way while picking and recording
+
+func plainWindow(_ frame: CGRect, level: NSWindow.Level = .normal) -> NSWindow {
+    let w = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+    w.isReleasedWhenClosed = false
+    w.level = level
+    w.orderFront(nil)
+    return w
+}
+
+test("the curtain orders the app's windows out and back exactly as they were") {
+    let a = plainWindow(CGRect(x: 40, y: 60, width: 300, height: 200))
+    let b = plainWindow(CGRect(x: 120, y: 90, width: 320, height: 240))
+    a.orderFront(nil)
+    let frames = (a.frame, b.frame)
+    let curtain = Curtain(fade: 0) { [a, b] }
+    curtain.close()
+    eq(curtain.closed, true)
+    expect(!a.isVisible && !b.isVisible, "both windows are ordered out")
+    curtain.open()
+    expect(a.isVisible && b.isVisible, "both windows are back")
+    eq(a.frame, frames.0); eq(b.frame, frames.1)
+    eq(a.alphaValue, 1); eq(b.alphaValue, 1)
+    expect(a.orderedIndex < b.orderedIndex, "the same order, front to back: \(a.orderedIndex) \(b.orderedIndex)")
+    a.orderOut(nil); b.orderOut(nil)
+}
+
+test("the curtain closes once and opens once") {
+    let a = plainWindow(CGRect(x: 40, y: 60, width: 300, height: 200))
+    let curtain = Curtain(fade: 0) { [a] }
+    curtain.open()
+    expect(a.isVisible, "opening a curtain that never closed changes nothing")
+    curtain.close(); curtain.close()
+    eq(curtain.held.count, 1, "a second close holds nothing more")
+    curtain.open(); curtain.open()
+    expect(a.isVisible, "back after the first open")
+    eq(curtain.held.count, 0)
+    a.orderOut(nil)
+}
+
+test("the curtain leaves windows at the menu bar's level and above, and windows already hidden") {
+    let main = plainWindow(CGRect(x: 40, y: 60, width: 300, height: 200))
+    let bar = plainWindow(CGRect(x: 0, y: 0, width: 200, height: 22), level: .statusBar)
+    let overlay = plainWindow(CGRect(x: 0, y: 0, width: 200, height: 200), level: .screenSaver)
+    let closed = plainWindow(CGRect(x: 10, y: 10, width: 200, height: 200))
+    closed.orderOut(nil)
+    let curtain = Curtain(fade: 0) { [main, bar, overlay, closed] }
+    curtain.close()
+    expect(!main.isVisible, "the main window goes")
+    expect(bar.isVisible && overlay.isVisible, "the menu bar item and a picker overlay stay")
+    curtain.open()
+    expect(main.isVisible, "the main window is back")
+    expect(!closed.isVisible, "a window that was not shown stays hidden")
+    [main, bar, overlay].forEach { $0.orderOut(nil) }
+}
+
+test("the curtain takes a child window with its parent") {
+    let parent = plainWindow(CGRect(x: 40, y: 60, width: 400, height: 300))
+    let child = plainWindow(CGRect(x: 80, y: 100, width: 200, height: 120))
+    parent.addChildWindow(child, ordered: .above)
+    let frame = child.frame
+    let curtain = Curtain(fade: 0) { [parent, child] }
+    curtain.close()
+    expect(!parent.isVisible && !child.isVisible, "both are gone")
+    curtain.open()
+    expect(parent.isVisible && child.isVisible, "both are back")
+    eq(child.frame, frame)
+    parent.removeChildWindow(child)
+    parent.orderOut(nil); child.orderOut(nil)
+}
+
+test("opening the curtain while it fades out keeps the windows") {
+    let a = plainWindow(CGRect(x: 40, y: 60, width: 300, height: 200))
+    let curtain = Curtain(fade: 0.2) { [a] }
+    curtain.close()
+    curtain.open()
+    _ = wait(0.6) { false }
+    expect(a.isVisible, "the late fade-out did not order it out")
+    near(Double(a.alphaValue), 1, "fully shown again", within: 0.01)
+    a.orderOut(nil)
+}
+
+test("the app's own windows are never a picker's candidates") {
+    let mine = plainWindow(CGRect(x: 100, y: 100, width: 400, height: 300))
+    mine.title = "Exact Studio test window"
+    _ = wait(0.3) { false }
+    let ids = SourcePicker.candidates(.window).compactMap(\.windowID) + SourcePicker.candidates(.simulator).compactMap(\.windowID)
+    expect(!ids.contains(CGWindowID(mine.windowNumber)), "our window is not offered")
+    mine.orderOut(nil)
+}
+
+test("another copy of the app is never a candidate either") {
+    let id = "com.entiendonull.exactstudio"
+    eq(Sources.ours(id, mine: id), true)
+    eq(Sources.ours("com.apple.TextEdit", mine: id), false)
+    eq(Sources.ours(nil, mine: id), false)
+    eq(Sources.ours(id, mine: nil), false)
+}
+
 print("\(passed) passed, \(failed.count) failed")
 if !failed.isEmpty { failed.forEach { print("  failed: \($0)") }; exit(1) }

@@ -11,6 +11,12 @@ import ScreenCaptureKit
 enum SourceKind: String { case display, window, simulator, emulator }
 
 enum Sources {
+    // @ref LLP 0001#out-of-the-way — never ours, from this copy of the app or another
+    static func ours(_ bundle: String?, mine: String? = Bundle.main.bundleIdentifier) -> Bool {
+        guard let bundle, let mine else { return false }
+        return bundle == mine
+    }
+
     static func kind(of window: SCWindow) -> SourceKind {
         kind(bundle: window.owningApplication?.bundleIdentifier ?? "", app: window.owningApplication?.applicationName ?? "", title: window.title ?? "")
     }
@@ -28,12 +34,79 @@ enum Sources {
         let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
         let me = ProcessInfo.processInfo.processIdentifier
         return content.windows.compactMap { w in
-            guard w.windowLayer == 0, w.frame.width >= 120, w.frame.height >= 120, w.owningApplication?.processID != me else { return nil }
+            guard w.windowLayer == 0, w.frame.width >= 120, w.frame.height >= 120, w.owningApplication?.processID != me,
+                  !ours(w.owningApplication?.bundleIdentifier) else { return nil }
             let k = kind(of: w)
             guard k != .window else { return nil }
             let app = w.owningApplication?.applicationName ?? ""
             let title = (w.title ?? "").isEmpty ? app : w.title!
             return ["id": "window:\(w.windowID)", "name": title, "app": k == .emulator ? "Android Emulator" : app, "kind": k.rawValue]
+        }
+    }
+}
+
+// @ref LLP 0001#out-of-the-way — ordered out, never NSApp.hide: the pickers are this app's windows too
+final class Curtain {
+    private(set) var closed = false
+    private(set) var held: [(window: NSWindow, alpha: CGFloat)] = []
+    private weak var key: NSWindow?
+    private var wasActive = false
+    private var turn = 0
+    private let fade: TimeInterval
+    private let all: () -> [NSWindow]
+
+    init(fade: TimeInterval = 0.15, windows: @escaping () -> [NSWindow] = { NSApp.windows }) {
+        self.fade = fade
+        all = windows
+    }
+
+    static func hideable(_ w: NSWindow) -> Bool {
+        w.isVisible && w.level.rawValue < NSWindow.Level.statusBar.rawValue && !(w is PickerWindow)
+            && w.sheetParent == nil && w.parent == nil
+    }
+
+    func close() {
+        guard !closed else { return }
+        closed = true
+        turn += 1
+        wasActive = NSApp.isActive
+        key = NSApp.keyWindow
+        held = all().filter(Self.hideable).sorted { $0.orderedIndex < $1.orderedIndex }.map { ($0, $0.alphaValue) }
+        let windows = held, now = turn
+        let out = { [weak self] in
+            guard let self, self.closed, self.turn == now else { return }
+            for (w, alpha) in windows { w.orderOut(nil); w.alphaValue = alpha }
+        }
+        guard fade > 0 else { return out() }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = fade
+            windows.forEach { $0.window.animator().alphaValue = 0 }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + fade, execute: out)
+    }
+
+    func open() {
+        guard closed else { return }
+        closed = false
+        turn += 1
+        let windows = held
+        held = []
+        if wasActive { NSApp.activate(ignoringOtherApps: true) }
+        for (w, alpha) in wasActive ? windows.reversed() : windows {
+            if fade > 0 { w.alphaValue = 0 }
+            wasActive ? w.orderFront(nil) : w.orderBack(nil)
+            if fade == 0 { w.alphaValue = alpha }
+        }
+        if wasActive, let key, windows.contains(where: { $0.window === key }) { key.makeKey() }
+        guard fade > 0 else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = fade
+            windows.forEach { $0.window.animator().alphaValue = $0.alpha }
+        }
+        let now = turn
+        DispatchQueue.main.asyncAfter(deadline: .now() + fade) { [weak self] in
+            guard let self, !self.closed, self.turn == now else { return }
+            windows.forEach { $0.window.alphaValue = $0.alpha }
         }
     }
 }
@@ -200,6 +273,7 @@ final class SourcePicker: NSObject {
             let w = b["Width"] ?? 0, h = b["Height"] ?? 0
             guard w >= 120, h >= 120 else { return nil }
             let owner = NSRunningApplication(processIdentifier: pid)
+            guard !Sources.ours(owner?.bundleIdentifier) else { return nil }
             let app = info[kCGWindowOwnerName as String] as? String ?? owner?.localizedName ?? ""
             let title = info[kCGWindowName as String] as? String ?? ""
             // @ref LLP 0001#sources — device windows belong to the Simulator picker, which lights the phone
@@ -885,7 +959,9 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
 
         // A display, whole or an area of it.
         let me = ProcessInfo.processInfo.processIdentifier
-        let mine = content.applications.filter { $0.processID == me }
+        // @ref LLP 0001#out-of-the-way — with its windows ordered out, the app is missing from the on-screen list
+        let everything = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        let mine = (everything ?? content).applications.filter { $0.processID == me }
         let display: SCDisplay
         var rect: CGRect
         if let (screen, r) = area {
