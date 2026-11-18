@@ -77,6 +77,8 @@ final class TimelineView: NSView {
         case imagePosition(String), imageEffects(String, Int)
         /// The frame's background, the back of the stack; then a line before what is heard, not drawn.
         case background, divider
+        /// A new recording's one line under the Clip: what + Add does. It goes with the first item.
+        case start
     }
     struct Row { let kind: Kind; let y: CGFloat; let height: CGFloat
         var maxY: CGFloat { y + height } }
@@ -125,6 +127,8 @@ final class TimelineView: NSView {
             if item.kind == "image" { add(.imagePosition(item.id), motionH) }
             effectRows(item)
         }
+        // @ref LLP 0005#add-where-it-goes — the only explanation on the timeline, until the first item
+        if e.segments.isEmpty, e.moves.isEmpty, e.sounds.isEmpty, !empty, dragged == nil { add(.start, laneH) }
         add(.background, Self.backgroundHeight, gap: 6)
         add(.divider, 1, gap: 7)
         for l in 0..<e.soundLanes + extra(Edits.soundSpace) { add(.lane(Edits.soundSpace, l), laneH) }
@@ -150,6 +154,7 @@ final class TimelineView: NSView {
         guard let editor else { needsDisplay = true; return }
         editor.listen(self) { [weak self] in self?.changed() }
         editor.onZoom = { [weak self] in self?.needsDisplay = true }
+        editor.onAddMenu = { [weak self] in self?.showAddMenu() }
         observedPlayer = editor.player
         timeObserver = editor.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] _ in
             self?.follow()
@@ -426,7 +431,7 @@ final class TimelineView: NSView {
         case let .lane(space, lane): return .lane(space, lane)
         case let .imagePosition(id): return .imagePosition(id)
         case let .imageEffects(id, lane): return .imageEffects(id, lane)
-        case .clip, .background, .divider: return nil
+        case .clip, .background, .divider, .start: return nil
         }
     }
     private func hasPlus(_ r: Row) -> Bool {
@@ -787,6 +792,14 @@ final class TimelineView: NSView {
             switch r.kind {
             case .clip:
                 continue
+            case .start:
+                let zone = CGRect(x: trackRect.minX, y: r.y, width: trackRect.width, height: r.height).insetBy(dx: 0.75, dy: 0.75)
+                let dash = NSBezierPath(roundedRect: zone, xRadius: 8, yRadius: 8)
+                dash.lineWidth = 1.5
+                dash.setLineDash([5, 4], count: 2, phase: 0)
+                NSColor(white: 1, alpha: 0.2).setStroke()
+                dash.stroke()
+                drawHint("+ Add puts a text, a zoom, music and more at the playhead. A row appears for it.", in: r)
             case .background:
                 // @ref LLP 0005#layers — the back of the stack: fixed, nothing on it
                 drawLabel("Background", symbol: "rectangle.inset.filled", y: r.y, height: r.height, attrs: child, tint: NSColor(white: 1, alpha: 0.4))
@@ -1146,9 +1159,35 @@ final class TimelineView: NSView {
                 let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
                 item.submenu = nsMenu(inner)
                 menu.addItem(item)
+            case let .two(title, line, run):
+                let item = NSMenuItem(title: title, action: #selector(picked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = Act(run)
+                item.attributedTitle = Self.twoLines(title, line)
+                menu.addItem(item)
+            case let .sub2(title, line, inner):
+                let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+                item.attributedTitle = Self.twoLines(title, line)
+                item.submenu = nsMenu(inner)
+                menu.addItem(item)
             }
         }
         return menu
+    }
+
+    /// A menu item's name with a quieter line under it that says what it changes.
+    static func twoLines(_ title: String, _ line: String) -> NSAttributedString {
+        let out = NSMutableAttributedString(string: title, attributes: [.font: NSFont.menuFont(ofSize: 0)])
+        out.append(NSAttributedString(string: "\n" + line, attributes: [.font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+                                                                         .foregroundColor: NSColor.secondaryLabelColor]))
+        return out
+    }
+
+    /// + Add, from the timeline bar: it opens under the bar, at the timeline's left edge.
+    // @ref LLP 0005#add-where-it-goes
+    func showAddMenu() {
+        guard let editor else { return }
+        nsMenu(TimelineMenus.add(editor)).popUp(positioning: nil, at: CGPoint(x: Self.pad, y: 2), in: self)
     }
 
     private func popUp(_ entries: [MenuEntry], under r: CGRect) {
@@ -1258,6 +1297,7 @@ final class TimelineView: NSView {
             let mode = wide && p.x - x(fx.start) < edge ? -1 : wide && x(fx.end) - p.x < edge ? 1 : 0
             drag = .fx(id, fx.id, mode, fx.start, fx.end, fx.lane, t(p.x))
         case .clip, .divider: scrub()
+        case .start: showAddMenu()
         case .background:
             editor.select("")
             if p.x >= Self.labelWidth { scrub() }

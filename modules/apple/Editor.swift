@@ -34,6 +34,8 @@ final class Editor {
     private var playing: NSKeyValueObservation?
     /// Said when the selection, an edit or the play state changes: the module turns it into a watched topic.
     var onChange: () -> Void = {}
+    /// Opens + Add where the timeline shows it.
+    var onAddMenu: () -> Void = {}
 
     var folder: URL { Library.recordings.appendingPathComponent(id) }
     var duration: Double { min(meta.duration, asset.duration.seconds.isFinite ? asset.duration.seconds : meta.duration) }

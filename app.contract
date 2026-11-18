@@ -674,6 +674,11 @@ component ExactStudio
                     column width=56 height=5 border-radius=3 background-color="-exact-tertiary-label"
                   row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" resize=lowerBarSized testId="timeline-bar"
                     row gap=8 align-items="center"
+                      // @ref LLP 0005#add-where-it-goes — the one way in: every kind of thing, at the playhead
+                      button press=editDo("add-menu") buttonStyle="filled" title="Add a text, an image, a zoom, an effect, a move or a sound at the playhead" testId="add"
+                        image "symbol:sf/plus"
+                        text "Add"
+                      column width=1 height=22 background-color="-exact-separator"
                       button press=editDo("split") disabled=(not summary.canSplit) buttonStyle="bordered" title=(summary.canSplit ? `${summary.splitLabel} at the playhead (S)` : summary.splitWhy) testId="split-clip"
                         image "symbol:sf/scissors"
                         text summary.splitLabel

@@ -1024,6 +1024,49 @@ test("a + menu holds items only, grouped, under a line that says where they land
     expect(TimelineMenus.plus(.lane(1, 1), e) == nil, "a lane past the one that may open has no +")
 }
 
+test("+ Add holds every kind of thing, each with a second line that says what it changes; an item that would be refused is off with the rule's two lines") {
+    let e = open("empty")
+    at(e, 1)
+    let menu = TimelineMenus.add(e)
+    eq(menu.titles, ["Add at 0:01.0"])
+    eq(menu.compactMap { entry -> String? in
+        switch entry { case let .two(t, _, _), let .sub2(t, _, _): return t; case let .off(t, _): return t; default: return nil } },
+       ["Text", "Image…", "Zoom", "Effect", "Move", "Music & Sound…"], "the owner's order")
+    eq(menu.line("Text"), "On top of the video"); eq(menu.line("Zoom"), "Pushes in on the cursor, or out")
+    eq(menu.line("Effect"), "The video, or the whole frame"); eq(menu.line("Move"), "Where the video goes")
+    eq(menu.line("Music & Sound…"), "Plays over the video")
+    eq(menu.choices.filter { $0.hasPrefix("Effect › ") }, ["Effect › Speed › Slow Down", "Effect › Speed › Speed Up", "Effect › Spotlight",
+        "Effect › Cursor Highlight", "Effect › Blur", "Effect › Black & White", "Effect › Mask", "Effect › 3D Turn"])
+    eq(menu.choices.filter { $0.hasPrefix("Move › ") }.first, "Move › Add Move Here")
+    expect(!menu.choices.contains { $0.contains("Lane") }, "+ Add adds items, never lanes")
+    expect(menu.run("Zoom › Zoom In"), "Zoom In is in the Zoom submenu")
+    eq(e.edits.zooms.count, 1); eq(e.edits.lanes, 1, "an Effects row appears with it")
+    at(e, 2)
+    let again = TimelineMenus.add(e)
+    eq(again.reason("Zoom In"), "One zoom at a time.\nZoom in 2× runs here until 0:04.0. Move the playhead past it.")
+    eq(e.edits.zooms.count, 1, "asking changes nothing")
+    again.run("Text")
+    eq(e.edits.texts.count, 1); eq(e.undoName, "Add Text")
+    TimelineMenus.add(e).run("Effect › Blur")
+    eq(e.edits.segments.filter { $0.kind == "blur" }.count, 1)
+    TimelineMenus.add(e).run("Move › Add Move Here")
+    eq(e.edits.moves.count, 1)
+}
+
+test("a new recording shows the Clip and one dashed line that says what + Add does; it goes with the first item") {
+    let e = open("empty")
+    let view = timeline(e, height: 600)
+    eq(view.rows.map(\.kind).filter { $0 != .position }, [.clip, .start, .background, .divider])
+    at(e, 1); e.add("text")
+    expect(!view.rows.contains { $0.kind == .start }, "gone with the first item")
+    e.deleteSelected()
+    expect(view.rows.contains { $0.kind == .start }, "back with nothing left")
+    e.setShowEmptyLanes(true)
+    expect(!view.rows.contains { $0.kind == .start }, "the empty rows say it themselves")
+    e.setShowEmptyLanes(false)
+    view.detach()
+}
+
 test("a lane's + adds on that lane; with no room there, on the first free lane of its kind, else a new one") {
     let e = open("empty")
     at(e, 5); e.add("spotlight")
@@ -1790,6 +1833,7 @@ test("the rows are the stack: texts and images in front over the Video, its Move
         case .clip: return "Video"
         case .background: return "Background"
         case .divider: return "—"
+        case .start: return "start"
         }
     }
     eq(order, ["Text", "Images", "Video", "Moves", "Effects", "Effects 2", "Effects 3", "Background", "—", "Music & Sound"])

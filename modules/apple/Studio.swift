@@ -288,6 +288,7 @@ final class Studio: ExactModule {
         case "delete": e.deleteSelected()
         case "split": e.split()
         case "split-all": e.splitAll()
+        case "add-menu": e.onAddMenu()
         case "auto": e.autoZoom()
         case "clear": e.clearAll()
         case "play": e.togglePlay()

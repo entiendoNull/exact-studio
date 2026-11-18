@@ -324,6 +324,7 @@ test "each area has its own bar: the toolbar the piece, the viewer bar the video
   expect tree has "crop-open"
   expect tree has "clock"
   expect tree has "motion-paths"
+  expect tree has "add"
   expect tree has "split-clip"
   expect disabled "split-all"
   expect tree has "zoom-controls"
