@@ -483,7 +483,10 @@ and background from `look.json`. `./exact-studio template --list` prints them.
 The copy never makes a claim. A template either writes no text, or writes an obvious placeholder in
 brackets (`[Hook line]`, `1. [What to do]`). A text with `[` … `]` in it is **unfilled**: `show`
 marks it `UNFILLED`, `validate` reports it and exits 1, and `export` refuses until it is written or
-deleted. The app selects the first one after a template, ready to type. Each line has time on screen
+deleted. The app selects the first one after a template, ready to type. The app's **Export** refuses
+the same lines: it lists each one by time and words (`0:00.2 [Hook line]`) and offers **Show First**,
+which selects the first and focuses its Words field. A broken rule the app tolerates does not stop
+either export. Each line has time on screen
 for a six-word line by the reading-speed rule (`1.0 s + 0.3 s` a word, plus its animations), and
 texts are one placement, style and animation, white on a dark background and black on a light one (a title over the blurred opening on a pill).
 Zooms (1.6×, at least 2.5 s, 1 s apart) and the 3D turn never share a moment with a text.

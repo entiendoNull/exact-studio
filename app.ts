@@ -35,6 +35,11 @@ const sources: Sources = {
     native.watch('edits');
     return native.call({ op: 'look', id }) as Result<'recordingLook'>;
   },
+  exportCheck: async ([id], _store, _storage, native): Promise<Result<'exportCheck'>> => {
+    if (!native?.available) return { count: 0, lines: [], first: '', why: '' };
+    native.watch('edits');
+    return native.call({ op: 'export-check', id }) as Result<'exportCheck'>;
+  },
   editClip: ([id, what, track, number, kind], _store, _storage, native) =>
     later(native, { op: 'edit', id, do: what, track, number, kind }, { ok: false }),
   startRecording: ([source], _store, _storage, native) =>

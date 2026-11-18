@@ -615,7 +615,7 @@ case "template":
     r.edits = Templates.apply(made, to: r.edits)
     write(r.edits, r.folder.appendingPathComponent("edits.json"))
     print("\(info.title) applied to \(r.id): \(r.edits.segments.count) segments, \(made.moves.count) moves (edits.json)")
-    for s in r.edits.texts.filter(\.isPlaceholder).sorted(by: { $0.start < $1.start }) {
+    for s in r.edits.unfilled {
         print("  to fill: text \(s.id) “\(s.text ?? "")” \(stamp(s.start))–\(stamp(s.end))")
     }
 

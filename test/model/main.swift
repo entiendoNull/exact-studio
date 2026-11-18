@@ -794,6 +794,44 @@ test("a template replaces the texts, effects and moves, keeps the cuts, speed ch
     eq(e.edits, before)
 }
 
+test("unfilled lists the [bracketed] texts by time, and nothing else; a broken rule is not one") {
+    var e = Edits()
+    var late = seg("late", "text", 6, 8); late.text = "2. [What to do]"
+    var early = seg("early", "text", 1.2, 3); early.text = "[Product name]"
+    var filled = seg("filled", "text", 3, 5, lane: 1); filled.text = "Export in one click"
+    var square = seg("square", "text", 4, 5, lane: 2); square.text = "a [ alone"
+    e.segments = [late, seg("z1", "zoom", 1, 3), seg("z2", "zoom", 2, 4), early, filled, square]
+    e.fitLanes()
+    eq(e.unfilled.map(\.id), ["early", "late"])
+    expect(!e.conflicts(map: TimeMap(duration: 10, edits: e)).isEmpty, "the overlapping zooms break a rule")
+    e.segments.removeAll { $0.kind == "text" && $0.id != "filled" }
+    eq(e.unfilled.map(\.id), [])
+}
+
+test("the app's export refuses unfilled lines, lists them, shows the first, and exports once it is written") {
+    let e = open("full")
+    e.applyTemplate("social")
+    eq(e.exportCheck["count"] as? Int, 1)
+    eq(e.exportCheck["lines"] as? [String], ["0:00.2 [Hook line]"])
+    eq(e.exportCheck["why"] as? String, "1 line still in brackets. Write it or delete it, then export.")
+    do { _ = try e.exportable(look: e.look); expect(false, "it exported an unfilled line") }
+    catch { eq("\(error)", "1 line still in brackets. Write it or delete it, then export.") }
+    e.select("")
+    e.showFirstUnfilled()
+    eq(e.selected, e.edits.unfilled.first?.id ?? "-")
+    e.setText("text", "Recording, framed for you")
+    eq(e.exportCheck["count"] as? Int, 0)
+    eq(e.exportCheck["first"] as? String, "")
+    expect((try? e.exportable(look: e.look)) != nil, "it refused a filled template")
+}
+
+test("a broken rule the app tolerates does not stop its export") {
+    let e = open("full", edits: #"{"segments":[{"id":"a","kind":"zoom","start":1,"end":3,"lane":0,"level":2},{"id":"b","kind":"zoom","start":2,"end":4,"lane":0,"level":2}]}"#)
+    expect(!e.edits.conflicts(map: e.map).isEmpty, "the zooms overlap")
+    eq(e.exportCheck["count"] as? Int, 0)
+    expect((try? e.exportable(look: e.look)) != nil, "a tolerated rule break stopped the export")
+}
+
 test("every edit is one undo step, named for the Edit menu; redo walks forward again") {
     let e = open("empty")
     let start = e.edits

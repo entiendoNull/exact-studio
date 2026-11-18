@@ -441,3 +441,39 @@ test "a text's Depth stack sends it behind the video and back; the ⋯ arrange c
   expect state sel.layer == "front"
   expect disabled "menu-arrange-in-front"
   expect enabled "menu-arrange-behind"
+
+test "Export refuses unfilled lines and lists them; Show First focuses the first; once written it exports"
+  tap "recording-full"
+  clock data
+  tap "templates"
+  tap "template-social"
+  clock data
+  tap "export-open"
+  clock data
+  expect text "export-unfilled-title" == "1 line to fill first"
+  expect text "export-unfilled-line" == "0:00.2 [Hook line]"
+  expect tree missing "export"
+  expect tree missing "export-copy"
+  screenshot "/Users/jacobclausen/devroot/scratch/shots/export/export-refuses-unfilled.png"
+  tap "export-close"
+  tap "toggle-right"
+  clock settle
+  tap "export-open"
+  clock data
+  tap "export-show-first"
+  clock data
+  clock +1
+  expect tree missing "export-lightbox"
+  expect state rightOpen == true
+  expect state sel.text == "[Hook line]"
+  expect focused "text-words"
+  type "text-words" "Framed in one click"
+  type "text-words" key "Enter"
+  clock data
+  expect state check.count == 0
+  tap "export-open"
+  clock data
+  expect tree missing "export-unfilled"
+  tap "export"
+  clock until state exportLine == "Saved." within 60000
+  expect text "export-line" == "Saved."

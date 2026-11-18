@@ -38,6 +38,9 @@ Each reach of a blur or black and white is a cut after one layer (`Framing.cover
   export looks like the big one.
 - Destinations: the Movies folder, **Save As…**, or the **clipboard**. A copy is a real file put
   on the clipboard, so it pastes into Slack, Messages and Finder.
+- With unfilled lines (#templates) the lightbox offers no destination. It says how many, lists
+  each by time and words, and offers **Show First**: the first is selected and its Words field
+  focused. Not a modal: fill it, press Export again. Same check as the CLI (`Edits.unfilled`).
 
 ## No blinking
 
@@ -67,8 +70,8 @@ the length whatever happened on screen.
   dropped), its cuts, and the frame's shape. The layout comes from `Framing.layout`, so the text
   sits beside the video when that leaves it larger, else above it.
 - The copy never makes a claim. A template writes no text, plain labels ("Before", "After"), or
-  placeholders in brackets. A bracketed text is unfilled: `validate` reports it and `export`
-  refuses it, so a placeholder cannot ship by mistake.
+  placeholders in brackets. A bracketed text is unfilled: `validate` reports it, and `export` and
+  the app's Export refuse it, so a placeholder cannot ship by mistake. A rule break does not.
 - Each line gets the reading-speed time of a six-word line: `1.0 s + 0.3 s` a word, never under
   1.5 s, plus 1 s for its animations.
 - One emphasis at a time: zooms (1.6×, at least 2.5 s, 1 s apart, one per 8 s at most), the 3D
