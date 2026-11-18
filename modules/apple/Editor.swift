@@ -60,7 +60,7 @@ final class Editor {
         do {
             if let saved = try EditFile.read(Look.self, folder.appendingPathComponent("look.json")) {
                 look = saved
-            } else if let last = UserDefaults.standard.data(forKey: "ExactStudio.lastLook"), let saved = try? JSONDecoder().decode(Look.self, from: last) {
+            } else if let last = Settings.store.data(forKey: "ExactStudio.lastLook"), let saved = try? JSONDecoder().decode(Look.self, from: last) {
                 look = saved
             }
         } catch {
@@ -157,7 +157,7 @@ final class Editor {
         guard let data = try? encoder.encode(look) else { return }
         try? data.write(to: folder.appendingPathComponent("look.json"))
         stamps = Editor.stamps(folder)
-        UserDefaults.standard.set(data, forKey: "ExactStudio.lastLook")
+        Settings.store.set(data, forKey: "ExactStudio.lastLook")
         record()
     }
 
@@ -506,6 +506,9 @@ final class Editor {
             recentImages.removeAll { $0 == image.id }
             recentImages.insert(image.id, at: 0)
         }
+        if let s = selectedSegment ?? selectedImage { reveal(space: s.space) }
+        else if selectedSound != nil { reveal(space: Edits.soundSpace) }
+        else if selectedPiece != nil || selectedMove != nil || id == Editor.recordedSound { reveal(space: 0) }
         notify()
     }
 
@@ -630,10 +633,10 @@ final class Editor {
     // MARK: Images
     // @ref LLP 0002#images — images share lanes; each has its own moves and effects
 
-    /// The image lanes open in the timeline, and the groups folded away: "video" (its Position and
-    /// effect lanes), "top" (texts and images) and "frame". How the timeline looks, not part of the edit.
+    /// The image lanes open in the timeline, and the groups folded away: "video" (the Clip and every
+    /// row under it), "top" (texts and images), "sound" and "frame". How the timeline looks, not part of the edit.
     private(set) var openImageLanes: Set<Int> = []
-    private(set) var folded = Set(UserDefaults.standard.stringArray(forKey: "ExactStudio.folded") ?? [])
+    private(set) var folded = Settings.folded
     var videoOpen: Bool { !folded.contains("video") }
     /// The images selected so far, the last one first.
     private var recentImages: [String] = []
@@ -656,7 +659,7 @@ final class Editor {
 
     func toggle(group: String) {
         if folded.contains(group) { folded.remove(group) } else { folded.insert(group) }
-        UserDefaults.standard.set(Array(folded), forKey: "ExactStudio.folded")
+        Settings.store.set(folded.sorted(), forKey: Settings.foldedKey)
         redrawViews()
     }
 
@@ -677,7 +680,7 @@ final class Editor {
     var onZoom: () -> Void = {}
     var zoomed: Bool { zoom > 1.0001 }
     /// Whether the mouse wheel zooms the timeline (else it scrolls the rows). Kept between launches.
-    var wheelZoom: Bool { UserDefaults.standard.object(forKey: "ExactStudio.wheelZoom") as? Bool ?? true }
+    var wheelZoom: Bool { Settings.store.object(forKey: "ExactStudio.wheelZoom") as? Bool ?? true }
 
     /// Zoom to `z`, with `start` at the left edge, kept inside the recording. Only redraws.
     func setZoom(_ z: Double, start: Double) {
@@ -698,7 +701,7 @@ final class Editor {
     }
 
     func setWheelZoom(_ on: Bool) {
-        UserDefaults.standard.set(on, forKey: "ExactStudio.wheelZoom")
+        Settings.store.set(on, forKey: "ExactStudio.wheelZoom")
         onChange()
     }
 

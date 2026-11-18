@@ -51,7 +51,7 @@ final class TimelineView: NSView {
     private static let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
     private static let motionHeight: CGFloat = 26, headerHeight: CGFloat = 22
     /// How tall the rows are: 0 compact, 1 regular, 2 tall. The person's choice, kept between launches.
-    private var size = min(max(UserDefaults.standard.integer(forKey: "ExactStudio.laneSize"), 0), 2)
+    private var size = min(max(Settings.store.integer(forKey: "ExactStudio.laneSize"), 0), 2)
     private var laneH: CGFloat { [Self.laneHeight, 42, 56][size] }
     private var motionH: CGFloat { [Self.motionHeight, 36, 46][size] }
     static func height(lanes: Int) -> CGFloat { clipTop + clipHeight + laneGap + motionHeight + laneGap + CGFloat(lanes + 1) * (laneHeight + laneGap) + 4 }
@@ -61,7 +61,7 @@ final class TimelineView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     /// What a row under the clip is.
-    private enum Kind: Equatable {
+    enum Kind: Equatable {
         /// A group's header, by its key: "top" (texts and images), "sound" or "frame". It folds its group.
         case header(String)
         /// The recording's own sound, under the clip.
@@ -74,7 +74,7 @@ final class TimelineView: NSView {
         /// Under an open image lane, its current image's Position row and effect rows.
         case imagePosition(String), imageEffects(String, Int)
     }
-    private struct Row { let kind: Kind; let y: CGFloat; let height: CGFloat
+    struct Row { let kind: Kind; let y: CGFloat; let height: CGFloat
         var maxY: CGFloat { y + height } }
 
     /// The space of the segment being dragged, or nil when none is.
@@ -85,12 +85,13 @@ final class TimelineView: NSView {
     }
 
     /// The rows under the clip, top-down. While a block is dragged, its kind has one more lane to drop it on.
-    /// A folded group shows only its header.
-    private var rows: [Row] {
+    /// A folded group shows only its header; folded, VIDEO hides the Clip too.
+    var rows: [Row] {
         var out: [Row] = []
         var y = Self.clipTop + Self.clipHeight + Self.laneGap
         func add(_ kind: Kind, _ height: CGFloat) { out.append(Row(kind: kind, y: y, height: height)); y += height + Self.laneGap }
         guard let editor else { add(.lane(0, 0), laneH); return out }
+        if !editor.videoOpen { y = Self.videoTop + Self.headerHeight + Self.laneGap }
         let e = editor.edits, dragged = draggedSpace
         out.append(Row(kind: .header("video"), y: Self.videoTop, height: Self.headerHeight))
         if editor.videoOpen {
@@ -135,6 +136,7 @@ final class TimelineView: NSView {
         if let p = observedPlayer, let o = timeObserver { p.removeTimeObserver(o) }
         timeObserver = nil
         self.editor = editor
+        shown = ([], [], [])
         guard let editor else { needsDisplay = true; return }
         editor.listen(self) { [weak self] in self?.changed() }
         editor.onZoom = { [weak self] in self?.needsDisplay = true }
@@ -151,14 +153,31 @@ final class TimelineView: NSView {
 
     /// How much taller (or, negative, shorter) than its content the person made the timeline,
     /// by dragging its top edge; kept between launches. Shorter than its content, it scrolls.
-    private var extra = CGFloat(UserDefaults.standard.double(forKey: "ExactStudio.timelineExtra"))
-    private var scrollY: CGFloat = 0
+    private var extra = CGFloat(Settings.store.double(forKey: "ExactStudio.timelineExtra"))
+    var scrollY: CGFloat = 0
     private static let minimum: CGFloat = 120, grip: CGFloat = 8
     private var contentHeight: CGFloat { (rows.last?.maxY ?? Self.height(lanes: 1)) + 8 }
     private var resizing: (start: CGFloat, extra: CGFloat)?
 
+    private var shown: (folded: Set<String>, lanes: Set<Int>, rows: [Row]) = ([], [], [])
+
+    // @ref LLP 0005#fold-everything-pick-a-size
     private func changed() {
         needsDisplay = true
+        if let editor {
+            let now = rows
+            if editor.folded != shown.folded || editor.openImageLanes != shown.lanes {
+                let top = scrollY + Self.videoTop, bottom = scrollY + bounds.height
+                let toggled = editor.folded.symmetricDifference(shown.folded).map { Kind.header($0) }
+                    + editor.openImageLanes.symmetricDifference(shown.lanes).map { Kind.lane(2, $0) }
+                let seen = shown.rows.filter { $0.maxY > top && $0.y < bottom }
+                let anchors = seen.filter { toggled.contains($0.kind) } + seen
+                if let anchor = anchors.first(where: { a in now.contains { $0.kind == a.kind } }), let same = now.first(where: { $0.kind == anchor.kind }) {
+                    scrollY += same.y - anchor.y
+                }
+            }
+            shown = (editor.folded, editor.openImageLanes, now)
+        }
         let h = contentHeight
         scrollY = min(max(scrollY, 0), max(0, contentHeight - bounds.height))
         if h != lastHeight { lastHeight = h; onHeight(h) }
@@ -427,6 +446,7 @@ final class TimelineView: NSView {
 
     /// An added sound's blocks: a colour no other block has.
     static let soundColor = NSColor(srgbRed: 0.50, green: 0.60, blue: 0.17, alpha: 1)
+    static let clipColor = NSColor(srgbRed: 0.93, green: 0.63, blue: 0.22, alpha: 1)
     /// A mask's blocks: a deep red no other block has.
     static let maskColor = NSColor(srgbRed: 0.66, green: 0.20, blue: 0.24, alpha: 1)
 
@@ -514,90 +534,91 @@ final class TimelineView: NSView {
             NSBezierPath(roundedRect: CGRect(x: b.minX + 5, y: b.midY - h / 2, width: b.width - 10, height: h), xRadius: 1.5, yRadius: 1.5).fill()
         }
         }
-        drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7))
+        if editor.videoOpen { drawLabel("Clip", symbol: "film", y: clipTop, height: clipHeight, attrs: label, tint: NSColor(white: 1, alpha: 0.7)) }
         // From here to the playhead, labels and +s wait in `labelQueue` and are drawn after, unclipped.
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: trackClip).addClip()
         labelQueue = []
 
-        // The clip: each part its own rounded block of filmstrip, a clear gap between parts,
-        // a scissors pin over each split; a removed part dark and hatched.
-        let gap: CGFloat = 4
-        let amber = NSColor(srgbRed: 0.93, green: 0.63, blue: 0.22, alpha: 1)
-        let all = editor.pieces
-        let bridged = Set(all.indices.filter { !all[$0].removed && editor.edits.transitions[Edits.key(all[$0].end)] != nil }.flatMap { i -> [Int] in
-            let run = Array(all.indices.dropFirst(i + 1).prefix { all[$0].removed })
-            return (run.last ?? i) + 1 < all.count ? run : []
-        })
-        for (index, piece) in all.enumerated() {
-            let r = CGRect(x: x(piece.start) + (piece.start > 0 ? gap : 0), y: clipTop,
-                           width: max(3, x(piece.end) - x(piece.start) - (piece.start > 0 ? gap : 0) - (piece.end < d ? gap : 0)), height: clipHeight)
-            let shape = NSBezierPath(roundedRect: r, xRadius: 9, yRadius: 9)
-            NSGraphicsContext.saveGraphicsState()
-            shape.addClip()
-            NSColor(white: 1, alpha: 0.08).setFill()
-            r.fill()
-            // The filmstrip runs across the whole clip; each block shows its own stretch of it.
-            if let ctx = NSGraphicsContext.current?.cgContext { drawFilm(editor, in: r, ctx: ctx) }
-            if piece.removed {
-                NSColor(calibratedWhite: 0.06, alpha: 0.84).setFill()
+        if editor.videoOpen {
+            // The clip: each part its own rounded block of filmstrip, a clear gap between parts,
+            // a scissors pin over each split; a removed part dark and hatched.
+            let gap: CGFloat = 4
+            let all = editor.pieces
+            let bridged = Set(all.indices.filter { !all[$0].removed && editor.edits.transitions[Edits.key(all[$0].end)] != nil }.flatMap { i -> [Int] in
+                let run = Array(all.indices.dropFirst(i + 1).prefix { all[$0].removed })
+                return (run.last ?? i) + 1 < all.count ? run : []
+            })
+            for (index, piece) in all.enumerated() {
+                let r = CGRect(x: x(piece.start) + (piece.start > 0 ? gap : 0), y: clipTop,
+                               width: max(3, x(piece.end) - x(piece.start) - (piece.start > 0 ? gap : 0) - (piece.end < d ? gap : 0)), height: clipHeight)
+                let shape = NSBezierPath(roundedRect: r, xRadius: 9, yRadius: 9)
+                NSGraphicsContext.saveGraphicsState()
+                shape.addClip()
+                NSColor(white: 1, alpha: 0.08).setFill()
                 r.fill()
-                NSColor.systemRed.withAlphaComponent(0.35).setStroke()
-                var hx = r.minX - r.height
-                while hx < r.maxX {
-                    let line = NSBezierPath()
-                    line.move(to: CGPoint(x: hx, y: r.maxY)); line.line(to: CGPoint(x: hx + r.height, y: r.minY))
-                    line.lineWidth = 2
-                    line.stroke()
-                    hx += 9
+                // The filmstrip runs across the whole clip; each block shows its own stretch of it.
+                if let ctx = NSGraphicsContext.current?.cgContext { drawFilm(editor, in: r, ctx: ctx) }
+                if piece.removed {
+                    NSColor(calibratedWhite: 0.06, alpha: 0.84).setFill()
+                    r.fill()
+                    NSColor.systemRed.withAlphaComponent(0.35).setStroke()
+                    var hx = r.minX - r.height
+                    while hx < r.maxX {
+                        let line = NSBezierPath()
+                        line.move(to: CGPoint(x: hx, y: r.maxY)); line.line(to: CGPoint(x: hx + r.height, y: r.minY))
+                        line.lineWidth = 2
+                        line.stroke()
+                        hx += 9
+                    }
+                } else {
+                    // A warm wash, so the kept parts read as clip blocks.
+                    Self.clipColor.withAlphaComponent(0.22).setFill()
+                    r.fill()
                 }
-            } else {
-                // A warm wash, so the kept parts read as clip blocks.
-                amber.withAlphaComponent(0.22).setFill()
-                r.fill()
+                NSGraphicsContext.restoreGraphicsState()
+                (piece.removed ? NSColor(white: 1, alpha: 0.12) : Self.clipColor.withAlphaComponent(0.9)).setStroke()
+                shape.lineWidth = 1.5
+                shape.stroke()
+                if piece.removed, !bridged.contains(index) { title("Removed", in: r) }
+                if editor.selected == piece.id {
+                    NSColor.white.setStroke()
+                    let sel = NSBezierPath(roundedRect: r.insetBy(dx: -1.5, dy: -1.5), xRadius: 10, yRadius: 10)
+                    sel.lineWidth = 2.5
+                    sel.stroke()
+                }
             }
-            NSGraphicsContext.restoreGraphicsState()
-            (piece.removed ? NSColor(white: 1, alpha: 0.12) : amber.withAlphaComponent(0.9)).setStroke()
-            shape.lineWidth = 1.5
-            shape.stroke()
-            if piece.removed, !bridged.contains(index) { title("Removed", in: r) }
-            if editor.selected == piece.id {
-                NSColor.white.setStroke()
-                let sel = NSBezierPath(roundedRect: r.insetBy(dx: -1.5, dy: -1.5), xRadius: 10, yRadius: 10)
-                sel.lineWidth = 2.5
-                sel.stroke()
+            // @ref LLP 0002#our-own-look — our own marker, not one from another app
+            // A split marker over each split: a thin line down the gap, with two small arrowheads
+            // above the clip pointing in at it.
+            for split in editor.edits.splits where split > 0.001 && split < d - 0.001 {
+                let cx = x(split)
+                NSColor(white: 1, alpha: 0.8).setFill()
+                CGRect(x: cx - 0.75, y: clipTop - 12, width: 1.5, height: clipHeight + 12).fill()
+                let mid = clipTop - 8, w: CGFloat = 6, h: CGFloat = 5
+                for side in [-1.0, 1.0] {
+                    let head = NSBezierPath()
+                    let tipX = cx + CGFloat(side) * 2.5, backX = tipX + CGFloat(side) * w
+                    head.move(to: CGPoint(x: tipX, y: mid)); head.line(to: CGPoint(x: backX, y: mid - h)); head.line(to: CGPoint(x: backX, y: mid + h)); head.close()
+                    NSColor.white.setFill()
+                    head.fill()
+                }
             }
-        }
-        // @ref LLP 0002#our-own-look — our own marker, not one from another app
-        // A split marker over each split: a thin line down the gap, with two small arrowheads
-        // above the clip pointing in at it.
-        for split in editor.edits.splits where split > 0.001 && split < d - 0.001 {
-            let cx = x(split)
-            NSColor(white: 1, alpha: 0.8).setFill()
-            CGRect(x: cx - 0.75, y: clipTop - 12, width: 1.5, height: clipHeight + 12).fill()
-            let mid = clipTop - 8, w: CGFloat = 6, h: CGFloat = 5
-            for side in [-1.0, 1.0] {
-                let head = NSBezierPath()
-                let tipX = cx + CGFloat(side) * 2.5, backX = tipX + CGFloat(side) * w
-                head.move(to: CGPoint(x: tipX, y: mid)); head.line(to: CGPoint(x: backX, y: mid - h)); head.line(to: CGPoint(x: backX, y: mid + h)); head.close()
-                NSColor.white.setFill()
-                head.fill()
-            }
-        }
 
-        // Transitions across removed parts: a badge on the gap they bridge.
-        let parts = editor.pieces
-        for (i, p) in parts.enumerated() where !p.removed {
-            guard let kind = editor.edits.transitions[Edits.key(p.end)], parts.dropFirst(i + 1).contains(where: { !$0.removed }) else { continue }
-            let next = parts.dropFirst(i + 1).first { !$0.removed }!
-            let mid = (x(p.end) + x(next.start)) / 2
-            let tag = (kind == "crossfade" ? "Crossfade" : "Fade") as NSString
-            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.white]
-            let size = tag.size(withAttributes: attrs)
-            let pill = CGRect(x: mid - size.width / 2 - 7, y: clipTop + clipHeight / 2 - 9, width: size.width + 14, height: 18)
-            NSColor.systemGreen.setFill()
-            NSBezierPath(roundedRect: pill, xRadius: 9, yRadius: 9).fill()
-            tag.draw(at: CGPoint(x: pill.minX + 7, y: pill.minY + 2.5), withAttributes: attrs)
+            // Transitions across removed parts: a badge on the gap they bridge.
+            let parts = editor.pieces
+            for (i, p) in parts.enumerated() where !p.removed {
+                guard let kind = editor.edits.transitions[Edits.key(p.end)], parts.dropFirst(i + 1).contains(where: { !$0.removed }) else { continue }
+                let next = parts.dropFirst(i + 1).first { !$0.removed }!
+                let mid = (x(p.end) + x(next.start)) / 2
+                let tag = (kind == "crossfade" ? "Crossfade" : "Fade") as NSString
+                let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.white]
+                let size = tag.size(withAttributes: attrs)
+                let pill = CGRect(x: mid - size.width / 2 - 7, y: clipTop + clipHeight / 2 - 9, width: size.width + 14, height: 18)
+                NSColor.systemGreen.setFill()
+                NSBezierPath(roundedRect: pill, xRadius: 9, yRadius: 9).fill()
+                tag.draw(at: CGPoint(x: pill.minX + 7, y: pill.minY + 2.5), withAttributes: attrs)
+            }
         }
 
         // The rows under the clip.
@@ -659,6 +680,8 @@ final class TimelineView: NSView {
                 let items: [Item] = group == "sound"
                     ? editor.edits.sounds.map { ($0.start, $0.end(editor.map), $0.lane, Self.soundColor) }
                     : segments.filter({ group == "top" ? $0.isOverlay : group == "video" ? $0.space == 0 : $0.space == 3 }).map { ($0.start, $0.end, $0.kind == "image" ? 1000 + $0.lane : $0.lane, Self.color($0)) }
+                    + (group == "video" ? editor.pieces.filter { !$0.removed }.map { ($0.start, $0.end, -2, Self.clipColor) }
+                        + editor.edits.moves.map { (max(0, $0.t - $0.duration), $0.t, -1, NSColor.systemTeal) } : [])
                 if isFolded {
                     // Folded, the group still shows where its things are: slim bars in the track, in row
                     // order, each on the first of up to three sub-lines where it overlaps nothing, so
@@ -1106,19 +1129,19 @@ final class TimelineView: NSView {
         if p.y < Self.videoTop, p.x < Self.labelWidth {
             if let i = (0..<3).first(where: { sizeRect($0).insetBy(dx: -1, dy: -3).contains(p) }) {
                 size = i
-                UserDefaults.standard.set(i, forKey: "ExactStudio.laneSize")
+                Settings.store.set(i, forKey: "ExactStudio.laneSize")
                 changed()
             }
             return
         }
-        // The clip: its label folds the video's rows; a part of it is selected, and the playhead goes there.
-        if p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight {
+        // The clip: a part of it is selected, and the playhead goes there.
+        if editor.videoOpen, p.y >= Self.clipTop, p.y <= Self.clipTop + Self.clipHeight {
             if p.x < Self.labelWidth { return }
             if let piece = editor.pieces.first(where: { t(p.x) >= $0.start && t(p.x) <= $0.end }) { editor.select(piece.id) }
             return scrub()
         }
         guard let r = row(at: p.y) else {
-            if p.y > Self.clipTop + Self.clipHeight { editor.select("") }
+            if p.y > (rows.first { $0.kind != .header("video") }?.y ?? Self.clipTop) - Self.laneGap { editor.select("") }
             return scrub()
         }
         if hasMore(r), moreRect(r).insetBy(dx: -2, dy: -4).contains(p) { return popUp(laneMenu(for: r), under: moreRect(r)) }
@@ -1262,7 +1285,7 @@ final class TimelineView: NSView {
     override func mouseUp(with e: NSEvent) {
         if resizing != nil {
             resizing = nil
-            UserDefaults.standard.set(Double(extra), forKey: "ExactStudio.timelineExtra")
+            Settings.store.set(Double(extra), forKey: "ExactStudio.timelineExtra")
             needsDisplay = true
             return
         }
@@ -1295,78 +1318,4 @@ final class TimelineView: NSView {
     }
 }
 
-final class PlayClock: ExactNativeInstance {
-    private let label = NSTextField(labelWithString: "")
-    private let studio: Studio
-    private var clip = ""
-    private weak var editor: Editor?
-    private weak var player: AVPlayer?
-    private var observer: Any?
-
-    init(_ studio: Studio, _ props: [String: String], _ events: ExactNativeEvents) {
-        self.studio = studio
-        super.init(events: events)
-        label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
-        label.textColor = .secondaryLabelColor
-        label.alignment = .center
-        events.intrinsicSize(CGSize(width: 112, height: 20))
-        try? setProps(props)
-    }
-
-    override var view: ExactNativeView { label }
-
-    override func setProps(_ props: [String: String]) throws {
-        let next = props["clip"] ?? ""
-        guard next != clip else { return }
-        clip = next
-        attach(studio.editor(next))
-    }
-
-    private func attach(_ next: Editor?) {
-        editor?.unlisten(self)
-        if let player, let observer { player.removeTimeObserver(observer) }
-        observer = nil
-        editor = next
-        player = next?.player
-        guard let next else { label.stringValue = ""; return }
-        next.listen(self) { [weak self] in self?.show() }
-        observer = next.player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] _ in self?.show() }
-        show()
-    }
-
-    private func show() {
-        guard let editor else { return }
-        let map = editor.map, total = map.outputDuration
-        label.stringValue = "\(TimelineMenus.clock(min(map.output(editor.playhead), total))) / \(TimelineView.clock(total, tenths: false))"
-    }
-
-    override func destroy() { attach(nil) }
-}
-
-/// The view Exact places; its height follows the lanes.
-final class Timeline: ExactNativeInstance {
-    private let strip = TimelineView()
-    private let studio: Studio
-    private var clip = ""
-
-    init(_ studio: Studio, _ props: [String: String], _ events: ExactNativeEvents) {
-        self.studio = studio
-        super.init(events: events)
-        strip.onHeight = { h in events.intrinsicSize(CGSize(width: 800, height: h)) }
-        strip.clipsToBounds = true
-        events.intrinsicSize(CGSize(width: 800, height: TimelineView.height(lanes: 1)))
-        try? setProps(props)
-    }
-
-    override var view: ExactNativeView { strip }
-
-    override func setProps(_ props: [String: String]) throws {
-        let next = props["clip"] ?? ""
-        guard next != clip else { return }
-        clip = next
-        strip.attach(studio.editor(next))
-    }
-
-    override func destroy() { strip.detach() }
-}
 #endif

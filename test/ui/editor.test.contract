@@ -328,3 +328,21 @@ test "the floating settings panel never covers the timeline, however low it is d
   clock data
   expect state floatClear == true
   expect state floatH >= 100
+
+test "VIDEO folds to one line with the Clip in it; ON TOP moves up under it, and unfolding puts every row back"
+  tap "recording-full"
+  clock settle
+  tap "timeline" drag 0 0 from 40 45 mouse
+  clock data
+  tap "timeline" drag 0 0 from 259 108 mouse
+  clock data
+  expect text "segment-title" == "Text"
+  expect state sel.text == "Hello"
+  tap "timeline" drag 0 0 from 40 45 mouse
+  clock data
+  tap "timeline" drag 0 0 from 220 91 mouse
+  clock data
+  expect text "segment-title" == "Clip Part"
+  tap "timeline" drag 0 0 from 259 314 mouse
+  clock data
+  expect text "segment-title" == "Text"
