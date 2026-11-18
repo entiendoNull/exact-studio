@@ -7,7 +7,9 @@ description: Record the screen with Exact Studio without a person (a Simulator, 
 
 A recording is a folder under `~/Movies/Exact Studio/Recordings/<id>/`. Its edit is two JSON files:
 `edits.json` (the timeline) and `look.json` (the frame). Read `docs/edits.md` first: it has every
-field, its units and the overlap rules; `schema/*.schema.json` are the JSON Schemas.
+field, its units and the overlap rules; `schema/*.schema.json` are the JSON Schemas. `docs/effects.md`
+says what each effect, move style, text and image animation, style and transition looks like on
+screen, its timing and its limits, with picture strips.
 
 This skill is the mechanics. To make a recording into promotional material (a launch video, a demo,
 an ad, a social clip), also follow the `direct-recording` skill: it decides what to cut, where to
@@ -59,6 +61,10 @@ The loop, from this repository's root:
 
 Rules that keep an edit looking good:
 
+- Before you use an effect, a move style, an animation, a text style or a transition you have not
+  used this session, read its entry in `docs/effects.md` (MCP: `effects_guide` with its name). Then
+  check it on your recording: `./exact-studio strip <id> <from> <to> --source` renders its frames
+  side by side in `.exact/strip.png`.
 - Keep texts clear of the video: beside it in a wide frame, above or below it in a tall one, and
   not over a stretch where a zoom pulls the video under the text.
 - Prefer a few strong moments over many effects; leave the first second plain or blurred under a title.

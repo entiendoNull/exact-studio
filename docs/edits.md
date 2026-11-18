@@ -18,6 +18,10 @@ app's UI. The app watches the files: a change shows in its open preview within a
 
 JSON Schemas: [`schema/edits.schema.json`](../schema/edits.schema.json), [`schema/look.schema.json`](../schema/look.schema.json).
 
+This file is the format. [`docs/effects.md`](effects.md) is what each effect, move style, text and image
+animation, style and transition looks like on screen, its timing and its limits, with picture strips:
+read an entry before you use a thing for the first time.
+
 ## The loop
 
 ```sh
@@ -89,8 +93,8 @@ The clip is cut at each time in `splits` (sorted). That makes parts: 0 to the fi
 split, the last split to the end. A part is left out of the video when its **start** is in
 `removed` (0 for the first part). Where removed parts lie between two kept parts, `transitions`
 says how the video passes from one to the next, keyed by the earlier kept part's **end in
-milliseconds**, as a string: `"crossfade"` (0.6 s) or `"fade"` (through the background). No key is a
-plain cut.
+milliseconds**, as a string: `"crossfade"` (0.6 s, less when a part lasts under 1.2 s; the video gets that much
+shorter) or `"fade"` (0.4 s out and 0.4 s in, through the background). No key is a plain cut.
 
 To cut out 10–14 s: add `10` and `14` to `splits`, `10` to `removed`.
 
@@ -127,22 +131,22 @@ it. A count the file leaves out is derived from the lanes in use.
 
 | kind | fields | |
 |---|---|---|
-| `zoom` | `level` | above 1 zooms in toward the cursor (1.5–3 is usual), below 1 zooms out (0.5–0.85); eases in and out over 0.7 s |
+| `zoom` | `level` | above 1 zooms in toward the cursor (1.5–3 is usual), below 1 zooms out (0.5–0.85); eases in and out over 0.7 s (half its length when shorter) |
 | `speed` | `rate` | 0.25–8; 0.5 is half speed |
 | `spotlight` | | darkens all but a circle around the cursor |
 | `highlight` | | a soft glow under the cursor |
 | `blur` | `scope` | none: only the video. `"frame"`: the whole picture, background and images included; texts stay sharp on top. `"all"`: texts too |
 | `mono` | `scope` | black and white, the same reaches |
-| `3d` | `tilt`, `turn`, `roll`, `style` | turns the video in 3D over its span and back, even with 3D off; `style` `"hold"` or `"orbit"` (one full turn) |
+| `3d` | `tilt`, `turn`, `roll`, `style` | turns the video in 3D over its span and back, even with 3D off, easing over 0.7 s (a third of a short span); `style` `"hold"` (the default: holds `tilt`, `turn`, `roll`, default 10, −24, 0) or `"orbit"` (one full turn about the vertical across the whole span; `turn` is ignored) |
 | `mask` | `rect`, `style`, `color`, `radius` | hides a part of the recording; see [Masks](#masks) |
 | `text` | see below | |
 | `image` | see below | |
 
 **Text fields:** `text` (the words); `x`, `y` (its centre, 0–1 of the frame, top-left origin);
-`size` (its height as a share of the frame's, 0.04–0.12 is usual); `color` (`white`, `black`, `yellow`,
-`pink`, `blue`, `mint`); `weight` (`regular`, `bold`, `heavy`, `rounded`); `style` (`plain`, `pill`, `box`,
-`outline`, `shadow`); `animIn` (`letters`, `letters-pop`, `drop`, `typewriter`, `pop`, `spin`, `slide`, `rise`,
-`blur`, `fade`, `none`); `animOut` (`fade`, `fall`, `letters`, `pop`, `sink`, `blur`, `none`); `loop` while
+`size` (its font size as a share of the frame's height, default 0.08; 0.04–0.12 is usual); `color` (`white`, the default, `black`, `yellow`,
+`pink`, `blue`, `mint`); `weight` (`regular`, `bold`, the default, `heavy`, `rounded`); `style` (`plain`, the default, `pill`, `box`,
+`outline`, `shadow`); `animIn` (default `pop`; `letters`, `letters-pop`, `drop`, `typewriter`, `pop`, `spin`, `slide`, `rise`,
+`blur`, `fade`, `none`); `animOut` (`fade`, the default, `fall`, `letters`, `pop`, `sink`, `blur`, `none`); `loop` while
 shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees).
 
 Keep a text clear of the video: put it beside the video when the frame is wide, above or below it
@@ -207,8 +211,8 @@ first image lane free then (else a new one), and prints it. Then edit the segmen
 BMP; a PNG keeps its transparency); `x`, `y` (its centre, 0–1 of the frame, top-left origin); `size`
 (its height as a share of the frame's; its width follows the picture's shape); `rotation` (degrees);
 `opacity` (0–1); `radius` (rounded corners, as a share of its shorter side, 0–0.5); `shadow`;
-`animIn` (`pop`, `fade`, `rise`, `slide`, `spin`, `blur`, `none`); `animOut` (`fade`, `pop`, `sink`,
-`blur`, `none`).
+`animIn` (`pop`, `fade`, `rise`, `slide`, `spin`, `blur`, `none`; default `fade`, while `image` writes `pop`);
+`animOut` (`fade`, the default, `pop`, `sink`, `blur`, `none`).
 
 **Its own moves, `moves`:** an image moves the way the video does. Each move has an `id` and lands at
 time `t` (inside the image's span), having travelled for `duration` seconds before it (default 0.8),
@@ -313,7 +317,8 @@ and take it from `length`.
 `base` is where the video sits before any move: `x`, `y` its centre (0–1, top-left origin, default
 0.5), `scale` (1 fills the frame inside the padding, the default). Each move has an `id` and lands at
 time `t`, having travelled for `duration` seconds before it (default 0.8), in `style`: `smooth` (the
-default), `linear`, `spring`, `zoom` (through full screen), `swipe`, `fade`, `spin`, `pop`. `to` is
+default), `linear`, `spring`, `zoom` (through full screen), `swipe`, `fade`, `spin`, `pop`
+([how each looks](effects.md#move-styles)). `to` is
 where it lands (`x`, `y`, `scale`, with the same defaults as `base`), and `angles` (`tilt`, `turn`,
 `roll` in degrees, each default 0) the 3D angle it lands at, used while `three.on`; without `angles`
 it keeps the angle it had.

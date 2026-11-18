@@ -58,8 +58,9 @@ Do not edit `exact.mjs` or the generated block at the top of `AGENTS.md`. `bun e
 | `./ref-check` | The design notes and the `@ref` comments | `llp/` |
 | `contract build` | The view compiles | `app.contract` |
 | Edit model and Editor | Lane rules, cuts, the time map, templates, old files; the Editor's split, remove, join, add, drag, delete, templates and undo, on a real video | `test/model/main.swift` |
-| CLI | `validate` and `show` on the fixture recordings against goldens, the JSON Schemas, `frame`, `template`, `image`, `sound`, `mask` | `test/cli.test.ts`, `test/fixtures/`, `test/golden/` |
+| CLI | `validate` and `show` on the fixture recordings against goldens, the JSON Schemas, `frame`, `strip`, `template`, `image`, `sound`, `mask` | `test/cli.test.ts`, `test/fixtures/`, `test/golden/` |
 | MCP server | Its tools and a `write_edits` round trip | `test/mcp.test.ts` |
+| Effects reference | Every effect, style and animation name the code accepts has an entry in `docs/effects.md`; its picture strips exist | `test/effects.test.ts`, `docs/effects/` |
 | macOS UI | The empty app; the editor on fixture recordings: the timeline, the inspector, templates | `app.test.contract`, `test/ui/*.test.contract` |
 
 ### Add a test
@@ -71,6 +72,8 @@ Every bug fix and every feature adds a test that fails without it. Put it at the
 - What `show` prints: a folder in `test/fixtures/valid/`. Its goldens are written the same way.
 - What an Editor action does (the timeline's buttons and menus call these): a test in `test/model/main.swift` that opens a fixture with `open(…)`.
 - What the window shows or does: a test in `test/ui/editor.test.contract`. It runs on the fixture recordings, each test from a fresh copy.
+
+A new effect, style or animation needs an entry in `docs/effects.md`. When a change alters how anything draws, run `test/make-effect-strips.sh`, look at the strips in `docs/effects/`, then commit them.
 
 When an output changes on purpose, run `./check --update` and read the diff of `test/golden/` before you commit it.
 

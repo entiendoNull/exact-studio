@@ -60,6 +60,32 @@ async function writeChecked(id: string, file: string, value: unknown): Promise<R
   return text(`Saved ${file}. The app's open preview updates within a second.`);
 }
 
+/** The entries of docs/effects.md named `name` (a heading `name`, or a table row of it), each under its section's title. */
+function effectEntries(name: string): { text: string; pictures: string[] } {
+  const lines = readFileSync(join(root, 'docs/effects.md'), 'utf8').split('\n');
+  const want = name.trim().toLowerCase();
+  const level = (l: string) => /^(#+) /.exec(l)?.[1].length ?? 0;
+  const out: string[] = [];
+  let section = '', sectionAt = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const n = level(lines[i]);
+    if (n === 2) { section = lines[i].slice(3); sectionAt = i; }
+    const head = /^#{3,4} `([^`]+)`/.exec(lines[i]);
+    const row = /^\| `([^`]+)` \|/.exec(lines[i]);
+    if (head && head[1].toLowerCase() === want) {
+      let j = i + 1;
+      while (j < lines.length && !(level(lines[j]) && level(lines[j]) <= n)) j++;
+      out.push(`${section}:\n${lines.slice(i, j).join('\n').trim()}`);
+    } else if (row && row[1].toLowerCase() === want) {
+      let j = sectionAt + 1;
+      while (j < lines.length && level(lines[j]) !== 2) j++;
+      out.push(lines.slice(sectionAt, j).join('\n').trim());
+    }
+  }
+  const text = out.join('\n\n');
+  return { text, pictures: [...text.matchAll(/\]\(effects\/([^)]+\.png)\)/g)].map((m) => join(root, 'docs/effects', m[1])) };
+}
+
 const id = { type: 'string', description: 'A recording id, a unique start of one, or "latest".' };
 
 /** A record verb's answer: what it printed, its warnings, and what to do about a refusal by its exit code. */
@@ -310,9 +336,25 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'edit_format',
-    description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, masks included, with examples. Read it before write_edits.',
+    description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, masks included, with examples. Read it before write_edits. What each effect looks like on screen is in effects_guide.',
     inputSchema: { type: 'object', properties: {} },
     call: async () => text(readFileSync(join(root, 'docs/edits.md'), 'utf8')),
+  },
+  {
+    name: 'effects_guide',
+    description:
+      'What each effect, move style, text and image animation, text style and transition looks like on screen (docs/effects.md): what the viewer sees, its timing (ramps, which ends ease), its parameters and useful ranges, what it touches and its limits, and when to use or avoid it. With name (such as "orbit", "zoom", "letters-pop", "swipe", "crossfade"), only the entries of that name, with their picture strips. Read the entry before you use a thing for the first time in a session.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'An effect, style, animation or transition name. Leave out for the whole reference.' } },
+    },
+    call: async (a) => {
+      if (!a.name) return text(readFileSync(join(root, 'docs/effects.md'), 'utf8'));
+      const found = effectEntries(String(a.name));
+      if (!found.text) return text(`No entry named "${a.name}". Call effects_guide without a name for the whole reference.`, true);
+      const pictures = found.pictures.filter(existsSync).map((p): Content => ({ type: 'image', data: readFileSync(p).toString('base64'), mimeType: 'image/png' }));
+      return { content: [{ type: 'text', text: found.text }, ...pictures] };
+    },
   },
   {
     name: 'directing_guide',
@@ -338,7 +380,7 @@ async function handle(msg: any): Promise<unknown> {
         capabilities: { tools: {} },
         serverInfo: { name: 'exact-studio', version: '0.1.0' },
         instructions:
-          'Record and edit Exact Studio screen recordings. To record without a person: list_sources → start_recording (with max_seconds) → drive the app you record with your other tools → stop_recording, which returns the new id → edit it as below. Everything on the source is recorded, so prefer a Simulator or one window, and hide any secret with add_mask. Never stop a recording you did not start. To edit, loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end. To make a recording into a promo, demo or ad for an audience, read directing_guide first: it decides what to cut, where to zoom, what the texts say and how long they stay. When Exact Studio gets in the way (a bug, a confusing tool, a missing feature), read feedback_guide: note it and ask the person before anything is sent.',
+          'Record and edit Exact Studio screen recordings. To record without a person: list_sources → start_recording (with max_seconds) → drive the app you record with your other tools → stop_recording, which returns the new id → edit it as below. Everything on the source is recorded, so prefer a Simulator or one window, and hide any secret with add_mask. Never stop a recording you did not start. To edit, loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing, and effects_guide with a name before you use an effect, move style, animation or transition for the first time: it says what the viewer sees, its timing and its limits. To put a picture on the video, call add_image first, then edit the segment it returns. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end. To make a recording into a promo, demo or ad for an audience, read directing_guide first: it decides what to cut, where to zoom, what the texts say and how long they stay. When Exact Studio gets in the way (a bug, a confusing tool, a missing feature), read feedback_guide: note it and ask the person before anything is sent.',
       };
     case 'ping':
       return {};

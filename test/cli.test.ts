@@ -76,6 +76,16 @@ describe('valid recordings', () => {
     const raw = run(good, 'frame', 'full', '2', '--raw', '--out', out);
     expect(raw.out.split('\n')[0]).toBe('<library>/frame.png  320×180  the full recorded frame at 0:02.00 (video 0:02.00), before the crop, no edits');
   });
+
+  test('strip renders frames side by side in one PNG', () => {
+    const out = join(good, 'strip.png');
+    const r = run(good, 'strip', 'full', '1', '3', '--frames', '3', '--width', '300', '--out', out);
+    expect(r.err).toBe('');
+    expect(r.out).toBe('<library>/strip.png  300×171  3 frames, left to right, at video 0:01.00, 0:02.00, 0:03.00\n');
+    expect(readFileSync(out).subarray(1, 4).toString()).toBe('PNG');
+    expect(run(good, 'strip', 'full', '3', '1').code).not.toBe(0);
+    expect(run(good, 'strip', 'full', '1', '3', '--frames', '20').err).toContain('--frames is 2–12');
+  });
 });
 
 describe('invalid recordings fail validate with the expected lines', () => {

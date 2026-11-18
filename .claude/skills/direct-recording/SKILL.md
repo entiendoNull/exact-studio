@@ -10,7 +10,9 @@ promotional piece for a real product, for real people. Think like that from the 
 handover.
 
 The edit-recording skill is the mechanics: fields, verbs, units, lanes, checks. Read it and
-`docs/edits.md` first. This skill decides **what** to do and **why**. The output is marketing made by
+`docs/edits.md` first. `docs/effects.md` (MCP: `effects_guide`) says what each effect, move,
+animation and transition looks like and how long it takes: read an entry before you use a tool
+for the first time in a session. This skill decides **what** to do and **why**. The output is marketing made by
 people for people: tasteful, accurate, restrained. Every effect and every word must earn its place.
 
 Work in five passes, in order: **brief → shot list → script → edit → review**, then hand over.
@@ -166,7 +168,7 @@ moment (a zoom plus a spotlight plus a moving text), `mono` or `blur` on a key p
 - **Reading-speed rule.** A text must be fully on screen for at least
   `1.0 s + 0.3 s per word` (about 200 words a minute, with a beat to notice it), and never under
   1.5 s. Its animations take time on top: in about 0.55 s (letter-by-letter animations up to ~0.6 s
-  more), out about 0.45 s. So a 4-word line needs `end - start` of at least
+  more; `typewriter` 0.06 s a letter, with no cap), out about 0.45 s (`fall` and `letters` up to ~0.9 s). So a 4-word line needs `end - start` of at least
   `0.55 + 2.2 + 0.45 = 3.2 s` of *video* time. Check it across cuts: a cut inside a text shortens it.
 - **Fit.** One line is about `chars × size × 0.5 × (frame height / frame width)` of the frame's
   width. Keep it under 0.8 of the width centred, under 0.4 beside the video in a wide frame. In 9:16
