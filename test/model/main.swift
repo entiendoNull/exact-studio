@@ -821,5 +821,20 @@ test("dragging a landing frame moves where that move lands, as one named undo st
     eq(e.undoName, "Move Landing")
 }
 
+test("a text or an image with no animation set shows the one it plays: Pop or Fade in, Fade out, Still") {
+    let e = open("empty", edits: """
+        {"segments": [{"id": "t1", "kind": "text", "start": 1, "end": 3, "text": "Hi"},
+                      {"id": "t2", "kind": "text", "start": 1, "end": 3, "text": "Yo", "lane": 1, "animIn": "wobble", "loop": "spin"},
+                      {"id": "i1", "kind": "image", "start": 4, "end": 6, "file": "images/logo.png"}],
+         "textLanes": 2, "imageLanes": 1}
+        """)
+    e.select("t1")
+    eq(e.selection["animIn"] as? String, "pop"); eq(e.selection["animOut"] as? String, "fade"); eq(e.selection["loop"] as? String, "none")
+    e.select("t2")
+    eq(e.selection["animIn"] as? String, "none", "an unknown entrance plays none"); eq(e.selection["loop"] as? String, "none")
+    e.select("i1")
+    eq(e.selection["animIn"] as? String, "fade"); eq(e.selection["animOut"] as? String, "fade")
+}
+
 print("\(passed) passed, \(failed.count) failed")
 if !failed.isEmpty { failed.forEach { print("  failed: \($0)") }; exit(1) }

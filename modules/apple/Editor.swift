@@ -1697,7 +1697,9 @@ final class Editor {
             out.merge(["id": s.id, "kind": s.kind, "level": s.level ?? 0, "rate": s.rate ?? 0, "start": s.start, "end": s.end,
                        "startText": Editor.stamp(s.start), "endText": Editor.stamp(s.end), "text": s.text ?? "",
                        "size": ((s.size ?? 0) * 1000).rounded() / 10, "color": s.color ?? "", "weight": s.weight ?? "", "style": s.style ?? "",
-                       "animIn": s.animIn ?? "", "animOut": s.animOut ?? "", "loop": s.loop ?? "", "rotation": s.rotation ?? 0]) { $1 }
+                       "animIn": Editor.shown(s.animIn, s.kind == "image" ? Editor.imageIns : Editor.textIns, or: s.kind == "image" ? "fade" : "pop"),
+                       "animOut": Editor.shown(s.animOut, s.kind == "image" ? Editor.imageOuts : Editor.textOuts, or: "fade"),
+                       "loop": Editor.shown(s.loop, Editor.loops, or: "none"), "rotation": s.rotation ?? 0]) { $1 }
             if s.kind == "mask" {
                 out.merge(["style": s.style ?? "blur", "color": Segment.maskHex(s.color) ?? "#000000"]) { $1 }
             }
@@ -1725,6 +1727,17 @@ final class Editor {
                        "transition": edits.transitions[Edits.key(p.end)] ?? "cut"]) { $1 }
         }
         return out
+    }
+
+    static let textIns = ["letters", "letters-pop", "drop", "typewriter", "pop", "spin", "slide", "rise", "blur", "fade", "none"]
+    static let textOuts = ["fade", "fall", "letters", "pop", "sink", "blur", "none"]
+    static let imageIns = ["pop", "fade", "rise", "slide", "spin", "blur", "none"]
+    static let imageOuts = ["fade", "pop", "sink", "blur", "none"]
+    static let loops = ["none", "wave", "pulse", "float", "wiggle"]
+
+    static func shown(_ value: String?, _ known: [String], or fallback: String) -> String {
+        guard let value else { return fallback }
+        return known.contains(value) ? value : "none"
     }
 
     var summary: [String: Any] {

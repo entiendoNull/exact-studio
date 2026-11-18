@@ -205,6 +205,7 @@ test "the floating settings panel stays on the stage"
   clock data
   expect state floatX <= 460
   expect state floatY <= 160
+  expect state floatClear == true
 
 test "the inspector's sections fold, and the look's controls change look.json"
   tap "recording-empty"
@@ -285,3 +286,18 @@ test "Place on the viewer bar places the video"
   tap "place-left"
   clock data
   expect state summary.undoName == "Placement"
+
+test "the floating settings panel never covers the timeline, however low it is dropped"
+  tap "recording-full"
+  clock settle
+  tap "inspector-more"
+  tap "panel-menu-button"
+  tap "menu-panel-float"
+  clock settle
+  tap "timeline" drag 0 0 from 259 314 mouse
+  clock data
+  expect tree has "float-panel"
+  tap "float-grip" drag 0 840
+  clock data
+  expect state floatClear == true
+  expect state floatH >= 100

@@ -181,6 +181,9 @@ component ExactStudio
   state stageH = 0
   state floatW = 0
   state floatH = 0
+  state lowerH = 0
+  state lowerBarH = 0
+  state viewerBarH = 0
   state startedAt = 0
   state now = 0
   state listed = 0
@@ -209,7 +212,9 @@ component ExactStudio
   derive cardLeft = panelMode == "left" and sel.id != ""
   // @ref LLP 0005#calm-by-default
   derive floatX = stageW == 0 ? panelX : min(panelX, max(0, stageW - floatW - 16))
-  derive floatY = stageH == 0 ? panelY : min(panelY, max(0, stageH - floatH - 16))
+  derive floatRoom = max(160, stageH - 16 - lowerH - lowerBarH - viewerBarH - 52)
+  derive floatY = stageH == 0 ? panelY : min(panelY, max(0, floatRoom - floatH))
+  derive floatClear = floatY + floatH <= floatRoom
   derive typing = typingIn != "" and typingIn == sel.id
   derive currentName = match current { case some(r) => r.name, case none => "" }
   derive removingName = match first(library.items.filter(r => r.id == removing)) { case some(r) => r.name, case none => "" }
@@ -362,6 +367,12 @@ component ExactStudio
   action stageSized(w: number, h: number)
     stageW = w
     stageH = h
+  action lowerSized(w: number, h: number)
+    lowerH = h
+  action lowerBarSized(w: number, h: number)
+    lowerBarH = h
+  action viewerBarSized(w: number, h: number)
+    viewerBarH = h
   action floatSized(w: number, h: number)
     floatW = w
     floatH = h
@@ -570,7 +581,7 @@ component ExactStudio
                 column flex=1 min-width=0 min-height=0 gap=12 padding=16 position="relative" background-color="-exact-background" -exact-layout-transition="280ms ease" resize=stageSized
                   studio-preview clip=rec.id look=look cropping=(cropping ? "true" : "") paths=(showMotionPaths ? "true" : "false") aria-label="Preview" flex=1 min-height=200 testId="preview"
                   if cropping
-                    row gap=10 align-items="center" padding="8px 12px" border-radius=12 background-color="-exact-tertiary-background" testId="crop-bar"
+                    row gap=10 align-items="center" padding="8px 12px" border-radius=12 background-color="-exact-tertiary-background" resize=viewerBarSized testId="crop-bar"
                       image "symbol:sf/crop" color="-exact-secondary-label" aria-hidden=true
                       text "Drag a corner or an edge to crop. Drag inside to move the crop." font="-exact-footnote" color="-exact-secondary-label" flex=1
                       button press=trim("reset", 0) buttonStyle="bordered" testId="crop-reset"
@@ -579,7 +590,7 @@ component ExactStudio
                         text "Done"
                   else
                     // @ref LLP 0005#three-bars
-                    row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" testId="viewer-bar"
+                    row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" resize=viewerBarSized testId="viewer-bar"
                       row flex="1 0 0" gap=8 align-items="center"
                         text "VIDEO" font="-exact-caption1" font-weight=700 letter-spacing=0.6 color="#EDA138" padding="3px 8px" border-radius=6 background-color="#EDA13829" testId="video-scope"
                         button press=toggleCrop aria-pressed=cropping buttonStyle="bordered" testId="crop-open"
@@ -604,7 +615,7 @@ component ExactStudio
                   // The handle: drag it to give the preview or the timeline more room.
                   button pan=resizeStage press=resetStage appearance="none" aria-label="Resize the preview; click to reset" cursor="row-resize" align-self="stretch" display="flex" align-items="center" justify-content="center" height=12 margin-top=-6 margin-bottom=-6 testId="stage-handle"
                     column width=56 height=5 border-radius=3 background-color="-exact-tertiary-label"
-                  row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" testId="timeline-bar"
+                  row gap=8 row-gap=8 align-items="center" flex-wrap="wrap" resize=lowerBarSized testId="timeline-bar"
                     row gap=8 align-items="center"
                       button press=editDo("split-clip") buttonStyle="bordered" title="Split the Clip at the playhead (S)" testId="split-clip"
                         image "symbol:sf/scissors"
@@ -628,7 +639,7 @@ component ExactStudio
                         button press=zoomTimeline("wheel") aria-label="Zoom with the mouse wheel" aria-pressed=summary.wheelZoom buttonStyle="bordered" testId="zoom-wheel"
                           image (summary.wheelZoom ? "symbol:sf/computermouse.fill" : "symbol:sf/computermouse")
                       text `Video ${mmss(summary.length)} · recorded ${mmss(summary.source)}` flex-shrink=0 text-align="right" font-variant-numeric="tabular-nums" color="-exact-secondary-label" testId="length"
-                  studio-timeline clip=rec.id aria-label="Timeline" height=timelineH flex-shrink=1 min-height=150 testId="timeline"
+                  studio-timeline clip=rec.id aria-label="Timeline" height=timelineH flex-shrink=1 min-height=150 resize=lowerSized testId="timeline"
                   if sel.id != "" and panelMode == "overlay"
                     button press=closePanel appearance="none" aria-label="Close the settings" position="absolute" inset=0 background-color="#00000073" testId="lightbox-backdrop"
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
@@ -636,7 +647,7 @@ component ExactStudio
                         column padding=12
                           SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
                   if sel.id != "" and panelMode == "float"
-                    column position="absolute" left=floatX top=floatY width="24rem" max-height="80%" resize=floatSized border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
+                    column position="absolute" left=floatX top=floatY width="24rem" max-height=floatRoom resize=floatSized border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0
