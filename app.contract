@@ -1281,7 +1281,17 @@ component SettingsCard
             option "Blur out" value="blur"
             option "None" value="none"
         text "Drag the image in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
-        text "To animate it or add an effect to it, use the + on its Moves and Effects rows in the timeline." font="-exact-caption1" color="-exact-tertiary-label"
+        // @ref LLP 0002#rows — its own Moves and Effects rows appear with what they hold
+        row gap=8
+          button press=imageField("add-move", "") buttonStyle="bordered" flex=1 testId="image-add-move"
+            text "Add Move"
+          button popovertarget="image-fx-menu" buttonStyle="bordered" flex=1 testId="image-add-effect"
+            text "Add Effect"
+          column id="image-fx-menu" popover="auto" role="menu" aria-label="Add an effect to this image"
+            for k in ["blur", "mono", "fade", "pulse", "float", "wiggle"] key=k
+              button press=imageField("add-effect", k) popovertarget="image-fx-menu" popovertargetaction="hide" testId=`image-fx-${k}`
+                text imageFxLabel(k)
+        text "Each adds a row under the image's lane, at the playhead." font="-exact-caption1" color="-exact-tertiary-label"
       // @ref LLP 0005#depth — the Applies-to stack again, with this item as the line
       if sel.layer != ""
         column gap=10 testId="depth"

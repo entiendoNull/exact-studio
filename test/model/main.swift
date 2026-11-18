@@ -1053,6 +1053,28 @@ test("+ Add holds every kind of thing, each with a second line that says what it
     eq(e.edits.moves.count, 1)
 }
 
+test("the slim Moves row appears with the first move and goes with the last; an image's own rows show only with what they hold") {
+    let e = open("empty")
+    let view = timeline(e, height: 900)
+    expect(!view.rows.contains { $0.kind == .position }, "no Moves row before a move")
+    at(e, 3); e.addMove()
+    let moves = view.rows.first { $0.kind == .position }
+    eq(moves?.height, 22, "a slim row")
+    eq(view.rows.map(\.kind).firstIndex(of: .position), view.rows.map(\.kind).firstIndex(of: .clip).map { $0 + 1 }, "right under the Clip")
+    e.deleteSelected()
+    expect(!view.rows.contains { $0.kind == .position }, "gone with the last move")
+    at(e, 1); e.addImage(fixtures.appendingPathComponent("media/logo.png"))
+    let image = e.selectedSegment!.id
+    expect(e.isOpen(space: 2, lane: 0), "selecting it opened its lane")
+    expect(!view.rows.contains { $0.kind == .imagePosition(image) || $0.kind == .imageEffects(image, 0) }, "no own rows while it has neither")
+    e.addImageMove()
+    expect(view.rows.contains { $0.kind == .imagePosition(image) }, "its Moves row with its first move")
+    expect(!view.rows.contains { $0.kind == .imageEffects(image, 0) }, "still no Effects row")
+    e.select(image); e.addItemEffect("pulse")
+    expect(view.rows.contains { $0.kind == .imageEffects(image, 0) }, "its Effects row with its first effect")
+    view.detach()
+}
+
 test("a new recording shows the Clip and one dashed line that says what + Add does; it goes with the first item") {
     let e = open("empty")
     let view = timeline(e, height: 600)

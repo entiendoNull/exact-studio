@@ -51,11 +51,12 @@ final class TimelineView: NSView {
     /// The recorded sound's band along the bottom of the Clip.
     private static let bandHeight: CGFloat = 17
     private static let laneHeight: CGFloat = 28, laneGap: CGFloat = 8
-    private static let motionHeight: CGFloat = 26
+    /// The Moves row: slim, a travel bar and a diamond where the move lands.
+    private static let motionHeight: CGFloat = 22
     /// How tall the rows are: 0 compact, 1 regular, 2 tall. The person's choice, kept between launches.
     private var size = min(max(Settings.store.integer(forKey: "ExactStudio.laneSize"), 0), 2)
     private var laneH: CGFloat { [Self.laneHeight, 42, 56][size] }
-    private var motionH: CGFloat { [Self.motionHeight, 36, 46][size] }
+    private var motionH: CGFloat { [Self.motionHeight, 26, 32][size] }
     private static let backgroundHeight: CGFloat = 22, childIndent: CGFloat = 16
     static func height(lanes: Int) -> CGFloat { clipTop + clipHeight + laneGap + CGFloat(lanes) * (laneHeight + laneGap) + backgroundHeight + 40 }
 
@@ -104,8 +105,9 @@ final class TimelineView: NSView {
         var targets: [LayerRow] = []
         if extra(1) > 0 { targets.append(LayerRow(kind: "text", lane: e.textLanes)) }
         if extra(2) > 0 { targets.append(LayerRow(kind: "image", lane: e.imageLanes)) }
+        // @ref LLP 0002#rows — an item's own rows, as the video's Moves row, show only with what they hold
         func effectRows(_ item: Segment) {
-            var lanes = max(1, ((item.effects ?? []).map(\.lane).max() ?? -1) + 1)
+            var lanes = max(empty ? 1 : 0, ((item.effects ?? []).map(\.lane).max() ?? -1) + 1)
             if case let .fx(id, _, 0, _, _, _, _) = drag, id == item.id { lanes += 1 }
             for l in 0..<lanes { add(.imageEffects(item.id, l), laneH) }
         }
@@ -115,7 +117,7 @@ final class TimelineView: NSView {
                 if !out.isEmpty { y += 8 }
                 add(.clip, Self.clipHeight)
                 guard editor.clipOpen else { continue }
-                add(.position, motionH)
+                if !e.moves.isEmpty || empty { add(.position, motionH) }
                 for l in 0..<e.lanes + extra(0) { add(.lane(0, l), laneH) }
                 continue
             }
@@ -124,7 +126,7 @@ final class TimelineView: NSView {
             guard row.lane < e.laneCount(space: space), editor.isOpen(space: space, lane: row.lane),
                   let item = editor.currentItem(space: space, lane: row.lane) else { continue }
             // @ref LLP 0002#images — an open lane shows one item's own rows at a time
-            if item.kind == "image" { add(.imagePosition(item.id), motionH) }
+            if item.kind == "image", !(item.moves ?? []).isEmpty || empty { add(.imagePosition(item.id), motionH) }
             effectRows(item)
         }
         // @ref LLP 0005#add-where-it-goes — the only explanation on the timeline, until the first item
@@ -811,13 +813,15 @@ final class TimelineView: NSView {
                 drawLabel("Moves", symbol: "arrow.up.and.down.and.arrow.left.and.right", y: r.y, height: r.height, attrs: label, tint: .systemTeal, indent: Self.childIndent, plus: true)
                 bed(r)
                 if editor.edits.moves.isEmpty {
-                    drawHint("Drag the video in the preview to place it. Press + to add a move that animates it.", in: r)
+                    drawHint("+ adds a move", in: r)
                 }
                 for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) { draw(move: m, in: r, selected: editor.selected == "m:" + m.id, threeD: m.angles != nil, ref: .move(m)) }
             case let .lane(space, lane):
                 let symbol = space == 1 ? "textformat" : space == 2 ? "photo" : space == Edits.soundSpace ? "music.note" : "wand.and.stars"
                 // An image or text lane with items folds its current item's own rows; an empty one keeps its name in line.
-                let folds = (space == 1 || space == 2) && segments.contains { $0.space == space && $0.lane == lane }
+                let folds = (space == 1 || space == 2) && segments.contains {
+                    $0.space == space && $0.lane == lane && (editor.showEmptyLanes || !($0.effects ?? []).isEmpty || !($0.moves ?? []).isEmpty)
+                }
                 let indent: CGFloat = space == 0 ? Self.childIndent : (space == 1 || space == 2) && !folds ? 14 : 0
                 drawLabel(TimelineMenus.laneName(space, lane), symbol: symbol, y: r.y, height: r.height, attrs: label, tint: NSColor(white: 1, alpha: 0.5),
                           open: folds ? editor.isOpen(space: space, lane: lane) : nil, indent: indent, plus: hasPlus(r))
@@ -832,7 +836,7 @@ final class TimelineView: NSView {
                 drawLabel("Moves", symbol: "", y: r.y, height: r.height, attrs: child, tint: .clear, indent: 22, plus: true)
                 childBed(r, image)
                 if (image.moves ?? []).isEmpty {
-                    childHint("Drag the image in the preview to place it. Press + to add a move that animates it.", r, image)
+                    childHint("+ adds a move to this image", r, image)
                 }
                 for m in (image.moves ?? []).sorted(by: { $0.t < $1.t }) {
                     draw(move: m, in: r, selected: editor.selected == Editor.childID("im", image: id, m.id), threeD: false, ref: .move(m, image: id))
@@ -842,8 +846,7 @@ final class TimelineView: NSView {
                 drawLabel(lane == 0 ? "Effects" : "", symbol: "", y: r.y, height: r.height, attrs: child, tint: .clear, indent: 22, plus: true)
                 childBed(r, image)
                 if lane == 0, (image.effects ?? []).isEmpty {
-                    childHint(image.kind == "text" ? "Press + to blur this text only, make it black and white, or fade it."
-                        : "Press + to add an effect to this image only: blur, fade, pulse and more.", r, image)
+                    childHint(image.kind == "text" ? "+ adds an effect to this text only" : "+ adds an effect to this image only", r, image)
                 }
                 let pool = Joins.whole(image, run: Joins.run(image, in: editor.edits.segments)).effects ?? []
                 for fx in image.effects ?? [] where (landing(.effect(fx, image: id)) ?? fx.lane) == lane {
@@ -1009,10 +1012,11 @@ final class TimelineView: NSView {
 
     /// A move on a Moves row: its travel as a bar, ending in a diamond where it lands.
     private func draw(move m: Move, in r: Row, selected: Bool, threeD: Bool, ref: ItemRef) {
-        let bar = CGRect(x: x(m.t - m.duration), y: r.y + 7, width: max(2, x(m.t) - x(m.t - m.duration)), height: r.height - 14)
+        // @ref LLP 0005#layers — a slim row: the travel as a bar, the landing as a diamond; the style's name only where the bar holds it
+        let bar = CGRect(x: x(m.t - m.duration), y: r.y + 5, width: max(2, x(m.t) - x(m.t - m.duration)), height: r.height - 10)
         let state = self.state(ref)
         NSColor.systemTeal.withAlphaComponent(selected ? 0.85 : 0.45).setFill()
-        NSBezierPath(roundedRect: bar, xRadius: 6, yRadius: 6).fill()
+        NSBezierPath(roundedRect: bar, xRadius: min(6, bar.height / 2), yRadius: min(6, bar.height / 2)).fill()
         if state == .refused { hatch(bar, square: (false, false)) }
         if selected, state == .plain { stroke(bar.insetBy(dx: -2, dy: -3), selected: true) }
         if state == .refused || state == .lit { ring(bar.insetBy(dx: -2, dy: -3), square: (false, false), glow: state == .lit) }
@@ -1021,7 +1025,8 @@ final class TimelineView: NSView {
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
         // Zoomed, the name stays in the part of the bar that shows.
         let from = max(bar.minX, trackRect.minX), shown = min(bar.maxX, trackRect.maxX) - from
-        if shown > name.size(withAttributes: attrs).width + 16 { name.draw(at: CGPoint(x: from + 6, y: bar.minY - 1), withAttributes: attrs) }
+        let size = name.size(withAttributes: attrs)
+        if bar.height >= size.height + 2, shown > size.width + 22 { name.draw(at: CGPoint(x: from + 6, y: bar.midY - size.height / 2), withAttributes: attrs) }
         let d = diamond(m.t, in: r)
         let path = NSBezierPath()
         path.move(to: CGPoint(x: d.midX, y: d.minY)); path.line(to: CGPoint(x: d.maxX, y: d.midY))
