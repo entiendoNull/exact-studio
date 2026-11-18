@@ -442,12 +442,17 @@ final class TimelineView: NSView {
     }
 
     /// The chips an image's or a text's block shows: its own blur and black and white.
+    // @ref LLP 0002#depth — the row stays; the block says it is behind
     static func chips(_ s: Segment) -> [String] {
         let kinds = Set((s.effects ?? []).map(\.kind))
-        return (kinds.contains("blur") ? ["Blur"] : []) + (kinds.contains("mono") ? ["B&W"] : [])
+        return (s.isBehind ? [behindChip] : []) + (kinds.contains("blur") ? ["Blur"] : []) + (kinds.contains("mono") ? ["B&W"] : [])
     }
 
-    static func chipColor(_ chip: String) -> NSColor { chip == "Blur" ? .systemIndigo : .systemGray }
+    static let behindChip = "Behind video"
+
+    static func chipColor(_ chip: String) -> NSColor {
+        chip == behindChip ? NSColor(white: 0, alpha: 0.32) : chip == "Blur" ? .systemIndigo : .systemGray
+    }
 
     static func color(image effect: Segment) -> NSColor {
         switch effect.kind {

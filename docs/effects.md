@@ -227,6 +227,29 @@ The default (no `scope`): only the video, as above.
 - **Timing:** as `frame`.
 - **Use:** a blur into the last beat, or out of the first. **Avoid:** while a text must be read.
 
+## Depth
+
+A text's or an image's `layer`: where it sits in the stack texts, images, video, behind the video,
+background (front to back). Its row on the timeline stays where it is. `order` sets which item of the
+same kind and layer is in front (see [edits.md](edits.md#depth-layer-and-order)).
+
+### `front`
+
+The default (no `layer`): over the video, as always. Images under texts.
+
+### `behind`
+
+![a logo appears from behind the video as it moves away](effects/depth-behind.png)
+
+*Frames 1.2–3.2 s. The logo is behind the video; a move takes the video right and smaller, and the logo comes out.*
+
+- **Sees:** the item is drawn on the background, under the video and its shadow. Where the video covers it, it
+  is hidden; it appears where the video moves, shrinks, turns in 3D or is cropped away. It does not zoom with the video.
+- **Reach:** a `background` blur or black and white stays under it; `scene`, `frame` and `all` cover it.
+- **Timing:** its own animations, moves and effects play as in front.
+- **Use:** a logo or a title revealed by a move of the video, or a badge peeking out at the video's edge.
+  **Avoid:** a key point or a line that must be read: half of it may be hidden.
+
 ## Transitions
 
 Between two kept parts with removed parts between, keyed by the earlier part's end in `transitions`.

@@ -1288,6 +1288,167 @@ test("every split keeps the rendered video the same: zooms, texts with loops, ef
     }
 }
 
+// MARK: Depth
+
+func item(_ id: String, _ kind: String, _ start: Double, _ end: Double, lane: Int = 0, layer: String? = nil, order: Int? = nil) -> Segment {
+    var s = seg(id, kind, start, end, lane: lane)
+    if kind == "image" { s.file = "images/logo.png" }
+    s.layer = layer; s.order = order
+    return s
+}
+
+test("depth: an old file keeps its stack; layer and order are read, written back, and left out when unset") {
+    let old = try decode("""
+    {"textLanes":1,"imageLanes":2,"segments":[
+      {"id":"a","kind":"image","start":0,"end":5,"lane":1,"file":"x.png"},{"id":"b","kind":"image","start":0,"end":5,"lane":0,"file":"x.png"},
+      {"id":"t1","kind":"text","start":0,"end":5,"text":"one"},{"id":"t2","kind":"text","start":0,"end":5,"text":"two"}]}
+    """)
+    eq(old.overlays(at: 1).map(\.id), ["a", "b", "t1", "t2"], "lane 0 in front, texts over images in list order")
+    eq(old.overlays(at: 1, behind: true).map(\.id), [])
+    expect(!String(decoding: try JSONEncoder().encode(old), as: UTF8.self).contains("layer"), "no layer is written for an old file")
+    expect(!String(decoding: try JSONEncoder().encode(old), as: UTF8.self).contains("order"), "no order is written for an old file")
+    var e = old
+    e.segments[0].layer = "behind"; e.segments[3].order = -1; e.segments[1].layer = "front"
+    let back = try JSONDecoder().decode(Edits.self, from: JSONEncoder().encode(e))
+    eq(back, e)
+    eq(back.overlays(at: 1).map(\.id), ["b", "t2", "t1"], "a lower order is further back")
+    eq(back.overlays(at: 1, behind: true).map(\.id), ["a"])
+}
+
+test("arrange: forward and backward step past the next item of its kind that overlaps it; front and back go to the end") {
+    var e = Edits(segments: [item("i0", "image", 0, 5, lane: 0), item("i1", "image", 0, 5, lane: 1), item("i2", "image", 6, 9, lane: 1),
+                             item("i3", "image", 2, 4, lane: 2)])
+    e.imageLanes = 3
+    eq(e.depthStack(kind: "image", behind: false).map(\.id), ["i3", "i1", "i2", "i0"])
+    let forward = e.arranged("i1", "forward")!
+    eq(forward.depthStack(kind: "image", behind: false).map(\.id), ["i3", "i2", "i0", "i1"], "past i2, which it never meets, to in front of i0")
+    eq(forward.segments.map(\.order), [2, 3, 1, 0])
+    eq(e.arranged("i0", "forward"), nil, "already in front")
+    eq(e.arrangeProblem("i0", "front"), "It is already in front of the other images in front of the video.")
+    eq(e.arrangeProblem("i2", "forward"), "No other image in front of the video shows at the same time.")
+    eq(e.arranged("i0", "back")!.depthStack(kind: "image", behind: false).map(\.id), ["i0", "i3", "i1", "i2"])
+    eq(e.arranged("i3", "front")!.depthStack(kind: "image", behind: false).map(\.id), ["i1", "i2", "i0", "i3"])
+    let backward = forward.arranged("i1", "backward")!
+    eq(backward.segments.map(\.order), [nil, nil, nil, nil], "back where it was against everything it meets: the orders go")
+    var texts = Edits(segments: [item("t1", "text", 0, 5), item("t2", "text", 1, 4), item("i", "image", 0, 5)])
+    texts.textLanes = 2; texts.segments[1].lane = 1; texts.imageLanes = 1
+    eq(texts.arranged("t1", "front")!.overlays(at: 2).map(\.id), ["i", "t2", "t1"], "a text moves among the texts; images stay under them")
+}
+
+test("arrange: behind the video lands next to it, at the front of the items behind; back in front, at the back of those in front") {
+    var e = Edits(segments: [item("a", "image", 0, 5, lane: 0), item("b", "image", 0, 5, lane: 1, layer: "behind"), item("c", "image", 0, 5, lane: 2)])
+    e.imageLanes = 3
+    let behind = e.arranged("a", "behind")!
+    eq(behind.overlays(at: 1, behind: true).map(\.id), ["b", "a"])
+    eq(behind.overlays(at: 1).map(\.id), ["c"])
+    eq(behind.segments.map(\.lane), [0, 1, 2], "its row stays")
+    eq(behind.arrangeProblem("a", "behind"), "It is already behind the video.")
+    let front = behind.arranged("b", "in-front")!
+    eq(front.overlays(at: 1).map(\.id), ["b", "c"], "just over the video")
+    eq(front.segments.first { $0.id == "b" }?.layer, nil, "in front is no layer at all")
+    eq(e.arrangeProblem("a", "in-front"), "It is already in front of the video.")
+    eq(Edits(segments: [seg("z", "zoom", 0, 2)]).arrangeProblem("z", "behind"), "Only a text or an image has a depth.")
+    var halves = item("t", "text", 0, 2), second = item("t-2", "text", 2, 4)
+    halves.joinEnd = true; second.joinStart = true
+    let joined = Edits(segments: [halves, second]).arranged("t", "behind")!
+    eq(joined.segments.map(\.layer), ["behind", "behind"], "a split text goes behind whole")
+}
+
+struct Depth {
+    let pixels: [UInt8], width: Int, height: Int, video: UnitRect, picture: UnitRect
+    func at(_ x: Double, _ y: Double) -> [UInt8] { let o = (Int(y * Double(height)) * width + Int(x * Double(width))) * 4; return Array(pixels[o..<o + 3]) }
+}
+
+func depth(layer: String?, picture: Bool = true, base: Placement = Placement(), effect: String? = nil, three: Bool = false) throws -> Depth {
+    try FileManager.default.createDirectory(at: reachFolder, withIntermediateDirectories: true)
+    let pic = reachFolder.appendingPathComponent("pic.png")
+    if !FileManager.default.fileExists(atPath: pic.path) { try checkerPicture(pic) }
+    let meta = try JSONDecoder().decode(RecordingMeta.self, from: Data("""
+    {"id":"d","name":"d","kind":"area","created":0,"duration":10,"width":1600,"height":1000,
+     "crop":{"x":0,"y":0,"w":1,"h":1},"clicks":[],"cursorBaked":true}
+    """.utf8))
+    var look = Look()
+    look.shadow = true; look.radius = 24; look.background = "custom"; look.customA = "#E0302A"; look.customB = "#2A60E0"
+    var image = seg("i", "image", 0, 10)
+    image.file = "pic.png"; image.x = 0.5; image.y = 0.5; image.size = 0.4; image.animIn = "none"; image.animOut = "none"; image.layer = layer
+    var edits = Edits(segments: picture ? [image] : [])
+    edits.imageLanes = 1
+    edits.base = base
+    if three { edits.three.on = true; edits.three.turn = 80 }
+    if let effect { var fx = seg("fx", "mono", 1, 5); fx.scope = effect; edits.segments.append(fx); edits.fitLanes() }
+    let checker = CIFilter.checkerboardGenerator()
+    checker.width = 10; checker.color0 = CIColor(red: 0.95, green: 0.6, blue: 0.1); checker.color1 = CIColor(red: 0.1, green: 0.3, blue: 0.9)
+    let frame = checker.outputImage!.cropped(to: CGRect(x: 0, y: 0, width: 1600, height: 1000))
+    let f = Framing(meta: meta, look: look, edits: edits, cursor: [], folder: reachFolder)
+    return Depth(pixels: pixels(f, frame, at: 3), width: Int(f.canvas.width), height: Int(f.canvas.height),
+                 video: f.subjectFrame(at: 3), picture: f.imageFrame(image, at: 3))
+}
+
+test("behind the video: hidden where the video covers it, shown where the video moves, shrinks or turns away") {
+    let none = try depth(layer: nil, picture: false), behind = try depth(layer: "behind"), front = try depth(layer: nil)
+    eq(behind.pixels, none.pixels, "the video covers all of it: the frame is the one without it, byte for byte")
+    expect(front.pixels != none.pixels, "in front, it shows over the video")
+    let away = Placement(x: 0.82, y: 0.5, scale: 0.3)
+    let movedNone = try depth(layer: nil, picture: false, base: away), movedBehind = try depth(layer: "behind", base: away)
+    let movedFront = try depth(layer: nil, base: away)
+    expect(movedBehind.at(0.5, 0.5) != movedNone.at(0.5, 0.5), "with the video moved away, it shows")
+    eq(movedBehind.at(0.5, 0.5), movedFront.at(0.5, 0.5), "where the video is not, it looks as it does in front")
+    eq(movedBehind.at(0.82, 0.5), movedNone.at(0.82, 0.5), "where the video is, the video covers it")
+    let near = Placement(x: 0.7, y: 0.5, scale: 0.4)
+    let n = try depth(layer: nil, picture: false, base: near), b = try depth(layer: "behind", base: near), fr = try depth(layer: nil, base: near)
+    let edge = (max(b.video.x, b.picture.x) + min(b.video.x + b.video.w, b.picture.x + b.picture.w)) / 2
+    expect(b.video.x < b.picture.x + b.picture.w - 0.01, "the video's edge lies over the picture")
+    expect(fr.at(edge, 0.5) != n.at(edge, 0.5), "in front, it covers the video's edge")
+    eq(b.at(edge, 0.5), n.at(edge, 0.5), "behind, the video's edge covers it")
+    let turnedNone = try depth(layer: nil, picture: false, three: true), turned = try depth(layer: "behind", three: true)
+    expect(turned.pixels != turnedNone.pixels, "a video turned in 3D shows it at its narrowing side")
+}
+
+test("behind the video: the background cut stays under it; scene and the cuts above it cover it") {
+    let away = Placement(x: 0.82, y: 0.5, scale: 0.3)
+    let plain = try depth(layer: "behind", base: away)
+    let p = plain.at(0.5, 0.5)
+    eq(try depth(layer: "behind", base: away, effect: "background").at(0.5, 0.5), p, "a background reach leaves it in colour")
+    for scope in ["scene", "frame", "all"] {
+        let c = try depth(layer: "behind", base: away, effect: scope).at(0.5, 0.5)
+        expect(c != p && abs(Int(c[0]) - Int(c[1])) < 4 && abs(Int(c[1]) - Int(c[2])) < 4, "\(scope) turns it grey: \(c) from \(p)")
+    }
+    let front = try depth(layer: nil, base: away, effect: "scene").at(0.5, 0.5)
+    eq(front, try depth(layer: nil, base: away).at(0.5, 0.5), "scene never reaches an image in front")
+    eq(Framing.stack, ["background", "behind", "video", "images", "texts"])
+}
+
+test("arrange from the Editor: each step is one named undo step; a refused one says why and is none") {
+    let e = open("empty", edits: """
+    {"textLanes":1,"imageLanes":2,"segments":[
+      {"id":"a","kind":"image","start":1,"end":6,"lane":0,"file":"images/logo.png"},
+      {"id":"b","kind":"image","start":2,"end":5,"lane":1,"file":"images/logo.png"},
+      {"id":"t","kind":"text","start":1,"end":4,"lane":0,"text":"Hi"}]}
+    """)
+    e.select("b")
+    eq(e.selection["layer"] as? String, "front"); eq(e.selection["canForward"] as? Bool, true); eq(e.selection["canBack"] as? Bool, false)
+    e.arrange("forward")
+    eq(e.undoName, "Bring Forward"); eq(e.edits.overlays(at: 3).map(\.id), ["a", "b", "t"])
+    eq(onDisk(e).segments.map(\.order), [0, 1, nil], "saved")
+    e.arrange("behind")
+    eq(e.undoName, "Send Behind Video"); eq(e.edits.overlays(at: 3, behind: true).map(\.id), ["b"])
+    eq(e.selection["layer"] as? String, "behind"); eq(e.selection["canForward"] as? Bool, false)
+    eq(TimelineView.chips(e.selectedSegment!), [TimelineView.behindChip])
+    e.arrange("behind")
+    eq(e.undoName, "Send Behind Video", "a refused step is none"); eq(e.problem, "It is already behind the video.")
+    e.arrange("in-front")
+    eq(e.undoName, "Bring In Front of Video"); eq(e.edits.overlays(at: 3).map(\.id), ["b", "a", "t"])
+    e.select("t"); e.arrange("behind"); e.select("t")
+    eq(e.undoName, "Send Behind Video")
+    e.undo(); e.undo(); e.undo(); e.undo()
+    eq(e.edits.overlays(at: 3).map(\.id), ["b", "a", "t"]); eq(e.edits.segments.map(\.order), [nil, nil, nil])
+    eq(onDisk(e).segments.map(\.layer), [nil, nil, nil])
+    e.select("a"); e.arrange("back")
+    eq(e.undoName, "Send to Back"); eq(e.edits.overlays(at: 3).map(\.id), ["a", "b", "t"])
+    e.arrange("front")
+    eq(e.undoName, "Bring to Front"); e.arrange("backward"); eq(e.undoName, "Send Backward")
+}
+
 test("Split follows the selection and names itself; the clip when nothing is selected; each split is one undo step") {
     let e = open("full")
     at(e, 1.3)

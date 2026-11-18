@@ -1188,6 +1188,14 @@ final class Editor {
         }
     }
 
+    // @ref LLP 0002#depth
+    func arrange(_ step: String) {
+        guard let item = selectedSegment.flatMap({ $0.isOverlay ? $0 : nil }), let name = Edits.arrangeName(step) else { return }
+        if let why = edits.arrangeProblem(item.id, step) { return refuse(why) }
+        guard let next = edits.arranged(item.id, step) else { return }
+        named(name) { apply(next) }
+    }
+
     private func replace(_ s: Segment) {
         var next = edits
         next.segments = next.segments.map { $0.id == s.id ? s : $0 }
@@ -1764,7 +1772,8 @@ final class Editor {
                                   "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "", "rotation": 0,
                                   "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": blocked ?? problem,
                                   "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "",
-                                  "volume": 100, "fadeIn": 0, "fadeOut": 0]
+                                  "volume": 100, "fadeIn": 0, "fadeOut": 0,
+                                  "layer": "", "canForward": false, "canBackward": false, "canFront": false, "canBack": false]
         if selected == Editor.recordedSound {
             out.merge(["id": selected, "kind": "recorded", "volume": (edits.volume * 100).rounded()]) { $1 }
         } else if let s = selectedSound {
@@ -1782,6 +1791,11 @@ final class Editor {
                        "loop": Editor.shown(s.loop, Editor.loops, or: "none"), "rotation": s.rotation ?? 0]) { $1 }
             if s.kind == "mask" {
                 out.merge(["style": s.style ?? "blur", "color": Segment.maskHex(s.color) ?? "#000000"]) { $1 }
+            }
+            if s.isOverlay {
+                let can = { (step: String) in self.edits.arrangeProblem(s.id, step) == nil }
+                out.merge(["layer": s.isBehind ? "behind" : "front", "canForward": can("forward"), "canBackward": can("backward"),
+                           "canFront": can("front"), "canBack": can("back")]) { $1 }
             }
             if s.kind == "image" {
                 out.merge(["file": URL(fileURLWithPath: s.file ?? "").lastPathComponent, "opacity": ((s.opacity ?? 1) * 100).rounded(),

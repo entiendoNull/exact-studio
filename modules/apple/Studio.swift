@@ -131,6 +131,7 @@ final class Studio: ExactModule {
         "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
         "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": "",
         "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "", "volume": 100, "fadeIn": 0, "fadeOut": 0,
+        "layer": "", "canForward": false, "canBackward": false, "canFront": false, "canBack": false,
     ]
     private static let emptySummary: [String: Any] = [
         "parts": 1, "removed": 0, "effects": 0, "lanes": 1, "images": 0, "moves": 0, "length": 0, "source": 0, "playing": false,
@@ -296,6 +297,7 @@ final class Studio: ExactModule {
         case "move": e.setMoveField(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "place": e.placePreset(r["kind"] as? String ?? "")
         case "deselect": e.select("")
+        case "arrange": e.arrange(r["track"] as? String ?? "")
         case "seg": e.setSegment(r["track"] as? String ?? "", r["kind"] as? String ?? "")
         case "template": e.applyTemplate(r["kind"] as? String ?? "")
         case "undo": e.undo()
@@ -1202,10 +1204,13 @@ final class PlayerHost: NSView {
         let f = editor.framing
         let t = editor.playhead
         // A text or an image showing now: the selected one first, then the one in front.
+        // @ref LLP 0002#depth
         let over = Array(editor.edits.overlays(at: t).reversed())
+        let under = Array(editor.edits.overlays(at: t, behind: true).reversed())
         let frame = { (s: Segment) in s.kind == "image" ? f.imageFrame(s, at: t) : f.textFrame(s) }
         let held = editor.selectedImage?.id ?? editor.selected
-        if let s = (over.filter { $0.id == held } + over).first(where: { contains(frame($0), u) }) {
+        let reach = over + (contains(f.subjectFrame(at: t), u) ? [] : under)
+        if let s = (reach.filter { $0.id == held } + reach).first(where: { contains(frame($0), u) }) {
             // An image keeps its selected move selected, so the drag sets where that move lands.
             if s.id != held { editor.select(s.id) }
             let box = frame(s)

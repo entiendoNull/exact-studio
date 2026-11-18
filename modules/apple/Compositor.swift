@@ -126,6 +126,9 @@ struct Segment: Codable, Equatable {
     // @ref LLP 0002#split
     var joinStart: Bool?
     var joinEnd: Bool?
+    // @ref LLP 0002#depth
+    var layer: String?
+    var order: Int?
 
     static let visual = ["spotlight", "highlight", "blur", "mono"]
     static let kinds = ["zoom", "speed", "text", "image", "3d", "mask"] + visual
@@ -137,6 +140,7 @@ struct Segment: Codable, Equatable {
     static let textEffects = ["blur", "mono", "fade"]
     /// A blur's or black and white's reaches, back to front: each covers the layers under its cut.
     static let scopes = ["video", "background", "scene", "frame", "all"]
+    static let layers = ["front", "behind"]
 
     /// What an item of `kind` may have as its own effects: an image's or a text's; none for the rest.
     static func ownEffects(_ kind: String) -> [String] { kind == "image" ? imageEffects : kind == "text" ? textEffects : [] }
@@ -149,6 +153,7 @@ struct Segment: Codable, Equatable {
     var coversFrame: Bool { (kind == "blur" || kind == "mono") && Segment.scopes.dropFirst().contains(scope ?? "video") }
     /// Drawn over the finished picture: a text or an image.
     var isOverlay: Bool { kind == "text" || kind == "image" }
+    var isBehind: Bool { isOverlay && layer == "behind" }
     /// Which rows its `lane` counts: 0 the video's effect lanes, 1 the text lanes, 2 the image
     /// lanes, 3 the whole-frame effect lanes.
     var space: Int { kind == "text" ? 1 : kind == "image" ? 2 : coversFrame ? 3 : 0 }
@@ -214,6 +219,8 @@ extension Segment {
         rect = try c.decodeIfPresent(UnitRect.self, forKey: .rect)
         joinStart = try c.decodeIfPresent(Bool.self, forKey: .joinStart)
         joinEnd = try c.decodeIfPresent(Bool.self, forKey: .joinEnd)
+        layer = try c.decodeIfPresent(String.self, forKey: .layer)
+        order = try c.decodeIfPresent(Int.self, forKey: .order)
     }
 }
 
@@ -473,11 +480,18 @@ struct Edits: Codable, Equatable {
     /// The texts and images showing at `t`, back to front: the images, the lowest lane in front, then
     /// the texts over them, in the order they are listed, as they always were.
     // @ref LLP 0002#images — lane order is the stacking order
-    func overlays(at t: Double) -> [Segment] {
-        let showing = segments.filter { $0.isOverlay && t >= $0.start && t < $0.end }
-        let images = showing.enumerated().filter { $0.element.kind == "image" }
-            .sorted { ($0.element.lane, $1.offset) > ($1.element.lane, $0.offset) }.map(\.element)
-        return images + showing.filter { $0.kind == "text" }
+    // @ref LLP 0002#depth — `order` first; a tie keeps the old rule
+    func overlays(at t: Double, behind: Bool = false) -> [Segment] {
+        Edits.depth(segments.filter { $0.isOverlay && $0.isBehind == behind && t >= $0.start && t < $0.end })
+    }
+
+    static func depth(_ items: [Segment]) -> [Segment] {
+        let all = Array(items.enumerated())
+        let images = all.filter { $0.element.kind == "image" }
+            .sorted { ($0.element.order ?? 0, -$0.element.lane, $0.offset) < ($1.element.order ?? 0, -$1.element.lane, $1.offset) }
+        let texts = all.filter { $0.element.kind == "text" }
+            .sorted { ($0.element.order ?? 0, $0.offset) < ($1.element.order ?? 0, $1.offset) }
+        return (images + texts).map(\.element)
     }
     var turns: [Segment] { segments.filter { $0.kind == "3d" } }
 
@@ -538,6 +552,94 @@ struct Edits: Codable, Equatable {
             }
         }
         return out.filter { $0.end - $0.start > 0.3 }
+    }
+}
+
+// @ref LLP 0002#depth — one front-to-back stack; arranging moves an item among its own kind in its layer
+extension Edits {
+    static let arrangeSteps: [(step: String, name: String)] = [
+        ("forward", "Bring Forward"), ("backward", "Send Backward"), ("front", "Bring to Front"), ("back", "Send to Back"),
+        ("behind", "Send Behind Video"), ("in-front", "Bring In Front of Video"),
+    ]
+
+    static func arrangeName(_ step: String) -> String? { arrangeSteps.first { $0.step == step }?.name }
+
+    func depthStack(kind: String, behind: Bool) -> [Segment] {
+        Edits.depth(segments.filter { $0.kind == kind && $0.isBehind == behind })
+    }
+
+    func arrangeProblem(_ id: String, _ step: String) -> String? {
+        guard let s = segments.first(where: { $0.id == id }), s.isOverlay else { return "Only a text or an image has a depth." }
+        guard Edits.arrangeName(step) != nil else { return "No arrange step \(step)." }
+        let noun = s.kind == "text" ? "text" : "image", place = s.isBehind ? "behind the video" : "in front of the video"
+        switch step {
+        case "behind": return s.isBehind ? "It is already behind the video." : nil
+        case "in-front": return s.isBehind ? nil : "It is already in front of the video."
+        default:
+            let stack = depthStack(kind: s.kind, behind: s.isBehind)
+            guard let i = stack.firstIndex(where: { $0.id == id }) else { return nil }
+            let others = stack.indices.filter { $0 != i && stack[$0].overlaps(s) }
+            if others.isEmpty { return "No other \(noun) \(place) shows at the same time." }
+            let up = step == "forward" || step == "front"
+            if up, !others.contains(where: { $0 > i }) { return "It is already in front of the other \(noun)s \(place)." }
+            if !up, !others.contains(where: { $0 < i }) { return "It is already behind the other \(noun)s \(place)." }
+            return nil
+        }
+    }
+
+    func arranged(_ id: String, _ step: String) -> Edits? {
+        guard let s = segments.first(where: { $0.id == id }), arrangeProblem(id, step) == nil else { return nil }
+        var next = self
+        for member in Joins.run(s, in: segments) where next.arrangeProblem(member.id, step) == nil {
+            next.arrange(member.id, step)
+        }
+        return next == self ? nil : next
+    }
+
+    private mutating func arrange(_ id: String, _ step: String) {
+        guard let s = segments.first(where: { $0.id == id }) else { return }
+        var stack = depthStack(kind: s.kind, behind: s.isBehind)
+        guard let i = stack.firstIndex(where: { $0.id == id }) else { return }
+        let others = stack.indices.filter { $0 != i && stack[$0].overlaps(s) }
+        switch step {
+        case "behind", "in-front":
+            stack.remove(at: i)
+            restack(stack, kind: s.kind, behind: s.isBehind)
+            var moved = s
+            moved.layer = step == "behind" ? "behind" : nil
+            var into = depthStack(kind: s.kind, behind: step == "behind").filter { $0.id != id }
+            if step == "behind" { into.append(moved) } else { into.insert(moved, at: 0) }
+            replaceItem(moved)
+            restack(into, kind: s.kind, behind: step == "behind")
+            return
+        case "forward":
+            guard let j = others.first(where: { $0 > i }) else { return }
+            stack.insert(stack.remove(at: i), at: j)
+        case "backward":
+            guard let j = others.last(where: { $0 < i }) else { return }
+            stack.insert(stack.remove(at: i), at: j)
+        case "front": stack.append(stack.remove(at: i))
+        case "back": stack.insert(stack.remove(at: i), at: 0)
+        default: return
+        }
+        restack(stack, kind: s.kind, behind: s.isBehind)
+    }
+
+    private mutating func replaceItem(_ s: Segment) {
+        if let k = segments.firstIndex(where: { $0.id == s.id }) { segments[k] = s }
+    }
+
+    private mutating func restack(_ stack: [Segment], kind: String, behind: Bool) {
+        let ids = stack.map(\.id)
+        let plain = Edits.depth(segments.filter { $0.kind == kind && $0.isBehind == behind && ids.contains($0.id) }.map { var p = $0; p.order = nil; return p })
+        let rank = Dictionary(uniqueKeysWithValues: plain.enumerated().map { ($1.id, $0) })
+        let keep = stack.indices.allSatisfy { i in
+            stack.indices.allSatisfy { j in i >= j || !stack[i].overlaps(stack[j]) || rank[stack[i].id, default: 0] < rank[stack[j].id, default: 0] }
+        }
+        for (n, id) in ids.enumerated() {
+            guard let k = segments.firstIndex(where: { $0.id == id }) else { continue }
+            segments[k].order = keep ? nil : n
+        }
     }
 }
 
@@ -1073,7 +1175,8 @@ struct Framing {
 
     /// One frame: `frame` is the source at `t`; `opacity` fades the subject (a transition's).
     /// Texts are drawn over the finished frame by `overlay`, once, even where two frames blend.
-    func render(_ frame: CIImage, at t: Double, opacity: Double = 1, texts: Bool = true) -> CIImage {
+    func render(_ frame: CIImage, at t: Double, opacity: Double = 1, texts: Bool = true, items: Double? = nil) -> CIImage {
+        let items = items ?? t
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let e = frame.extent
         let cropRect = CGRect(x: e.minX + crop.x * e.width, y: e.minY + (1 - crop.y - crop.h) * e.height,
@@ -1164,11 +1267,11 @@ struct Framing {
                     body = BodyOnCanvas(rect: r, radius: CGFloat(d.radius) * r.width, buttons: d.buttons.map(onCanvas))
                 }
             }
-            return finish(subjectImage, at: t, opacity: opacity, texts: texts, source: shown, body: body)
+            return finish(subjectImage, at: t, opacity: opacity, texts: texts, items: items, source: shown, body: body)
         } else {
             subjectImage = shaped(subjectImage, source: source)
         }
-        return finish(subjectImage, at: t, opacity: opacity, texts: texts, source: shown)
+        return finish(subjectImage, at: t, opacity: opacity, texts: texts, items: items, source: shown)
     }
 
     /// The masks showing at `t` applied to a frame as recorded (`cropRect` is the crop in its pixels): each
@@ -1300,7 +1403,7 @@ struct Framing {
     }
 
     /// The cut subject placed, zoomed and shadowed over the background, with the texts.
-    private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool, source: CIImage, body: BodyOnCanvas? = nil) -> CIImage {
+    private func finish(_ subjectImage: CIImage, at t: Double, opacity: Double, texts: Bool, items: Double, source: CIImage, body: BodyOnCanvas? = nil) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let minSide = min(canvas.width, canvas.height)
         // In 3D the subject is a slab drawn by SceneKit, at the pose's angle; the rest is the flat path's.
@@ -1314,7 +1417,7 @@ struct Framing {
             } ?? outline
             if let drawn = Stage3D.shared.render(face: subjectImage, rect: rect, outline: path, buttons: body?.buttons ?? [], canvas: canvas, three: three) {
                 let lift = min(1.5, (abs(a.tilt) + abs(a.turn.truncatingRemainder(dividingBy: 180))) / 90)
-                return place(drawn, shadowFrom: drawn, lift: lift, at: t, opacity: opacity, texts: texts, source: source)
+                return place(drawn, shadowFrom: drawn, lift: lift, at: t, opacity: opacity, texts: texts, items: items, source: source)
             }
         }
         // The subject and its shadow are one layer; placement and zoom move it over a still background.
@@ -1344,7 +1447,7 @@ struct Framing {
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
                 .concatenating(CGAffineTransform(translationX: mid.x, y: mid.y)))
         }
-        let ground = cover(look.background == "video" ? blurred(source) : background, after: "background", at: t)
+        let ground = underlay(cover(look.background == "video" ? blurred(source) : background, after: "background", at: t), at: items)
         let scene = layer.composited(over: ground).cropped(to: canvasRect)
         return texts ? overlay(scene, at: t) : scene
     }
@@ -1361,7 +1464,7 @@ struct Framing {
 
     /// A drawn subject (the 3D slab, transparent around it, the canvas's size) with a shadow
     /// from its own shape, placed and zoomed over the background, with the texts.
-    private func place(_ body: CIImage, shadowFrom shape: CIImage, lift: Double, at t: Double, opacity: Double, texts: Bool, source: CIImage) -> CIImage {
+    private func place(_ body: CIImage, shadowFrom shape: CIImage, lift: Double, at t: Double, opacity: Double, texts: Bool, items: Double, source: CIImage) -> CIImage {
         let canvasRect = CGRect(origin: .zero, size: canvas)
         let minSide = min(canvas.width, canvas.height)
         var layer = body
@@ -1389,7 +1492,7 @@ struct Framing {
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
                 .concatenating(CGAffineTransform(translationX: mid.x, y: mid.y)))
         }
-        let ground = cover(look.background == "video" ? blurred(source) : background, after: "background", at: t)
+        let ground = underlay(cover(look.background == "video" ? blurred(source) : background, after: "background", at: t), at: items)
         let scene = layer.composited(over: ground).cropped(to: canvasRect)
         return texts ? overlay(scene, at: t) : scene
     }
@@ -1398,13 +1501,13 @@ struct Framing {
     /// them: `Segment.scopes[i + 1]` covers `stack[0...i]` ("video", the first scope, is the video's own effect).
     /// `render` draws the background and the video, once for each frame a crossfade blends; `overlay` the rest, once.
     // @ref LLP 0003#the-stack — one list, each reach a cut in it; no reach is a special case
-    static let stack = ["background", "video", "images", "texts"]
+    static let stack = ["background", "behind", "video", "images", "texts"]
+    static let cuts = ["background": "background", "video": "scene", "images": "frame", "texts": "all"]
 
     /// `image`, the layers up to `layer` drawn on the canvas, under the blurs and black-and-whites whose reach
     /// is the cut after that layer, showing at `t`.
     func cover(_ image: CIImage, after layer: String, at t: Double) -> CIImage {
-        guard let i = Framing.stack.firstIndex(of: layer) else { return image }
-        let scope = Segment.scopes[i + 1]
+        guard let scope = Framing.cuts[layer] else { return image }
         var out = image
         let rect = CGRect(origin: .zero, size: canvas)
         for fx in edits.effects where fx.scope == scope {
@@ -1420,6 +1523,15 @@ struct Framing {
             }
         }
         return out
+    }
+
+    // @ref LLP 0003#the-stack — over the `background` cut, under the video, so `scene` covers them
+    func underlay(_ ground: CIImage, at t: Double) -> CIImage {
+        let under = edits.overlays(at: t, behind: true)
+        guard !under.isEmpty else { return ground }
+        var out = ground
+        for s in under { out = (s.kind == "image" ? renderImage(s, at: t) : renderText(s, at: t)).composited(over: out) }
+        return out.cropped(to: CGRect(origin: .zero, size: canvas))
     }
 
     /// The texts and images showing at `t`, over `scene`.
@@ -1738,16 +1850,16 @@ final class StudioCompositor: NSObject, AVVideoCompositing {
         let framing = ins.state.current
         let now = request.compositionTime.seconds
         var frames: [CIImage] = []
-        var last = 0.0
-        for layer in ins.layers {
-            guard let buffer = request.sourceFrame(byTrackID: layer.track) else { continue }
-            let p = layer.piece
-            let t = min(p.src1, p.src0 + max(0, now - p.out0) * p.rate)
+        let shown = ins.layers.compactMap { layer in request.sourceFrame(byTrackID: layer.track).map { (layer.piece, $0) } }
+        let time = { (p: TimeMap.Piece) in min(p.src1, p.src0 + max(0, now - p.out0) * p.rate) }
+        // @ref LLP 0003#the-stack
+        let last = shown.last.map { time($0.0) } ?? 0
+        for (p, buffer) in shown {
+            let t = time(p)
             var fade = 1.0
             if p.fadeIn > 0 { fade = min(fade, Ease.smooth((now - p.out0) / p.fadeIn)) }
             if p.fadeOut > 0 { fade = min(fade, Ease.smooth((p.out1 - now) / p.fadeOut)) }
-            frames.append(framing.render(CIImage(cvPixelBuffer: buffer), at: t, opacity: fade, texts: false))
-            last = t
+            frames.append(framing.render(CIImage(cvPixelBuffer: buffer), at: t, opacity: fade, texts: false, items: last))
         }
         var image = frames.first ?? CIImage(color: .black)
         if frames.count == 2, let next = ins.layers.last?.piece {

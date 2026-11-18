@@ -88,6 +88,11 @@ shape SegmentInfo
   volume: number
   fadeIn: number
   fadeOut: number
+  layer: string
+  canForward: bool
+  canBackward: bool
+  canFront: bool
+  canBack: bool
 
 shape Summary
   parts: number
@@ -344,6 +349,9 @@ component ExactStudio
     send edited = editClip(selected, "set", "", 0, k)
   action editDo(what: string)
     send edited = editClip(selected, what, "", 0, "")
+  // @ref LLP 0002#depth
+  action arrange(step: string)
+    send edited = editClip(selected, "arrange", step, 0, "")
   action zoomTimeline(how: string)
     send edited = editClip(selected, "timeline", how, 0, "")
   action toggleLeft
@@ -494,7 +502,7 @@ component ExactStudio
             scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
               if cardLeft
                 column padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box"
-                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
+                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, arrange=arrange)
               else
                 column gap=30 padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
                   if status.recording
@@ -659,14 +667,14 @@ component ExactStudio
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
                       scroll width="24rem" max-height="85%" pointer-events="auto" border-radius=16 box-shadow="0px 18px 60px #00000080" background-color="-exact-secondary-background"
                         column padding=12
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, arrange=arrange)
                   if sel.id != "" and panelMode == "float"
                     column position="absolute" left=floatX top=floatY width="24rem" max-height=floatRoom resize=floatSized border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0
                         column padding=12 padding-top=4
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, arrange=arrange)
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
@@ -677,7 +685,7 @@ component ExactStudio
                       image "symbol:alert" color="-exact-system-orange" aria-hidden=true
                       text sel.problem font="-exact-footnote" flex=1
                   if sel.id != "" and panelMode == "dock"
-                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut)
+                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, arrange=arrange)
                   row align-items="center" gap=8 margin-bottom=-14
                     text "Frame" font="-exact-headline" flex=1 testId="inspector-title"
                     // @ref LLP 0005#calm-by-default
@@ -700,6 +708,19 @@ component ExactStudio
                       text "Clear Edits…"
                     button press=askRemove(selected) -exact-menu="file" aria-label="Delete Recording…" testId="menu-delete"
                       text "Delete Recording…"
+                    // @ref LLP 0005#depth — Exact adds no menu of its own, so the arrange commands sit in Edit
+                    button press=arrange("forward") -exact-menu="edit" disabled=(not sel.canForward) aria-label="Bring Forward" testId="menu-arrange-forward"
+                      text "Bring Forward"
+                    button press=arrange("backward") -exact-menu="edit" disabled=(not sel.canBackward) aria-label="Send Backward" testId="menu-arrange-backward"
+                      text "Send Backward"
+                    button press=arrange("front") -exact-menu="edit" disabled=(not sel.canFront) aria-label="Bring to Front" testId="menu-arrange-front"
+                      text "Bring to Front"
+                    button press=arrange("back") -exact-menu="edit" disabled=(not sel.canBack) aria-label="Send to Back" testId="menu-arrange-back"
+                      text "Send to Back"
+                    button press=arrange("behind") -exact-menu="edit" disabled=(sel.layer != "front") aria-label="Send Behind Video" testId="menu-arrange-behind"
+                      text "Send Behind Video"
+                    button press=arrange("in-front") -exact-menu="edit" disabled=(sel.layer != "behind") aria-label="Bring In Front of Video" testId="menu-arrange-in-front"
+                      text "Bring In Front of Video"
                   column gap=16
                     button press=toggleSection("bg") appearance="none" aria-expanded=openBg testId="sec-bg" padding-top=2 padding-bottom=2
                       row align-items="center" gap=6 flex=1
@@ -931,9 +952,15 @@ component SettingsCard
     threeNumber: action
     fieldIn: action
     fieldOut: action
+    arrange: action
   derive reaches = ["video", "background", "scene", "frame", "all"]
   action placeReach(n: number)
     segField("scope", nth(reaches, n))
+  action placeDepth(n: number)
+    if n >= 3 and sel.layer == "behind"
+      arrange("in-front")
+    if n < 3 and sel.layer == "front"
+      arrange("behind")
   view
     column gap=18 padding=20 border-radius=16 background-color="-exact-tertiary-background" testId="segment"
       row align-items="center" gap=8
@@ -946,6 +973,20 @@ component SettingsCard
           for m in ["dock", "float", "overlay", "left"] key=m
             button press=setPanel(m) popovertarget="panel-place" popovertargetaction="hide" role="menuitemradio" aria-checked=(mode == m) testId=`panel-${m}`
               text panelLabel(m)
+          // @ref LLP 0005#depth
+          if sel.layer != ""
+            hr
+            button press=arrange("forward") disabled=(not sel.canForward) popovertarget="panel-place" popovertargetaction="hide" testId="arrange-forward"
+              text "Bring Forward"
+            button press=arrange("backward") disabled=(not sel.canBackward) popovertarget="panel-place" popovertargetaction="hide" testId="arrange-backward"
+              text "Send Backward"
+            button press=arrange("front") disabled=(not sel.canFront) popovertarget="panel-place" popovertargetaction="hide" testId="arrange-front"
+              text "Bring to Front"
+            button press=arrange("back") disabled=(not sel.canBack) popovertarget="panel-place" popovertargetaction="hide" testId="arrange-back"
+              text "Send to Back"
+            hr
+            button press=arrange(sel.layer == "behind" ? "in-front" : "behind") popovertarget="panel-place" popovertargetaction="hide" testId="arrange-video"
+              text (sel.layer == "behind" ? "Bring In Front of Video" : "Send Behind Video")
       if sel.kind != "recorded"
         row gap=8
           column gap=4 flex=1 min-width=0
@@ -1179,6 +1220,12 @@ component SettingsCard
             option "None" value="none"
         text "Drag the image in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
         text "To animate it or add an effect to it, use the + on its Position and Effects rows in the timeline." font="-exact-caption1" color="-exact-tertiary-label"
+      // @ref LLP 0005#depth — the Applies-to stack again, with this item as the line
+      if sel.layer != ""
+        column gap=10 testId="depth"
+          text "DEPTH" font="-exact-caption1" font-weight=600 color="-exact-secondary-label" letter-spacing=0.6
+          LayerStack(rows=["Texts", "Images", "Video", "Behind the video", "Background"], symbols=["symbol:sf/textformat", "symbol:sf/photo", "symbol:sf/film", "symbol:sf/square.3.layers.3d.bottom.filled", "symbol:sf/rectangle.inset.filled"], cut=(sel.layer == "behind" ? 2 : sel.kind == "text" ? 5 : 4), least=2, lit=-1, label=(sel.kind == "text" ? "This text" : "This image"), over="", under="", place=placeDepth, tag="depth")
+          text (sel.layer == "behind" ? "Behind the video: it shows around it, and where the video moves, shrinks or turns away." : "In front of the video. Drag the line under Video, or click Behind the video.") font="-exact-caption1" color="-exact-tertiary-label" testId="depth-hint"
       if sel.kind == "imove"
         text `A move of ${sel.file}. Drag the image in the preview to set where it lands; scroll over it to set its size there.` font="-exact-caption1" color="-exact-tertiary-label"
         row align-items="center" gap=8

@@ -174,6 +174,9 @@ Use the smallest tool that makes the point. In order of preference:
 5. **A move** (`base` → another place) to change sides between chapters, with `smooth` or `spring`.
    `swipe`, `spin`, `pop`, `zoom` moves are loud: one per video at most, at a chapter change.
 6. **An image** (a logo the owner gave, small in a corner, 0.08–0.12) only in the open or the close.
+7. **Behind the video** (`"layer": "behind"`): a logo or a title the video uncovers as it moves aside or
+   shrinks, in the open or the close, with one calm move (`smooth`, ~1.5 s). It reads as a reveal, so
+   once per video at most. Never behind a key point or a line that must be read: the video hides part of it.
 
 Never: effects on dead time, an effect for its own sake, two emphasis tools fighting for the same
 moment (a zoom plus a spotlight plus a moving text), `mono` or `blur` on a key point, a `loop`

@@ -78,6 +78,10 @@ Rules that keep an edit looking good:
   than the video, give a `blur` or `mono` segment a `scope`: the cut in the stack background, video, images, texts. `"background"`
   covers the background only, `"scene"` the background and the video, `"frame"` the images too (texts stay sharp), `"all"`
   everything. To blur one image or one text alone, use its own `effects`. `docs/edits.md` has the table of which lanes each kind uses.
+- A text or an image can sit behind the video: `"layer": "behind"`. It is drawn on the background and
+  shows only where the video is not, so it needs a move (`moves`, or a smaller `base`) that uncovers it;
+  check `frame` before and after that move. `order` (higher in front) stacks items of one kind in one
+  layer. A `background` reach stays under it; `scene` and above cover it. `docs/edits.md` ("Depth").
 - For music or a sound effect, run `./exact-studio sound <id> <audio file> --at <t> [--for <seconds>]`:
   it copies the file into `sounds/` and prints the new entry in `sounds`. An added sound is not cut
   by the video's cuts or speed changes: it starts at recording time `start` and plays straight
