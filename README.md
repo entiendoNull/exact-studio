@@ -64,9 +64,9 @@ To update, run `git pull` in both folders and run the last command again.
 - **Text:** styled texts with entrance, exit and loop animations.
 - **Masks:** hide an API key, an email or a name with a blur, big pixels or a solid box. A mask is placed on the full recorded frame (before the crop), so it stays on that part of the recording when the crop changes or the video zooms, moves or turns in 3D. It never fades.
 - **Images:** put a logo, a badge or any picture on the video. Each image has its own moves and its own effects.
-- **Image lanes:** images that follow one another share a lane. Images that show at the same time go on separate lanes; the top lane is in front.
-- **Rows by kind:** effects for the video, texts, images, sounds, and effects for the whole frame each have their own rows. Each row has a + that adds its own kind of thing at the playhead.
-- **A tidy timeline:** every group folds away, and the rows have three heights to pick from.
+- **A timeline that grows with the edit:** a new recording shows the Clip alone. + Add puts a text, an image, a zoom, an effect, a move or music at the playhead, and a row appears for it; an empty row goes away. A second row of a kind appears only while two of its items overlap.
+- **Rows as layers:** the text and image rows are the stack, front to back, with the Video among them. Drag a row by its label to put it in front or behind, the video too.
+- **A tidy timeline:** the Video folds its Moves and Effects rows away, and the rows have three heights to pick from.
 - **Zoom the timeline:** with the mouse wheel, a pinch, or the − and + buttons; Fit shows it all again. A trackpad scrolls instead, and a switch turns wheel zoom off.
 - **Templates:** Clean Demo, Hero Angle, Before / After, Feature Spotlight, Social Hook, Tutorial Steps and Product Launch. Each fits the recording's length, clicks and frame shape. A template never writes a claim: its lines are [bracketed] placeholders, and export refuses them until you write them.
 - **Zoom on clicks:** adds a zoom around each group of clicks.
