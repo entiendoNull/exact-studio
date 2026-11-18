@@ -16,7 +16,7 @@
 //          {op: "recordings"}                   → {items: [{id, name, kind, created, duration}]}
 //          {op: "edit", id, do, track?, number?, kind?}  → {ok}
 //                 do: add (track: a kind, or zoom-in, zoom-out, slow, fast), set (number | kind),
-//                     delete, split, auto, clear, play, split-clip, remove, join-prev, join-next,
+//                     delete, split (the selection, else the clip), split-all, auto, clear, play, split-clip, remove, join-prev, join-next,
 //                     add-lane, start / end (kind: the typed time)
 //          {op: "export", id, quality, to}      → {ok, error, path, copied}  quality best|1080p|720p|small; to movies|choose|clipboard
 //          {op: "delete", id}                   → {ok, error}
@@ -88,9 +88,10 @@ final class Studio: ExactModule {
     required init(context: ExactModuleContext) {
         super.init(context: context)
         keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-            guard let self, e.keyCode == 49, e.modifierFlags.intersection([.command, .option, .control]).isEmpty,
+            guard let self, e.keyCode == 49 || e.keyCode == 1, e.modifierFlags.intersection([.command, .option, .control]).isEmpty,
                   !(NSApp.keyWindow?.firstResponder is NSText), let editor = self.editors[self.active] else { return e }
-            editor.togglePlay()
+            // @ref LLP 0005#split — S splits the selection, ⇧S every lane
+            if e.keyCode == 1 { e.modifierFlags.contains(.shift) ? editor.splitAll() : editor.split() } else { editor.togglePlay() }
             return nil
         }
         if context.agent {
@@ -136,6 +137,7 @@ final class Studio: ExactModule {
         "device": false, "found": false, "cursorDrawn": false, "baseScale": 100, "undoName": "", "redoName": "",
         "threeOn": false, "tilt": 0, "turn": 0, "roll": 0, "angleMove": "", "thickness": 5, "edge": "metal",
         "zoomed": false, "wheelZoom": true,
+        "splitLabel": "Split Clip", "canSplit": false, "splitWhy": "", "canSplitAll": false, "splitAllWhy": "",
     ]
 
     override func call(_ request: [String: Any]) throws -> [String: Any] {
@@ -279,7 +281,8 @@ final class Studio: ExactModule {
             }
         case "set": e.setValue(number: r["number"] as? Double, kind: r["kind"] as? String)
         case "delete": e.deleteSelected()
-        case "split": e.splitSelected()
+        case "split": e.split()
+        case "split-all": e.splitAll()
         case "auto": e.autoZoom()
         case "clear": e.clearAll()
         case "play": e.togglePlay()

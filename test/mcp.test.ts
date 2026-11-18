@@ -62,7 +62,7 @@ test('tools/list offers every tool, each with a schema', async () => {
   expect(result.tools.map((t: any) => t.name)).toEqual([
     'list_sources', 'start_recording', 'recording_status', 'stop_recording', 'list_recordings', 'show_recording',
     'read_edits', 'write_edits', 'write_look', 'validate_recording', 'render_frame', 'export_video', 'apply_template',
-    'add_image', 'add_sound', 'add_mask', 'edit_format', 'directing_guide', 'feedback_guide',
+    'add_image', 'add_sound', 'add_mask', 'split', 'edit_format', 'directing_guide', 'feedback_guide',
   ]);
   for (const t of result.tools) expect(t.inputSchema.type).toBe('object');
 });
@@ -83,6 +83,18 @@ test('write_edits keeps a valid edit and refuses a clash, leaving the file as it
   expect(refused.isError).toBe(true);
   expect(refused.content[0].text).toContain('Two zooms can’t overlap.');
   expect(readFileSync(file, 'utf8')).toBe(kept);
+});
+
+test('split cuts a zoom into joined halves, and Split All Lanes cuts every lane', async () => {
+  const zoom = { id: 'z', kind: 'zoom', start: 1, end: 3, lane: 0, level: 2 };
+  await tool('write_edits', { id: 'empty', edits: { segments: [zoom] } });
+  const one = await tool('split', { id: 'empty', at: 2, item: 'z' });
+  expect(one).toEqual({ content: [{ type: 'text', text: 'split z of empty at 0:02.00 (edits.json): z → z-2, joined' }], isError: false });
+  const all = await tool('split', { id: 'empty', at: 2.5, all: true });
+  expect(all.content[0].text).toBe('split all lanes of empty at 0:02.50 (edits.json):\n  clip\n  zoom z-2 → z-3');
+  const edits = JSON.parse(readFileSync(join(lib, 'empty/edits.json'), 'utf8'));
+  expect(edits.segments.map((s: any) => [s.id, s.joinStart ?? false, s.joinEnd ?? false])).toEqual([['z', false, true], ['z-2', true, true], ['z-3', true, false]]);
+  expect((await tool('split', { id: 'empty', at: 1.02, item: 'z' })).isError).toBe(true);
 });
 
 test('a file that can\'t be read: read_edits shows it, the other tools refuse it, write_edits repairs it', async () => {

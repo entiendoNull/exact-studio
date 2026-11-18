@@ -107,6 +107,9 @@ Write every on-screen line before placing any. Read them in a row: they should t
   or nothing.
 - **Texts are one line.** The renderer draws a text on a single line with no wrapping. A second line
   is a second text segment on another text lane.
+- **A line that changes in place** (a counter, a word swapped for a better one) is one text split
+  with `./exact-studio split <id> <t> <text id>`: the halves join, so the new words appear with no
+  exit and entrance between them. Change the second half's `text` only.
 
 Line count: one per key point, plus an optional title and an optional close. Silence is fine; a
 stretch without text lets the product speak.

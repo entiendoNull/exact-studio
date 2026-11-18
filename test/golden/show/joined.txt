@@ -1,0 +1,19 @@
+Joined halves  (display, joined)
+recorded 0:10.00, plays as 0:10.00; 2 clicks; folder <library>/joined
+look: ocean background, 16:9, padding 8%, 3D off
+clip parts:
+  0:00.00–0:03.50
+  0:03.50–0:10.00
+segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane (0 in front), f a whole-frame lane):
+  e0: 0:01.00–0:03.50  zoom 1.8×  [z]  joined before z-2
+  e0: 0:03.50–0:04.00  zoom 1.8×  [z-2]  joined after z
+  t0: 0:01.00–0:03.50  text “Keep going” pill in:letters out:fade  [t]  joined before t-2
+  t0: 0:03.50–0:06.00  text “Keep going” pill in:letters out:fade  [t-2]  joined after t
+  i0: 0:02.00–0:03.50  image images/logo.png at x 0.2 y 0.8 size 0.2 in:fade out:fade  [i]  joined before i-2
+        effect pulse 0:03.00–0:03.50  [p]  joined before p-2
+  i0: 0:03.50–0:08.00  image images/logo.png at x 0.2 y 0.8 size 0.2 in:fade out:fade  [i-2]  joined after i
+        move lands 0:05.00 after 0.8s smooth: x 0.8 y 0.8 scale 1.0  [m]
+        effect pulse 0:03.50–0:06.00  [p-2]  joined after p
+sounds (added over the video; each plays straight through from its start, not cut by the cuts):
+  s0: from 0:03.00 for 0.5s (video 0:03.00–0:03.50)  sounds/beep.wav from 0.0s  volume 1.0 fade in 0.1s out 0.3s  [s]  joined before s-2
+  s0: from 0:03.50 for 0.3s (video 0:03.50–0:03.80)  sounds/beep.wav from 0.5s  volume 1.0 fade in 0.1s out 0.3s  [s-2]  joined after s

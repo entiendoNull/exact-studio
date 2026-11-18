@@ -104,6 +104,7 @@ enum Pictures {
 extension Framing {
     /// Where an image is at `t`: its centre, and `scale` times its `size`. Its moves work as the video's do.
     func imagePose(_ s: Segment, at t: Double) -> Pose {
+        let s = whole(s)
         var from = Placement(x: s.x ?? 0.5, y: s.y ?? 0.5, scale: 1)
         let moves = (s.moves ?? []).sorted { $0.t < $1.t }
         guard !moves.isEmpty else { return Pose(x: from.x, y: from.y, scale: 1) }
@@ -122,6 +123,7 @@ extension Framing {
     func renderImage(_ s: Segment, at t: Double) -> CIImage {
         guard let art = Pictures.image(s.file, in: folder) else { return .empty() }
         let pose = imagePose(s, at: t)
+        let s = whole(s)
         let h = max(0.005, (s.size ?? 0.25) * pose.scale) * canvas.height, k = h / art.extent.height, w = art.extent.width * k
         let box = CGRect(x: -w / 2, y: -h / 2, width: w, height: h)
         // Lanczos keeps a large picture sharp when it is drawn small.
@@ -144,10 +146,12 @@ extension Framing {
         let since = t - s.start, until = s.end - t
 
         // Its own effects, each easing in and out over its span.
-        for fx in s.effects ?? [] {
-            let a = presence(fx, at: t, ramp: 0.3)
+        let effects = s.effects ?? []
+        for fx in effects {
+            let w = Joins.whole(fx, run: Joins.run(fx, in: effects))
+            let a = Joins.presence(fx, whole: w, at: t, ramp: 0.3)
             guard a > 0.001 else { continue }
-            let run = t - fx.start
+            let run = t - w.start
             switch fx.kind {
             case "blur": blur = max(blur, h * 0.06 * a)
             case "mono": grey = max(grey, a)

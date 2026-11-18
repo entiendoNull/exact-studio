@@ -28,6 +28,8 @@ JSON Schemas: [`schema/edits.schema.json`](../schema/edits.schema.json), [`schem
 ./exact-studio frame latest 2 --raw                   # .exact/frame.png: the full recorded frame, to measure a mask on
 ./exact-studio mask latest --rect 0.1,0.2,0.3,0.05 --at 2 --for 6   # hide that part; prints the new segment
 # …edit edits.json / look.json…
+./exact-studio split latest 4.2 t1                    # cut text t1 at 4.2 s into two joined halves
+./exact-studio split latest 4.2 --all                 # Split All Lanes: the clip and every block at 4.2 s
 ./exact-studio validate latest           # exit 1 with one line per problem
 ./exact-studio frame latest 4.5          # .exact/frame.png: the frame at 4.5 s of the video
 ./exact-studio export latest             # ~/Movies/Exact Studio/<name> <id>.mp4
@@ -145,6 +147,36 @@ shown (`none`, `wave`, `pulse`, `float`, `wiggle`); `rotation` (degrees).
 
 Keep a text clear of the video: put it beside the video when the frame is wide, above or below it
 when tall, and not where a zoom pulls the video under it.
+
+### Splits and joins: `joinStart`, `joinEnd`
+
+A split cuts a block in two so each half can be changed on its own. **It never changes the video.**
+The halves are marked: the first gets `"joinEnd": true`, the second `"joinStart": true`, and the
+second gets a fresh id (`z1` → `z1-2`). Segments, an image's own effects and sounds take the two
+keys; a missing key is not joined.
+
+```sh
+./exact-studio split <id> <t>                 # the clip, at <t> seconds of the recording
+./exact-studio split <id> <t> <item>          # a segment or a sound by id; an image's effect as <image>:<effect>
+./exact-studio split <id> <t> --all           # the clip and every block under <t>; moves are never cut
+```
+
+Each half must last at least 0.1 s. Two blocks are joined while both say so, they are the same
+`kind` on the same `lane`, and the second starts where the first ends (a sound: the same `file`,
+starting where the first stops in the video). Then they draw as one:
+
+- Nothing eases where they meet: a zoom stays in, a blur stays on, a 3D turn stays turned.
+- A text has no exit and no entrance there, and its loop keeps its phase. Change the second half's
+  `text` to swap the words in place.
+- An image's halves share their `moves` and `effects`: each lands in or covers its own time, and the
+  run plays them all as one image. An effect that crosses the cut is split and joined too.
+- A sound's second half plays on from the same moment of its file: its `offset` is the first's
+  `offset` + `length`. It fades in at the first half's start and out at the last half's end.
+- Each half keeps its own settings, so a changed level, colour or volume shows from the cut on.
+
+Move a half away, resize it so they no longer touch, or put it on another lane, and the join is
+gone: the app drops both keys, and each half eases and animates on its own again. `validate`
+reports a key without its partner.
 
 ### Images
 
@@ -269,7 +301,7 @@ cuts. `show` prints when each sound plays in video time.
 folder, in `sounds/`: M4A, MP3, WAV, AIFF, AAC or CAF); `lane` (0 up, below `soundLanes`); `start`
 (seconds of the recording); `length` (seconds of the file that play, above 0); `offset` (where in
 the file it starts, default 0; `offset` + `length` must fit in the file); `volume` (0–1, default 1);
-`fadeIn`, `fadeOut` (seconds, default 0). Two sounds on one lane must not play at the same time; put
+`fadeIn`, `fadeOut` (seconds, default 0); `joinStart`, `joinEnd` (see [Splits and joins](#splits-and-joins-joinstart-joinend)). Two sounds on one lane must not play at the same time; put
 one on another lane (`soundLanes` counts them). Sounds on separate lanes mix with each other and
 with the recorded sound.
 

@@ -472,9 +472,12 @@ final class Editor {
     /// Land `next` if every segment in it may sit where it is; else keep the
     /// edits as they were and say why.
     @discardableResult
-    private func apply(_ next: Edits) -> Bool {
+    private func apply(_ proposed: Edits) -> Bool {
         if let why = unreadable["edits.json"] { refuse(why); return false }
+        var next = proposed
         let nextMap = TimeMap(duration: duration, edits: next)
+        // @ref LLP 0002#split — a half moved or resized away from the other is no longer joined
+        next.dropLooseJoins(map: nextMap)
         if let why = next.segments.lazy.compactMap({ next.conflict($0) }).first ?? next.sounds.lazy.compactMap({ next.conflict($0, map: nextMap) }).first {
             refuse(why)
             return false
@@ -518,12 +521,9 @@ final class Editor {
     /// Split the clip at the playhead. A split inside a removed part leaves both halves removed.
     func splitClip() {
         let t = playhead
-        guard t > 0.05, t < duration - 0.05 else { return refuse("Move the playhead into the clip to split it.") }
-        guard !edits.splits.contains(where: { abs($0 - t) < 0.05 }) else { return refuse("The clip is already split there.") }
         var next = edits
-        if let p = pieces.first(where: { t > $0.start && t < $0.end }), p.removed { next.removed.append(t) }
-        next.splits = (next.splits + [t]).sorted()
-        apply(next)
+        do { try next.splitClip(at: t, duration: duration) } catch { return refuse((error as? SplitRefused)?.why ?? "") }
+        named("Split Clip") { apply(next) }
         if let p = edits.pieces(duration).first(where: { Edits.same($0.start, t) }) { select(p.id) }
     }
 
@@ -843,7 +843,7 @@ final class Editor {
     private func imageTarget(_ image: Segment, at t: Double) -> ImageTarget {
         let moves = image.moves ?? []
         if let i = moves.firstIndex(where: { $0.id == "live" }) { return .move(i) }
-        if let sel = selectedImageMove, sel.image.id == image.id, abs(sel.move.t - t) < 0.2, let i = moves.firstIndex(where: { $0.id == sel.move.id }) { return .move(i) }
+        if let sel = selectedImageMove, moves.contains(where: { $0.id == sel.move.id }), abs(sel.move.t - t) < 0.2, let i = moves.firstIndex(where: { $0.id == sel.move.id }) { return .move(i) }
         if let i = moves.firstIndex(where: { abs($0.t - t) < 0.12 }) { return .move(i) }
         if moves.isEmpty || t <= (moves.map { $0.t - $0.duration }.min() ?? 0) { return .base }
         return .new
@@ -851,32 +851,41 @@ final class Editor {
 
     /// Put an image at (x, y), and scale it by `factor`. `live` draws it without saving (a drag); the drop saves.
     func placeImage(_ id: String, x: Double? = nil, y: Double? = nil, factor: Double = 1, live: Bool) {
-        guard var image = edits.segments.first(where: { $0.id == id && $0.kind == "image" }) else { return }
+        guard let image = edits.segments.first(where: { $0.id == id && $0.kind == "image" }) else { return }
         let t = playhead, now = framing.imagePose(image, at: t)
         let x = min(max(x ?? now.x, 0), 1), y = min(max(y ?? now.y, 0), 1)
-        var moves = image.moves ?? []
-        switch imageTarget(image, at: t) {
+        // @ref LLP 0002#split — joined halves of an image share one place and one set of moves
+        let run = Joins.run(image, in: edits.segments), whole = Joins.whole(image, run: run)
+        var members = run
+        func owner(_ move: String) -> Int { members.firstIndex { ($0.moves ?? []).contains { $0.id == move } } ?? 0 }
+        func change(_ move: String, _ body: (inout Move) -> Void) {
+            let i = owner(move)
+            members[i].moves = members[i].moves?.map { var m = $0; if m.id == move { body(&m) }; return m }
+        }
+        switch imageTarget(whole, at: t) {
         case .base:
-            image.x = x; image.y = y
-            image.size = min(max((image.size ?? 0.25) * factor, 0.02), 1.5)
+            for i in members.indices {
+                members[i].x = x; members[i].y = y
+                members[i].size = min(max((members[i].size ?? 0.25) * factor, 0.02), 1.5)
+            }
         case let .move(i):
-            moves[i].to = Placement(x: x, y: y, scale: min(max(moves[i].to.scale * factor, 0.1), 8))
+            change(whole.moves![i].id) { $0.to = Placement(x: x, y: y, scale: min(max($0.to.scale * factor, 0.1), 8)) }
         case .new:
-            moves.append(Move(id: "live", t: t, to: Placement(x: x, y: y, scale: min(max(now.scale * factor, 0.1), 8)),
-                              style: lastStyle == "zoom" ? "smooth" : lastStyle, duration: min(lastDuration, max(0.05, t - image.start))))
+            let i = members.firstIndex { $0.id == id } ?? 0
+            members[i].moves = (members[i].moves ?? []) + [Move(id: "live", t: t, to: Placement(x: x, y: y, scale: min(max(now.scale * factor, 0.1), 8)),
+                                                               style: lastStyle == "zoom" ? "smooth" : lastStyle, duration: min(lastDuration, max(0.05, t - whole.start)))]
         }
-        var made: String?
-        if !live, let i = moves.firstIndex(where: { $0.id == "live" }) {
-            // The drop: the move this drag was showing becomes a real one.
-            moves[i].id = Editor.newID("m")
-            made = moves[i].id
+        var made: (image: String, move: String)?
+        if !live, members.contains(where: { ($0.moves ?? []).contains { $0.id == "live" } }) {
+            let fresh = Editor.newID("m"), i = owner("live")
+            change("live") { $0.id = fresh }
+            made = (members[i].id, fresh)
         }
-        image.moves = moves.isEmpty ? nil : moves
         var next = edits
-        next.segments = next.segments.map { $0.id == id ? image : $0 }
+        next.segments = next.segments.map { s in members.first { $0.id == s.id } ?? s }
         if live { edits = next; redraw() } else {
             apply(next)
-            if let made { select(Editor.childID("im", image: id, made)) }
+            if let made { select(Editor.childID("im", image: made.image, made.move)) }
         }
     }
 
@@ -1224,26 +1233,63 @@ final class Editor {
         select("")
     }
 
-    /// Split the selected effect in two at the playhead.
-    func splitSelected() {
-        let t = playhead
-        guard let s = selectedSegment, t > s.start + 0.1, t < s.end - 0.1 else { return }
-        var left = s, right = s
-        left.end = t
-        right.id = s.id + "b"
-        right.start = t
-        if s.kind == "image" {
-            // The second half starts where the first is at the cut, and each keeps what falls in its time.
-            let p = framing.imagePose(s, at: t)
-            right.x = p.x; right.y = p.y; right.size = (s.size ?? 0.25) * p.scale
-            let scale = max(p.scale, 0.001)
-            right.moves = s.moves?.filter { $0.t > t }.map { var m = $0; m.to.scale /= scale; return m }
-            left.moves = s.moves?.filter { $0.t <= t }
-            left = Editor.tidy(left); right = Editor.tidy(right)
+    // @ref LLP 0002#split
+    private enum SplitTarget { case clip, segment(Segment), imageEffect(Segment, Segment), sound(Sound) }
+
+    private var splitTarget: SplitTarget {
+        if let s = selectedSegment { return .segment(s) }
+        if let (image, fx) = selectedImageEffect { return .imageEffect(image, fx) }
+        if let s = selectedSound { return .sound(s) }
+        return .clip
+    }
+
+    var splitLabel: String {
+        switch splitTarget {
+        case .clip: return "Split Clip"
+        case let .segment(s): return "Split " + History.kindName(s.kind)
+        case .imageEffect: return "Split Image Effect"
+        case .sound: return "Split Sound"
         }
+    }
+
+    private func splitting(at t: Double) -> Result<(Edits, String?), SplitRefused> {
         var next = edits
-        next.segments = next.segments.map { $0.id == s.id ? left : $0 } + [right]
-        apply(next)
+        do {
+            let made: String?
+            switch splitTarget {
+            case .clip: try next.splitClip(at: t, duration: duration); made = nil
+            case let .segment(s): made = try next.splitSegment(s.id, at: t)
+            case let .imageEffect(image, fx): made = Editor.childID("ie", image: image.id, try next.splitImageEffect(image: image.id, effect: fx.id, at: t))
+            case let .sound(s): made = Editor.soundID(try next.splitSound(s.id, at: t, map: map))
+            }
+            return .success((next, made))
+        } catch { return .failure(error as? SplitRefused ?? SplitRefused(why: "")) }
+    }
+
+    var splitProblem: String {
+        if case let .failure(why) = splitting(at: playhead) { return why.why }
+        return ""
+    }
+
+    var splitAllProblem: String {
+        var next = edits
+        do { try next.splitAll(at: playhead, duration: duration, map: map); return "" } catch { return (error as? SplitRefused)?.why ?? "" }
+    }
+
+    func split() {
+        if case .clip = splitTarget { return splitClip() }
+        switch splitting(at: playhead) {
+        case let .failure(why): refuse(why.why)
+        case let .success((next, made)):
+            let landed = named(splitLabel) { apply(next) }
+            if landed, let made { select(made) }
+        }
+    }
+
+    func splitAll() {
+        var next = edits
+        do { try next.splitAll(at: playhead, duration: duration, map: map) } catch { return refuse((error as? SplitRefused)?.why ?? "") }
+        named("Split All Lanes") { apply(next) }
     }
 
     func autoZoom() {
@@ -1751,7 +1797,9 @@ final class Editor {
                 "tilt": angleTarget.tilt.rounded(), "turn": angleTarget.turn.rounded(), "roll": angleTarget.roll.rounded(),
                 "angleMove": (selectedMove ?? angleMove).map { Editor.stamp($0.t) } ?? "",
                 "thickness": (edits.three.thickness * 1000).rounded() / 10, "edge": edits.three.edge,
-                "zoomed": zoomed, "wheelZoom": wheelZoom]
+                "zoomed": zoomed, "wheelZoom": wheelZoom,
+                "splitLabel": splitLabel, "canSplit": splitProblem.isEmpty, "splitWhy": splitProblem,
+                "canSplitAll": splitAllProblem.isEmpty, "splitAllWhy": splitAllProblem]
     }
 }
 

@@ -122,6 +122,9 @@ struct Segment: Codable, Equatable {
     /// top-left. So a later crop never moves it off what it hides.
     // @ref LLP 0006#follows-the-video — full-frame units, not the crop's
     var rect: UnitRect?
+    // @ref LLP 0002#split
+    var joinStart: Bool?
+    var joinEnd: Bool?
 
     static let visual = ["spotlight", "highlight", "blur", "mono"]
     static let kinds = ["zoom", "speed", "text", "image", "3d", "mask"] + visual
@@ -201,6 +204,8 @@ extension Segment {
         moves = try c.decodeIfPresent([Move].self, forKey: .moves)
         effects = try c.decodeIfPresent([Segment].self, forKey: .effects)
         rect = try c.decodeIfPresent(UnitRect.self, forKey: .rect)
+        joinStart = try c.decodeIfPresent(Bool.self, forKey: .joinStart)
+        joinEnd = try c.decodeIfPresent(Bool.self, forKey: .joinEnd)
     }
 }
 
@@ -275,6 +280,9 @@ struct Sound: Codable, Equatable {
     var volume = 1.0
     var fadeIn = 0.0
     var fadeOut = 0.0
+    // @ref LLP 0002#split
+    var joinStart: Bool?
+    var joinEnd: Bool?
 
     init(id: String, file: String, lane: Int = 0, start: Double, length: Double, offset: Double = 0, volume: Double = 1, fadeIn: Double = 0, fadeOut: Double = 0) {
         self.id = id; self.file = file; self.lane = lane; self.start = start; self.length = length
@@ -292,6 +300,8 @@ struct Sound: Codable, Equatable {
         volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1
         fadeIn = try c.decodeIfPresent(Double.self, forKey: .fadeIn) ?? 0
         fadeOut = try c.decodeIfPresent(Double.self, forKey: .fadeOut) ?? 0
+        joinStart = try c.decodeIfPresent(Bool.self, forKey: .joinStart)
+        joinEnd = try c.decodeIfPresent(Bool.self, forKey: .joinEnd)
     }
 
     /// When it plays, in seconds of the video: from where its start lands (the next kept moment,
@@ -851,6 +861,8 @@ struct Framing {
     /// The device's silhouette, when the recording has one, and the body read from it.
     private let silhouette: CIImage?
     private let deviceBody: Bezel.Body?
+    // @ref LLP 0002#split
+    private let runs: [String: [Segment]]
 
     init(meta: RecordingMeta, look: Look, edits: Edits, cursor: [Point], folder: URL? = nil) {
         self.meta = meta
@@ -883,6 +895,16 @@ struct Framing {
         releases = (meta.releases ?? []).map(\.t).sorted()
         background = Backgrounds.image(Backgrounds.gradient(look), size: canvas)
         moves = edits.moves.sorted { $0.t < $1.t }
+        runs = Joins.runs(edits.segments)
+    }
+
+    func whole(_ s: Segment) -> Segment { runs[s.id].map { Joins.whole(s, run: $0) } ?? s }
+
+    func eased(_ s: Segment, at t: Double, ramp: Double) -> Double { Joins.presence(s, whole: whole(s), at: t, ramp: ramp) }
+
+    func joined(_ s: Segment) -> (start: Bool, end: Bool) {
+        guard let r = runs[s.id] else { return (false, false) }
+        return (r.first?.id != s.id, r.last?.id != s.id)
     }
 
     /// A point in the subject's unit coordinates, on the canvas at the subject's base place.
@@ -900,12 +922,13 @@ struct Framing {
         var p = movedPose(at: t)
         // A 3D turn: the angle eases to the turn's pose and back over its span.
         for seg in edits.turns {
-            let a = presence(seg, at: t, ramp: min(0.7, (seg.end - seg.start) / 3))
+            let w = whole(seg)
+            let a = Joins.presence(seg, whole: w, at: t, ramp: min(0.7, (w.end - w.start) / 3))
             guard a > 0.0005 else { continue }
             var target = Angles(tilt: seg.tilt ?? 10, turn: seg.turn ?? -24, roll: seg.roll ?? 0)
             if seg.style == "orbit" {
                 // One full turn about the vertical across the span, the pose's tilt held.
-                let u = Ease.inOut((t - seg.start) / max(seg.end - seg.start, 0.01))
+                let u = Ease.inOut((t - w.start) / max(w.end - w.start, 0.01))
                 target.turn += 360 * u
                 p.angles = Angles(tilt: p.angles.tilt + (target.tilt - p.angles.tilt) * a, turn: p.angles.turn + 360 * u, roll: p.angles.roll + (target.roll - p.angles.roll) * a)
                 continue
@@ -919,7 +942,7 @@ struct Framing {
 
     /// Whether the subject is drawn in 3D at `t`: 3D is on, or a 3D turn is under way.
     func inDepth(at t: Double) -> Bool {
-        edits.three.on || edits.turns.contains { t > $0.start && t < $0.end }
+        edits.three.on || edits.turns.contains { let w = whole($0); return t > w.start && t < w.end }
     }
 
     /// The place and angle from the base and the moves alone.
@@ -1046,7 +1069,7 @@ struct Framing {
         let minSide = min(canvas.width, canvas.height)
         var overlays: [CIImage] = []
         for fx in edits.effects where !fx.coversFrame {
-            let a = presence(fx, at: t, ramp: 0.25)
+            let a = eased(fx, at: t, ramp: 0.25)
             guard a > 0.001 else { continue }
             switch fx.kind {
             case "blur":
@@ -1133,7 +1156,7 @@ struct Framing {
     private func hide(_ image: CIImage, crop cropRect: CGRect, at t: Double) -> CIImage {
         var fills: CIImage?
         // A few milliseconds early and late: rounding in the time map never drops the first or the last frame.
-        for m in edits.masks where t >= m.start - Framing.maskSlack && t < m.end + Framing.maskSlack {
+        for m in edits.masks where t >= m.start - (joined(m).start ? 0 : Framing.maskSlack) && t < m.end + (joined(m).end ? 0 : Framing.maskSlack) {
             guard let u = m.rect else { continue }
             // The rect is in the whole frame's units; only the part inside the crop is drawn.
             let e = image.extent
@@ -1354,7 +1377,7 @@ struct Framing {
         // Whole-frame effects: over the picture and its images and under the texts, or over the texts too.
         func cover(_ scope: String) {
             for fx in edits.effects where fx.scope == scope {
-                let a = presence(fx, at: t, ramp: 0.3)
+                let a = eased(fx, at: t, ramp: 0.3)
                 guard a > 0.001 else { continue }
                 if fx.kind == "blur" {
                     out = out.clampedToExtent().applyingGaussianBlur(sigma: Double(min(canvas.width, canvas.height)) * 0.03 * a).cropped(to: rect)
@@ -1397,7 +1420,7 @@ struct Framing {
         let mid = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
         var s = 1.0, amount = 0.0
         for z in edits.zooms {
-            let a = presence(z, at: t, ramp: 0.7)
+            let a = eased(z, at: t, ramp: 0.7)
             if a > amount { amount = a; s = 1 + ((z.level ?? 2) - 1) * a }
         }
         guard amount > 0.0005 else { return (1, mid) }
@@ -1414,6 +1437,7 @@ struct Framing {
     // MARK: Text
 
     func renderText(_ s: Segment, at t: Double) -> CIImage {
+        let s = whole(s)
         let art = TextArt.set(s, height: canvas.height)
         guard !art.letters.isEmpty else { return .empty() }
         let fs = art.height
@@ -1832,15 +1856,17 @@ enum Composition {
             // It plays where the track has sound; the fades stay inside that and apart.
             let span = track.segments.filter { !$0.isEmpty }.map(\.timeMapping.target)
             guard let first = span.first, let last = span.last else { continue }
-            let a = first.start.seconds, b = last.end.seconds, d = b - a
-            let fin = min(max(s.fadeIn, 0), d), fout = min(max(s.fadeOut, 0), d - fin)
-            if fin > 0.001 {
-                ear.setVolumeRamp(fromStartVolume: 0, toEndVolume: v, timeRange: CMTimeRange(start: time(a), duration: time(fin)))
-            } else {
-                ear.setVolume(v, at: time(a))
-            }
-            if fout > 0.001 {
-                ear.setVolumeRamp(fromStartVolume: v, toEndVolume: 0, timeRange: CMTimeRange(start: time(b - fout), duration: time(fout)))
+            let ha = first.start.seconds, hb = last.end.seconds
+            // @ref LLP 0002#split — a joined run fades in at its first half's start and out at its last half's end
+            let run = Joins.run(s, in: edits.sounds, map: map)
+            let head = run[0], tail = run[run.count - 1]
+            let a = head.id == s.id ? ha : head.playing(map).start, b = tail.id == s.id ? hb : tail.playing(map).end
+            for (i, r) in Sound.ramps(ha, hb, run: a, b, fadeIn: head.fadeIn, fadeOut: tail.fadeOut).enumerated() {
+                if abs(r.from - r.to) > 0.0001 {
+                    ear.setVolumeRamp(fromStartVolume: Float(r.from) * v, toEndVolume: Float(r.to) * v, timeRange: CMTimeRange(start: time(r.start), duration: time(r.end - r.start)))
+                } else if i == 0 {
+                    ear.setVolume(Float(r.from) * v, at: time(r.start))
+                }
             }
             extra.append(ear)
         }

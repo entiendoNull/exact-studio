@@ -1,0 +1,164 @@
+{
+  "base" : {
+    "scale" : 1,
+    "x" : 0.5,
+    "y" : 0.5
+  },
+  "frameLanes" : 0,
+  "imageLanes" : 1,
+  "lanes" : 1,
+  "moves" : [
+
+  ],
+  "removed" : [
+
+  ],
+  "segments" : [
+    {
+      "end" : 3.5,
+      "id" : "z",
+      "joinEnd" : true,
+      "kind" : "zoom",
+      "lane" : 0,
+      "level" : 1.8,
+      "start" : 1
+    },
+    {
+      "end" : 4,
+      "id" : "z-2",
+      "joinStart" : true,
+      "kind" : "zoom",
+      "lane" : 0,
+      "level" : 1.8,
+      "start" : 3.5
+    },
+    {
+      "animIn" : "letters",
+      "animOut" : "fade",
+      "end" : 3.5,
+      "id" : "t",
+      "joinEnd" : true,
+      "kind" : "text",
+      "lane" : 0,
+      "loop" : "wave",
+      "start" : 1,
+      "style" : "pill",
+      "text" : "Keep going",
+      "y" : 0.2
+    },
+    {
+      "animIn" : "letters",
+      "animOut" : "fade",
+      "end" : 6,
+      "id" : "t-2",
+      "joinStart" : true,
+      "kind" : "text",
+      "lane" : 0,
+      "loop" : "wave",
+      "start" : 3.5,
+      "style" : "pill",
+      "text" : "Keep going",
+      "y" : 0.2
+    },
+    {
+      "effects" : [
+        {
+          "end" : 3.5,
+          "id" : "p",
+          "joinEnd" : true,
+          "kind" : "pulse",
+          "lane" : 0,
+          "start" : 3
+        }
+      ],
+      "end" : 3.5,
+      "file" : "images/logo.png",
+      "id" : "i",
+      "joinEnd" : true,
+      "kind" : "image",
+      "lane" : 0,
+      "size" : 0.2,
+      "start" : 2,
+      "x" : 0.2,
+      "y" : 0.8
+    },
+    {
+      "effects" : [
+        {
+          "end" : 6,
+          "id" : "p-2",
+          "joinStart" : true,
+          "kind" : "pulse",
+          "lane" : 0,
+          "start" : 3.5
+        }
+      ],
+      "end" : 8,
+      "file" : "images/logo.png",
+      "id" : "i-2",
+      "joinStart" : true,
+      "kind" : "image",
+      "lane" : 0,
+      "moves" : [
+        {
+          "duration" : 0.8,
+          "id" : "m",
+          "style" : "smooth",
+          "t" : 5,
+          "to" : {
+            "scale" : 1,
+            "x" : 0.8,
+            "y" : 0.8
+          }
+        }
+      ],
+      "size" : 0.2,
+      "start" : 3.5,
+      "x" : 0.2,
+      "y" : 0.8
+    }
+  ],
+  "soundLanes" : 1,
+  "sounds" : [
+    {
+      "fadeIn" : 0.1,
+      "fadeOut" : 0.3,
+      "file" : "sounds/beep.wav",
+      "id" : "s",
+      "joinEnd" : true,
+      "lane" : 0,
+      "length" : 0.5,
+      "offset" : 0,
+      "start" : 3,
+      "volume" : 1
+    },
+    {
+      "fadeIn" : 0.1,
+      "fadeOut" : 0.3,
+      "file" : "sounds/beep.wav",
+      "id" : "s-2",
+      "joinStart" : true,
+      "lane" : 0,
+      "length" : 0.3,
+      "offset" : 0.5,
+      "start" : 3.5,
+      "volume" : 1
+    }
+  ],
+  "splits" : [
+    3.5
+  ],
+  "textLanes" : 1,
+  "three" : {
+    "edge" : "metal",
+    "on" : false,
+    "roll" : 0,
+    "thickness" : 0.05,
+    "tilt" : 0,
+    "turn" : 0
+  },
+  "transitions" : {
+
+  },
+  "volume" : 1
+}
