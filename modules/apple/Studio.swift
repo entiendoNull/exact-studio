@@ -95,6 +95,14 @@ final class Studio: ExactModule {
         if context.agent {
             Library.scratch = context.data.appendingPathComponent("Exact Studio", isDirectory: true)
             Pictures.mayAsk = false
+            let pinned: [String: Any] = ["ExactStudio.folded": [String](), "ExactStudio.wheelZoom": true, "ExactStudio.lastLook": Data(),
+                                         "ExactStudio.laneSize": 0, "ExactStudio.timelineExtra": 0.0]
+            UserDefaults.standard.setVolatileDomain(UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain).merging(pinned) { $1 },
+                                                    forName: UserDefaults.argumentDomain)
+            if let f = ProcessInfo.processInfo.environment["EXACT_STUDIO_FIXTURES"], let ids = try? FileManager.default.contentsOfDirectory(atPath: f) {
+                try? FileManager.default.createDirectory(at: Library.recordings, withIntermediateDirectories: true)
+                for id in ids { try? FileManager.default.copyItem(at: URL(fileURLWithPath: f).appendingPathComponent(id), to: Library.recordings.appendingPathComponent(id)) }
+            }
             print("exact-studio library: \(Library.root.path)")
         } else {
             sound = UserDefaults.standard.object(forKey: Self.soundKey) as? Bool ?? true
