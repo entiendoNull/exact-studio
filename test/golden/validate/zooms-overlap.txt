@@ -1,2 +1,2 @@
-zoom a (0:01.00–0:03.00): Two zooms can’t overlap.
-zoom b (0:02.00–0:04.00): Two zooms can’t overlap.
+zoom b (0:02.00–0:04.00), with zoom a: one-zoom: One zoom at a time.
+  Zoom in 2× runs to 0:03.0. Start it at 0:03.0 or later.

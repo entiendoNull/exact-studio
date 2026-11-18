@@ -93,8 +93,32 @@ test('write_edits keeps a valid edit and refuses a clash, leaving the file as it
   const kept = readFileSync(file, 'utf8');
   const refused = await tool('write_edits', { id: 'empty', edits: { lanes: 2, segments: [zoom, { ...zoom, id: 'y', lane: 1 }] } });
   expect(refused.isError).toBe(true);
-  expect(refused.content[0].text).toContain('Two zooms can’t overlap.');
+  expect(refused.content[0].text).toContain('one-zoom: One zoom at a time.\n  Zoom in 2× runs to 0:03.0. Start it at 0:03.0 or later.');
   expect(readFileSync(file, 'utf8')).toBe(kept);
+});
+
+// @ref LLP 0005#refusals — the same words as the app and validate (test/rules.json)
+const cases = JSON.parse(readFileSync(join(root, 'test/rules.json'), 'utf8'));
+for (const c of cases) {
+  test(`write_edits refuses ${c.rule} with the app's two lines`, async () => {
+    const saved = await tool('write_edits', { id: 'empty', edits: c.before });
+    expect(saved.content[0].text).toBe("Saved edits.json. The app's open preview updates within a second.");
+    const kept = readFileSync(join(lib, 'empty/edits.json'), 'utf8');
+    const refused = await tool('write_edits', { id: 'empty', edits: c.after });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toContain(`${c.item}`);
+    expect(refused.content[0].text).toContain(`: ${c.rule}: ${c.line1}\n  ${c.line2}`);
+    expect(readFileSync(join(lib, 'empty/edits.json'), 'utf8')).toBe(kept);
+  });
+}
+
+test('write_edits keeps an old file that breaks a rule: a change beside it saves, with a note', async () => {
+  const old = cases.find((c: any) => c.rule === 'no-zoom-in-orbit').after;
+  writeFileSync(join(lib, 'empty/edits.json'), JSON.stringify(old));
+  const saved = await tool('write_edits', { id: 'empty', edits: { ...old, segments: [...old.segments, { id: 't', kind: 'text', start: 0, end: 2, text: 'Hi' }], textLanes: 1 } });
+  expect(saved.isError).toBe(false);
+  expect(saved.content[0].text).toContain('Still in the file from before');
+  expect(saved.content[0].text).toContain('no-zoom-in-orbit: No zoom during an orbit.');
 });
 
 test('split cuts a zoom into joined halves, and Split All Lanes cuts every lane', async () => {

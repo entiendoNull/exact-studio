@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { drop, fixtures, library, root, run } from './library';
 import { check } from './schema';
@@ -191,7 +191,62 @@ describe('where an effect applies', () => {
     const out = readFileSync(join(golden, 'validate/reach-problems.txt'), 'utf8');
     expect(out).toContain('no scope behind; one of video, background, scene, frame, all');
     expect(out).toContain('only a blur or a black and white (mono) has a scope');
-    expect(out).toContain('A text has no pulse effect.');
+    expect(out).toContain('text-effect-kind: No such text effect.');
+  });
+});
+
+// @ref LLP 0005#refusals — the app, validate and MCP give the same words (test/rules.json; the app's side is in test/model)
+describe('every rule: validate prints its id and the same two lines as the app', () => {
+  const cases = JSON.parse(readFileSync(join(root, 'test/rules.json'), 'utf8'));
+  const recording = (name: string, edits: object) => {
+    const dir = join(good, name);
+    cpSync(join(good, 'empty'), dir, { recursive: true });
+    const meta = JSON.parse(readFileSync(join(dir, 'meta.json'), 'utf8'));
+    writeFileSync(join(dir, 'meta.json'), JSON.stringify({ ...meta, id: name }));
+    writeFileSync(join(dir, 'edits.json'), JSON.stringify(edits));
+    return dir;
+  };
+  for (const c of cases) {
+    test(`${c.rule}: “${c.line1}” then “${c.line2}”`, () => {
+      recording(`rule-${c.rule}`, c.after);
+      const r = run(good, 'validate', `rule-${c.rule}`);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain(`${c.item}`);
+      expect(r.out).toContain(`: ${c.rule}: ${c.line1}\n  ${c.line2}\n`);
+      const before = join(good, `rule-${c.rule}`, 'before.json');
+      writeFileSync(before, JSON.stringify(c.before));
+      expect(run(good, 'validate', `rule-${c.rule}`, '--since', before).code).toBe(1);
+    });
+  }
+
+  test('export renders an old file that breaks a rule, with the rule as a warning; validate still fails it', () => {
+    const old = cases.find((c: any) => c.rule === 'no-zoom-in-orbit').after;
+    recording('rule-export', old);
+    const out = join(good, 'rule-export.mp4');
+    const r = run(good, 'export', 'rule-export', '--out', out, '--quality', 'small');
+    expect(r.code).toBe(0);
+    expect(r.err).toContain('warning: zoom z (0:03.00–0:06.00), with 3d o: no-zoom-in-orbit: No zoom during an orbit.\n  3D orbit runs to 0:05.0. Start it at 0:05.0 or later.\n');
+    expect(existsSync(out)).toBe(true);
+    expect(run(good, 'validate', 'rule-export').code).toBe(1);
+    writeFileSync(join(good, 'rule-export', 'edits.json'), JSON.stringify({ ...old, segments: [...old.segments, { id: 'z', kind: 'zoom', start: 3, end: 3.05, level: 2 }] }));
+    const short = run(good, 'export', 'rule-export', '--out', join(good, 'short.mp4'), '--quality', 'small');
+    expect(short.code).toBe(1);
+    expect(short.out).toContain('another segment has the same id');
+  }, 120_000);
+
+  test('--since: a rule the old file broke too is a note, not a failure; a new one still fails', () => {
+    const old = cases.find((c: any) => c.rule === 'one-blur').after;
+    const dir = recording('rule-old', old);
+    const since = join(dir, 'before.json');
+    writeFileSync(since, JSON.stringify(old));
+    const kept = run(good, 'validate', 'rule-old', '--since', since);
+    expect(kept.code).toBe(0);
+    expect(kept.out).toBe('ok\nnote: before this change: blur b (0:02.00–0:04.00), with blur a: one-blur: One blur at a time.\n  Blur · video runs to 0:03.0. Start it at 0:03.0 or later.\n');
+    writeFileSync(join(dir, 'edits.json'), JSON.stringify({ ...old, lanes: 2, segments: [...old.segments, { id: 'z1', kind: 'zoom', start: 1, end: 3, level: 2 }, { id: 'z2', kind: 'zoom', start: 2, end: 4, lane: 1, level: 2 }] }));
+    const fresh = run(good, 'validate', 'rule-old', '--since', since);
+    expect(fresh.code).toBe(1);
+    expect(fresh.out).toContain('one-zoom: One zoom at a time.');
+    expect(fresh.out).toContain('note: before this change: blur b');
   });
 });
 

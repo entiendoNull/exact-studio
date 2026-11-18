@@ -1,8 +1,8 @@
 sound long (0:01.00, 3.0s of sounds/beep.wav): offset + length is 3.5s, but the file holds 2.000s
 sound long (0:01.00, 3.0s of sounds/beep.wav): volume must be 0–1
 sound long (0:01.00, 3.0s of sounds/beep.wav): fades can't be below 0
-sound long (0:01.00, 3.0s of sounds/beep.wav): That sound lane is taken there; drop it on another lane.
-sound clash (0:02.00, 1.0s of sounds/beep.wav): That sound lane is taken there; drop it on another lane.
+sound clash (0:02.00, 1.0s of sounds/beep.wav), with sound long: lane-taken: That lane is taken.
+  beep.wav is on this lane then. Put it on another lane.
 sound gone (0:12.00, 0.0s of sounds/none.wav): sounds/none.wav is not a readable sound file in sound-problems/ (m4a, mp3, wav, aiff, aif, aac, caf)
 sound gone (0:12.00, 0.0s of sounds/none.wav): length must be above 0
 sound gone (0:12.00, 0.0s of sounds/none.wav): offset can't be below 0

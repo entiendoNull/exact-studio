@@ -1,1 +1,2 @@
-image i (0:02.00–0:04.00): An image’s effect must stay inside the image’s time.
+image i (0:02.00–0:04.00): its blur effect e: image-inside: Keep it inside the image.
+  logo.png shows 0:02.0–0:04.0. Start and end it there.

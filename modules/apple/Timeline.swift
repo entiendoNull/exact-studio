@@ -274,6 +274,34 @@ final class TimelineView: NSView {
 
     /// Dragging to an edge of the zoomed track slides it slowly that way.
     private var lastDrag: NSEvent?
+    private var pointer: NSEvent? { lastDrag }
+    private var sliding: (ref: ItemRef, from: CGRect, began: CFTimeInterval)?
+    private var slideTimer: Timer?
+
+    private func rect(of ref: ItemRef) -> CGRect? {
+        guard let editor else { return nil }
+        let e = editor.edits
+        func box(_ a: Double, _ b: Double, _ kind: Kind) -> CGRect? {
+            row(kind).map { CGRect(x: x(a), y: $0.y + 2, width: max(4, x(b) - x(a)), height: $0.height - 4) }
+        }
+        switch ref.kind {
+        case "sound": return e.sounds.first { $0.id == ref.id }.flatMap { box($0.start, $0.end(editor.map), .lane(Edits.soundSpace, $0.lane)) }
+        case "image-effect":
+            return e.segments.first { $0.id == ref.image }?.effects?.first { $0.id == ref.id }.flatMap { box($0.start, $0.end, .imageEffects(ref.image ?? "", $0.lane)) }
+        case "move", "image-move": return nil
+        default: return e.segments.first { $0.id == ref.id }.flatMap { box($0.start, $0.end, .lane($0.space, $0.lane)) }
+        }
+    }
+
+    private func slideBack(_ ref: ItemRef, from: CGRect) {
+        sliding = (ref, from, CACurrentMediaTime())
+        slideTimer?.invalidate()
+        slideTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] t in
+            guard let self else { return t.invalidate() }
+            self.needsDisplay = true
+            if let s = self.sliding, CACurrentMediaTime() - s.began > 0.25 { self.sliding = nil; t.invalidate() }
+        }
+    }
     private var edgeTimer: Timer?
     private func autoPan() {
         guard let editor, editor.zoomed, moved, let e = lastDrag, let drag else { return }
@@ -679,11 +707,14 @@ final class TimelineView: NSView {
             (words as NSString).draw(in: CGRect(x: from, y: r.y + r.height / 2 - 7, width: to - from, height: 16), withAttributes: hint.merging([.paragraphStyle: fit]) { $1 })
         }
         func block(_ r: CGRect, _ color: NSColor, _ text: String, selected: Bool, dark: Bool = false, joined: (Bool, Bool) = (false, false),
-                   chips: [String] = [], inside: ((CGRect) -> Void)? = nil) {
+                   chips: [String] = [], ref: ItemRef? = nil, inside: ((CGRect) -> Void)? = nil) {
+            let r = ref.map { slid($0, r) } ?? r
+            let state = ref.map(self.state) ?? .plain
             color.withAlphaComponent(selected ? 0.95 : 0.78).setFill()
             Self.shape(r, radius: 6, square: joined).fill()
             inside?(r)
-            stroke(r, selected: selected, square: joined)
+            if state == .refused { hatch(r, square: joined) }
+            stroke(r, selected: selected && state == .plain, square: joined)
             // Zoomed, a block's name stays in the part of it that shows.
             let from = max(r.minX, trackRect.minX)
             var to = min(r.maxX, trackRect.maxX)
@@ -705,6 +736,12 @@ final class TimelineView: NSView {
             if r.width > 24 {
                 NSBezierPath(roundedRect: CGRect(x: r.minX + 3, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
                 NSBezierPath(roundedRect: CGRect(x: r.maxX - 5, y: r.midY - 5, width: 2, height: 10), xRadius: 1, yRadius: 1).fill()
+            }
+            switch state {
+            case .refused: ring(r, square: joined, glow: false); noEntry(in: r)
+            case .lit: ring(r, square: joined, glow: true)
+            case .standing: badge(in: r)
+            case .plain: break
             }
         }
         for r in shown {
@@ -768,7 +805,7 @@ final class TimelineView: NSView {
                 if editor.edits.moves.isEmpty {
                     drawHint("Drag the video in the preview to place it. Press + to add a move that animates it.", in: r)
                 }
-                for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) { draw(move: m, in: r, selected: editor.selected == "m:" + m.id, threeD: m.angles != nil) }
+                for m in editor.edits.moves.sorted(by: { $0.t < $1.t }) { draw(move: m, in: r, selected: editor.selected == "m:" + m.id, threeD: m.angles != nil, ref: .move(m)) }
             case let .lane(space, lane):
                 let name = space == 1 ? "Text" : space == 2 ? "Image" : space == 3 ? "Whole Frame" : space == Edits.soundSpace ? "Sound" : "Effects"
                 let symbol = space == 1 ? "textformat" : space == 2 ? "photo" : space == 3 ? "rectangle.inset.filled" : space == Edits.soundSpace ? "music.note" : "wand.and.stars"
@@ -794,7 +831,7 @@ final class TimelineView: NSView {
                     childHint("Drag the image in the preview to place it. Press + to add a move that animates it.", r, image)
                 }
                 for m in (image.moves ?? []).sorted(by: { $0.t < $1.t }) {
-                    draw(move: m, in: r, selected: editor.selected == Editor.childID("im", image: id, m.id), threeD: false)
+                    draw(move: m, in: r, selected: editor.selected == Editor.childID("im", image: id, m.id), threeD: false, ref: .move(m, image: id))
                 }
             case let .imageEffects(id, lane):
                 guard let image = segments.first(where: { $0.id == id && $0.isOverlay }) else { continue }
@@ -805,10 +842,10 @@ final class TimelineView: NSView {
                         : "Press + to add an effect to this image only: blur, fade, pulse and more.", r, image)
                 }
                 let pool = Joins.whole(image, run: Joins.run(image, in: editor.edits.segments)).effects ?? []
-                for fx in image.effects ?? [] where fx.lane == lane {
+                for fx in image.effects ?? [] where (landing(.effect(fx, image: id)) ?? fx.lane) == lane {
                     let b = CGRect(x: x(fx.start), y: r.y + 2, width: max(4, x(fx.end) - x(fx.start)), height: r.height - 4)
                     block(b, Self.color(image: fx), Self.caption(image: fx), selected: editor.selected == Editor.childID("ie", image: id, fx.id),
-                          joined: (pool.contains { $0.joins(fx) }, pool.contains { fx.joins($0) }))
+                          joined: (pool.contains { $0.joins(fx) }, pool.contains { fx.joins($0) }), ref: .effect(fx, image: id))
                 }
             }
             if hasPlus(r) {
@@ -831,15 +868,16 @@ final class TimelineView: NSView {
                 }
             }
         }
+        drawDropHints(editor)
         for seg in segments {
-            guard let r = row(of: seg) else { continue }
+            guard let r = landing(.of(seg)).flatMap({ row(.lane(seg.space, $0)) }) ?? row(of: seg) else { continue }
             let b = CGRect(x: x(seg.start), y: r.y + 2, width: max(4, x(seg.end) - x(seg.start)), height: r.height - 4)
             // An image stays lit while one of its own moves or effects is selected; the image whose
             // rows an open lane shows has a quiet outline.
             let selected = editor.selected == seg.id || (seg.isOverlay && editor.selectedItem?.id == seg.id)
             // @ref LLP 0002#split — a joined edge is square: the block goes on
             block(b, Self.color(seg), Self.caption(seg), selected: selected, dark: seg.kind == "highlight",
-                  joined: (segments.contains { $0.joins(seg) }, segments.contains { seg.joins($0) }), chips: Self.chips(seg))
+                  joined: (segments.contains { $0.joins(seg) }, segments.contains { seg.joins($0) }), chips: Self.chips(seg), ref: .of(seg))
             if !selected, seg.isOverlay, editor.isOpen(space: seg.space, lane: seg.lane), editor.currentItem(space: seg.space, lane: seg.lane)?.id == seg.id {
                 NSColor(white: 1, alpha: 0.6).setStroke()
                 let p = NSBezierPath(roundedRect: b.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
@@ -851,12 +889,12 @@ final class TimelineView: NSView {
         // waveform inside, faint, at the moment of the file that plays there.
         let map = editor.map
         for snd in editor.edits.sounds {
-            guard let r = row(.lane(Edits.soundSpace, snd.lane)) else { continue }
+            guard let r = row(.lane(Edits.soundSpace, landing(.sound(snd)) ?? snd.lane)) else { continue }
             let b = CGRect(x: x(snd.start), y: r.y + 2, width: max(4, x(snd.end(map)) - x(snd.start)), height: r.height - 4)
             let from = map.output(snd.start) - snd.offset
             let sounds = editor.edits.sounds
             block(b, Self.soundColor, URL(fileURLWithPath: snd.file).lastPathComponent, selected: editor.selected == Editor.soundID(snd.id),
-                  joined: (sounds.contains { $0.joins(snd, map: map) }, sounds.contains { snd.joins($0, map: map) })) { box in
+                  joined: (sounds.contains { $0.joins(snd, map: map) }, sounds.contains { snd.joins($0, map: map) }), ref: .sound(snd)) { box in
                 guard let wave = Waveform.of(editor.folder.appendingPathComponent(snd.file), ready: { [weak self] in self?.needsDisplay = true }) else { return }
                 self.drawWave(wave, in: box.insetBy(dx: 6, dy: max(3, box.height * 0.2)), alpha: 0.3) { t in map.output(t) - from }
             }
@@ -880,6 +918,7 @@ final class TimelineView: NSView {
             NSColor(white: 1, alpha: 0.2).setFill()
             NSBezierPath(roundedRect: b, xRadius: 1.5, yRadius: 1.5).fill()
         }
+        defer { drawReason() }
         guard ph >= trackRect.minX - 1, ph <= trackRect.maxX + 1 else { return }
         let tag = Self.clock(editor.playhead, tenths: true) as NSString
         let tagAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold), .foregroundColor: NSColor.white]
@@ -955,11 +994,14 @@ final class TimelineView: NSView {
     }
 
     /// A move on a Position row: its travel as a bar, ending in a diamond where it lands.
-    private func draw(move m: Move, in r: Row, selected: Bool, threeD: Bool) {
+    private func draw(move m: Move, in r: Row, selected: Bool, threeD: Bool, ref: ItemRef) {
         let bar = CGRect(x: x(m.t - m.duration), y: r.y + 7, width: max(2, x(m.t) - x(m.t - m.duration)), height: r.height - 14)
+        let state = self.state(ref)
         NSColor.systemTeal.withAlphaComponent(selected ? 0.85 : 0.45).setFill()
         NSBezierPath(roundedRect: bar, xRadius: 6, yRadius: 6).fill()
-        if selected { stroke(bar.insetBy(dx: -2, dy: -3), selected: true) }
+        if state == .refused { hatch(bar, square: (false, false)) }
+        if selected, state == .plain { stroke(bar.insetBy(dx: -2, dy: -3), selected: true) }
+        if state == .refused || state == .lit { ring(bar.insetBy(dx: -2, dy: -3), square: (false, false), glow: state == .lit) }
         let name = (["smooth": "Smooth", "linear": "Linear", "spring": "Spring", "zoom": "Zoom through", "swipe": "Swipe",
                      "fade": "Fade", "spin": "Spin", "pop": "Pop"][m.style] ?? m.style) + (threeD ? " · 3D" : "") as NSString
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: NSColor.white]
@@ -974,6 +1016,7 @@ final class TimelineView: NSView {
         path.fill()
         NSColor(white: 0, alpha: 0.4).setStroke()
         path.stroke()
+        if state == .standing { badge(in: CGRect(x: bar.minX, y: r.y + 2, width: max(bar.width, d.maxX - bar.minX), height: r.height - 4)) }
     }
 
     static func shape(_ r: CGRect, radius: CGFloat, square: (Bool, Bool)) -> NSBezierPath {
@@ -1015,38 +1058,16 @@ final class TimelineView: NSView {
 
     static func caption(_ s: Segment) -> String {
         switch s.kind {
-        case "zoom":
-            let l = s.level ?? 2
-            return l < 1 ? "Zoom out \(trim(l))×" : "Zoom in \(trim(l))×"
-        case "speed":
-            let r = s.rate ?? 1
-            return r < 1 ? "Slow \(trim(r))×" : "Fast \(trim(r))×"
-        case "spotlight": return "Spotlight"
-        case "highlight": return "Cursor highlight"
-        case "blur": return "Blur · " + reach(s.scope)
-        case "mono": return "Black & white · " + reach(s.scope)
-        case "3d": return s.style == "orbit" ? "3D orbit" : "3D turn"
-        case "mask": return s.style == "pixels" ? "Mask · pixels" : s.style == "solid" ? "Mask · solid" : "Mask · blur"
-        case "text": return "“\(s.text ?? "")”"
         case "image":
             let moves = s.moves?.count ?? 0, effects = s.effects?.count ?? 0
             let name = URL(fileURLWithPath: s.file ?? "").lastPathComponent
             return name + (moves > 0 ? " · \(moves) move\(moves == 1 ? "" : "s")" : "") + (effects > 0 ? " · \(effects) effect\(effects == 1 ? "" : "s")" : "")
-        default: return "Effect"
+        default: return s.label
         }
     }
 
     /// A blur's or black and white's reach, short, for its block.
     // @ref LLP 0002#where-an-effect-applies
-    static func reach(_ scope: String?) -> String {
-        switch scope {
-        case "background": return "background"
-        case "scene": return "video, background"
-        case "frame": return "whole frame"
-        case "all": return "everything"
-        default: return "video"
-        }
-    }
 
     private static func trim(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%g", v) }
 
@@ -1085,7 +1106,7 @@ final class TimelineView: NSView {
     private final class Act: NSObject { let run: () -> Void; init(_ run: @escaping () -> Void) { self.run = run } }
     @objc private func picked(_ item: NSMenuItem) { (item.representedObject as? Act)?.run() }
 
-    private func nsMenu(_ entries: [MenuEntry]) -> NSMenu {
+    func nsMenu(_ entries: [MenuEntry]) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         for entry in entries {
@@ -1348,7 +1369,9 @@ final class TimelineView: NSView {
             case let .retime(id, _): if let m = editor.edits.moves.first(where: { $0.id == id }) { editor.moveTime(id, to: m.t, live: false) }
             case let .imove(image, id, _):
                 if let m = editor.edits.images.first(where: { $0.id == image })?.moves?.first(where: { $0.id == id }) { editor.dragImageMove(image, id, to: m.t, live: false) }
-            default: editor.endDrag()
+            default:
+                let refused = editor.dragCheck.flatMap { c in c.conflict == nil ? nil : rect(of: c.item).map { (c.item, $0) } }
+                if !editor.endDrag(), let (ref, from) = refused { slideBack(ref, from: from) }
             }
         }
         drag = nil
@@ -1365,6 +1388,190 @@ final class TimelineView: NSView {
         case 124: editor.seek(source: editor.playhead + (e.modifierFlags.contains(.shift) ? 1 : 1.0 / 30))
         default: super.keyDown(with: e)
         }
+    }
+}
+
+// MARK: Refusals
+// @ref LLP 0005#refusals — the refusal look, the lit clash, the reason at the pointer, the slide back
+
+extension TimelineView {
+    static let refusalColor = NSColor(srgbRed: 1, green: 0x7a / 255.0, blue: 0x6e / 255.0, alpha: 1)
+    static let landingColor = NSColor(srgbRed: 0.42, green: 0.66, blue: 1, alpha: 1)
+
+    enum BlockState { case plain, refused, lit, standing }
+
+    func landing(_ ref: ItemRef) -> Int? {
+        guard let check = editor?.dragCheck, check.item == ref else { return nil }
+        return check.landing
+    }
+
+    func state(_ ref: ItemRef) -> BlockState {
+        guard let editor else { return .plain }
+        if let check = editor.dragCheck, let c = check.conflict {
+            if check.item == ref { return .refused }
+            if c.other == ref || (c.item == ref && check.item != ref) { return .lit }
+        }
+        return editor.standing.contains { $0.involves(ref) } ? .standing : .plain
+    }
+
+    func hatch(_ r: CGRect, square: (Bool, Bool)) {
+        NSGraphicsContext.saveGraphicsState()
+        Self.shape(r, radius: 6, square: square).addClip()
+        Self.refusalColor.withAlphaComponent(0.22).setFill()
+        r.fill()
+        let lines = NSBezierPath()
+        var x = r.minX - r.height
+        while x < r.maxX {
+            lines.move(to: CGPoint(x: x, y: r.maxY)); lines.line(to: CGPoint(x: x + r.height, y: r.minY))
+            x += 7
+        }
+        lines.lineWidth = 2
+        NSColor(white: 1, alpha: 0.38).setStroke()
+        lines.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    func ring(_ r: CGRect, square: (Bool, Bool), glow: Bool) {
+        NSGraphicsContext.saveGraphicsState()
+        if glow {
+            let shadow = NSShadow()
+            shadow.shadowColor = Self.refusalColor.withAlphaComponent(0.9)
+            shadow.shadowBlurRadius = 9
+            shadow.set()
+        }
+        Self.refusalColor.setStroke()
+        let p = Self.shape(r.insetBy(dx: -1.5, dy: -1.5), radius: 7, square: square)
+        p.lineWidth = 2
+        p.stroke()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    func noEntry(in r: CGRect) {
+        let d = min(14, r.height - 8)
+        guard d > 6, r.width > d + 8 else { return }
+        let c = CGRect(x: r.maxX - d - 10, y: r.midY - d / 2, width: d, height: d)
+        Self.refusalColor.setFill()
+        NSBezierPath(ovalIn: c).fill()
+        NSColor(white: 0, alpha: 0.35).setStroke()
+        NSBezierPath(ovalIn: c).stroke()
+        NSColor.white.setFill()
+        NSBezierPath(roundedRect: CGRect(x: c.minX + d * 0.22, y: c.midY - 1.25, width: d * 0.56, height: 2.5), xRadius: 1.25, yRadius: 1.25).fill()
+    }
+
+    func badge(in r: CGRect) {
+        let d: CGFloat = 12
+        guard r.width > d + 6, r.height > d else { return }
+        let c = CGRect(x: r.maxX - d - 4, y: r.minY + 3, width: d, height: d)
+        NSColor.systemOrange.setFill()
+        NSBezierPath(ovalIn: c).fill()
+        let bang = "!" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 9, weight: .heavy), .foregroundColor: NSColor.black]
+        let size = bang.size(withAttributes: attrs)
+        bang.draw(at: CGPoint(x: c.midX - size.width / 2, y: c.midY - size.height / 2), withAttributes: attrs)
+    }
+
+    func drawDropHints(_ editor: Editor) {
+        guard let check = editor.dragCheck, let origin = editor.dragFrom else { return }
+        func span(_ e: Edits) -> (Double, Double, Kind)? {
+            switch check.item.kind {
+            case "sound":
+                guard let s = e.sounds.first(where: { $0.id == check.item.id }) else { return nil }
+                return (s.start, s.end(editor.map), .lane(Edits.soundSpace, s.lane))
+            case "image-effect":
+                guard let fx = e.segments.first(where: { $0.id == check.item.image })?.effects?.first(where: { $0.id == check.item.id }) else { return nil }
+                return (fx.start, fx.end, .imageEffects(check.item.image ?? "", fx.lane))
+            case "move", "image-move": return nil
+            default:
+                guard let s = e.segments.first(where: { $0.id == check.item.id }) else { return nil }
+                return (s.start, s.end, .lane(s.space, s.lane))
+            }
+        }
+        func dashed(_ r: CGRect, _ color: NSColor, fill: CGFloat) {
+            color.withAlphaComponent(fill).setFill()
+            NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
+            color.setStroke()
+            let p = NSBezierPath(roundedRect: r.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6)
+            p.lineWidth = 1.5
+            p.setLineDash([5, 4], count: 2, phase: 0)
+            p.stroke()
+        }
+        if check.conflict != nil, let (a, b, kind) = span(origin), let r = row(kind) {
+            dashed(CGRect(x: x(a), y: r.y + 2, width: max(4, x(b) - x(a)), height: r.height - 4), NSColor(white: 1, alpha: 0.45), fill: 0.03)
+        }
+        if let lane = check.landing, let (a, b, kind) = span(editor.edits) {
+            let target: Kind
+            switch kind {
+            case let .lane(space, _): target = .lane(space, lane)
+            case let .imageEffects(image, _): target = .imageEffects(image, lane)
+            default: return
+            }
+            guard let r = row(target) else { return }
+            dashed(CGRect(x: x(a), y: r.y, width: max(4, x(b) - x(a)), height: r.height).insetBy(dx: -3, dy: -1), Self.landingColor, fill: 0.14)
+        }
+    }
+
+    func drawReason() {
+        guard let c = editor?.dragCheck?.conflict, let e = pointer else { return }
+        let p = convert(e.locationInWindow, from: nil)
+        let bold: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold), .foregroundColor: NSColor.white]
+        let plain: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor(white: 1, alpha: 0.8)]
+        let one = c.line1 as NSString, two = c.line2 as NSString
+        let room: CGFloat = 300
+        let w1 = one.size(withAttributes: bold).width
+        let r2 = two.boundingRect(with: CGSize(width: room, height: 200), options: [.usesLineFragmentOrigin], attributes: plain)
+        let w = min(room, max(w1, ceil(r2.width))) + 24, h = 14 + 16 + (c.line2.isEmpty ? 0 : ceil(r2.height) + 3)
+        let blocks = drawnBlocks(), key = [editor?.dragCheck?.item, c.other].compactMap { $0 }.compactMap(rect(of:))
+            .map { CGRect(x: $0.minX, y: $0.minY - scrollY, width: $0.width, height: $0.height) }
+        var candidates: [CGRect] = []
+        for dy in stride(from: -220.0, through: 220.0, by: 6.0) {
+            for x0 in [p.x + 16, p.x - 16 - w, p.x + 60, p.x - 60 - w] {
+                candidates.append(CGRect(x: min(max(trackRect.minX, x0), bounds.maxX - w - 8), y: min(max(Self.videoTop, p.y + CGFloat(dy) - h / 2), bounds.maxY - h - 6), width: w, height: h))
+            }
+        }
+        func area(_ rs: [CGRect], _ b: CGRect) -> CGFloat {
+            rs.reduce(0) { sum, r in let i = r.intersection(b.insetBy(dx: -4, dy: -4)); return sum + (i.isNull ? 0 : i.width * i.height) }
+        }
+        func cost(_ b: CGRect) -> CGFloat {
+            area(blocks, b) + 20 * area(key, b) + (b.insetBy(dx: -6, dy: -6).contains(p) ? 1_000_000 : 0) + hypot(b.midX - p.x, b.midY - p.y) * 4
+        }
+        let box = candidates.min { cost($0) < cost($1) } ?? candidates[0]
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor(white: 0, alpha: 0.5)
+        shadow.shadowBlurRadius = 10
+        shadow.shadowOffset = NSSize(width: 0, height: -3)
+        shadow.set()
+        NSColor(calibratedWhite: 0.14, alpha: 0.97).setFill()
+        NSBezierPath(roundedRect: box, xRadius: 8, yRadius: 8).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        Self.refusalColor.setStroke()
+        let edge = NSBezierPath(roundedRect: box.insetBy(dx: 0.75, dy: 0.75), xRadius: 8, yRadius: 8)
+        edge.lineWidth = 1.5
+        edge.stroke()
+        one.draw(at: CGPoint(x: box.minX + 12, y: box.minY + 7), withAttributes: bold)
+        if !c.line2.isEmpty { two.draw(with: CGRect(x: box.minX + 12, y: box.minY + 26, width: w - 24, height: ceil(r2.height) + 2), options: [.usesLineFragmentOrigin], attributes: plain) }
+    }
+
+    func drawnBlocks() -> [CGRect] {
+        guard let editor else { return [] }
+        let e = editor.edits
+        var refs = e.segments.map(ItemRef.of) + e.sounds.map(ItemRef.sound)
+        for i in e.images { refs += (i.effects ?? []).map { ItemRef.effect($0, image: i.id) } }
+        var out = refs.compactMap(rect(of:)).map { CGRect(x: $0.minX, y: $0.minY - scrollY, width: $0.width, height: $0.height) }
+        if editor.videoOpen { out.append(CGRect(x: trackRect.minX, y: Self.clipTop - scrollY, width: trackRect.width, height: Self.clipHeight)) }
+        if let p = row(.position) {
+            for m in e.moves { out.append(CGRect(x: x(m.t - m.duration), y: p.y - scrollY, width: x(m.t) - x(m.t - m.duration) + 8, height: p.height)) }
+        }
+        return out
+    }
+
+    func slid(_ ref: ItemRef, _ r: CGRect) -> CGRect {
+        guard let s = sliding, s.ref == ref else { return r }
+        let u = min(1, CACurrentMediaTime() - s.began) / 0.2
+        guard u < 1 else { return r }
+        let k = CGFloat(Ease.smooth(u))
+        return CGRect(x: s.from.minX + (r.minX - s.from.minX) * k, y: s.from.minY + (r.minY - s.from.minY) * k,
+                      width: s.from.width + (r.width - s.from.width) * k, height: s.from.height + (r.height - s.from.height) * k)
     }
 }
 

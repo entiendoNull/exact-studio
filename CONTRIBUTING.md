@@ -69,12 +69,15 @@ Do not edit `exact.mjs` or the generated block at the top of `AGENTS.md`. `bun e
 Every bug fix and every feature adds a test that fails without it. Put it at the lowest level that shows the behaviour:
 
 - A rule of the edit files (a lane rule, a cut, a field): a test in `test/model/main.swift`, or a fixture.
+- A rule of what may overlap (docs/edits.md, "What may overlap: the rules"): a case in `test/rules.json`. The model, CLI and MCP tests all read it, so the app, `validate` and `write_edits` must give its two lines word for word.
 - A problem `validate` must report: a folder in `test/fixtures/invalid/<name>/` with a `meta.json` and the bad `edits.json`. The first run writes `test/golden/validate/<name>.txt`. Read it, then commit it.
 - What `show` prints: a folder in `test/fixtures/valid/`. Its goldens are written the same way.
 - What an Editor action does (the timeline's buttons and menus call these): a test in `test/model/main.swift` that opens a fixture with `open(…)`.
 - What the window shows or does: a test in `test/ui/editor.test.contract`. It runs on the fixture recordings, each test from a fresh copy.
 
 A new effect, style or animation needs an entry in `docs/effects.md`. When a change alters how anything draws, run `test/make-effect-strips.sh`, look at the strips in `docs/effects/`, then commit them.
+
+`EXACT_STUDIO_SHOTS=<folder> .exact/test/model "$PWD"` (after `test/model.sh "$PWD"`) also saves pictures of a refused drag, a drop that opens a lane and the off menu items. Look at them when you change how a refusal draws.
 
 When an output changes on purpose, run `./check --update` and read the diff of `test/golden/` before you commit it.
 

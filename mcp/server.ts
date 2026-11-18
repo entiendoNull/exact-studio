@@ -46,18 +46,23 @@ function stable(v: unknown): unknown {
 }
 
 /** Writes edits.json or look.json, checks it with the CLI, and puts the old file back if it fails. */
+// @ref LLP 0005#refusals
 async function writeChecked(id: string, file: string, value: unknown): Promise<Result> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return text(`${file} must be a JSON object.`, true);
   const path = join(await folder(id), file);
   const old = existsSync(path) ? readFileSync(path) : null;
+  const since = file === 'edits.json' && old ? join(mkdtempSync(join(tmpdir(), 'exact-studio-')), 'edits.json') : null;
+  if (since && old) writeFileSync(since, old);
   writeFileSync(path, JSON.stringify(stable(value), null, 2) + '\n');
-  const r = await run(['validate', id]);
+  const r = await run(['validate', id, ...(since ? ['--since', since] : [])]);
   if (r.code) {
     if (old) writeFileSync(path, old);
     else unlinkSync(path);
     return text(`Not saved; ${file} is unchanged. Problems:\n${(r.out + r.err).trim()}`, true);
   }
-  return text(`Saved ${file}. The app's open preview updates within a second.`);
+  const notes = r.out.split('\n').filter((l, i, all) => l.startsWith('note: ') || (l.startsWith('  ') && all[i - 1]?.startsWith('note: ')));
+  const still = notes.length ? `\nStill in the file from before (not refused; fix them when you can):\n${notes.join('\n')}` : '';
+  return text(`Saved ${file}. The app's open preview updates within a second.${still}`);
 }
 
 /** The entries of docs/effects.md named `name` (a heading `name`, or a table row of it), each under its section's title. */
@@ -184,7 +189,8 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'write_edits',
-    description: 'Replaces edits.json (the timeline) with the given object. It is checked first; if a check fails, nothing changes and the problems come back.',
+    description:
+      'Replaces edits.json (the timeline) with the given object. It is checked first; if a check fails, nothing changes and the problems come back. A broken rule comes back as its id (such as one-zoom) and two lines: what the rule is, then the other item or time and one way out; do what the second line says. A rule the file already broke before this write is listed as a note and not refused. Put each item on lane 0 of its kind; use lane 1 only when it overlaps another of its kind.',
     inputSchema: { type: 'object', properties: { id, edits: { type: 'object', description: 'The whole edits.json.' } }, required: ['id', 'edits'] },
     call: (a) => writeChecked(a.id, 'edits.json', a.edits),
   },
@@ -196,7 +202,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'validate_recording',
-    description: 'Checks edits.json and look.json; one line per problem.',
+    description: 'Checks edits.json and look.json; one line per problem. A broken rule prints its id and two lines (the rule; the other item or time and one way out), the same words the app shows.',
     inputSchema: { type: 'object', properties: { id }, required: ['id'] },
     call: async (a) => outOf(await run(['validate', a.id])),
   },
@@ -340,7 +346,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'edit_format',
-    description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, masks included, with examples. Read it before write_edits. What each effect looks like on screen is in effects_guide.',
+    description: 'The edit file format (docs/edits.md): every field of edits.json and look.json, masks included, with examples, and the rules table (what may overlap, each rule\'s id and both lines). Read it before write_edits. What each effect looks like on screen is in effects_guide.',
     inputSchema: { type: 'object', properties: {} },
     call: async () => text(readFileSync(join(root, 'docs/edits.md'), 'utf8')),
   },

@@ -1,0 +1,938 @@
+[
+  {
+    "rule": "one-zoom",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "zoom",
+          "start": 1,
+          "end": 3,
+          "lane": 0,
+          "level": 2
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "zoom",
+          "start": 1,
+          "end": 3,
+          "lane": 0,
+          "level": 2
+        },
+        {
+          "id": "b",
+          "kind": "zoom",
+          "start": 2,
+          "end": 4,
+          "lane": 1,
+          "level": 0.7
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "zoom b",
+    "line1": "One zoom at a time.",
+    "line2": "Zoom in 2× runs to 0:03.0. Start it at 0:03.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "one-speed",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "speed",
+          "start": 1,
+          "end": 3,
+          "lane": 0,
+          "rate": 2
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "speed",
+          "start": 1,
+          "end": 3,
+          "lane": 0,
+          "rate": 2
+        },
+        {
+          "id": "b",
+          "kind": "speed",
+          "start": 2,
+          "end": 4,
+          "lane": 1,
+          "rate": 0.5
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "speed b",
+    "line1": "One speed at a time.",
+    "line2": "Fast 2× runs to 0:03.0. Start it at 0:03.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "one-3d",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "3d",
+          "start": 1,
+          "end": 3,
+          "lane": 0,
+          "style": "hold"
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "3d",
+          "start": 1,
+          "end": 3,
+          "lane": 0,
+          "style": "hold"
+        },
+        {
+          "id": "b",
+          "kind": "3d",
+          "start": 2,
+          "end": 4,
+          "lane": 1,
+          "style": "orbit"
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "3d b",
+    "line1": "One 3D turn at once.",
+    "line2": "3D turn runs to 0:03.0. Start it at 0:03.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "one-spotlight",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "spotlight",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "spotlight",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        },
+        {
+          "id": "b",
+          "kind": "spotlight",
+          "start": 2,
+          "end": 4,
+          "lane": 1
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "spotlight b",
+    "line1": "One spotlight at a time.",
+    "line2": "Spotlight runs to 0:03.0. Start it at 0:03.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "one-highlight",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "highlight",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "highlight",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        },
+        {
+          "id": "b",
+          "kind": "highlight",
+          "start": 2,
+          "end": 4,
+          "lane": 1
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "highlight b",
+    "line1": "One highlight at a time.",
+    "line2": "Cursor highlight runs to 0:03.0. Start it at 0:03.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "one-blur",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "blur",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "blur",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        },
+        {
+          "id": "b",
+          "kind": "blur",
+          "start": 2,
+          "end": 4,
+          "lane": 0,
+          "scope": "frame"
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 1,
+      "soundLanes": 0
+    },
+    "item": "blur b",
+    "line1": "One blur at a time.",
+    "line2": "Blur · video runs to 0:03.0. Start it at 0:03.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "one-mono",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "mono",
+          "start": 1,
+          "end": 3,
+          "lane": 0,
+          "scope": "background"
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 2,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "mono",
+          "start": 1,
+          "end": 3,
+          "lane": 0,
+          "scope": "background"
+        },
+        {
+          "id": "b",
+          "kind": "mono",
+          "start": 2,
+          "end": 4,
+          "lane": 1,
+          "scope": "scene"
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 2,
+      "soundLanes": 0
+    },
+    "item": "mono b",
+    "line1": "One black & white at once.",
+    "line2": "Black & white · background runs to 0:03.0. Start it at 0:03.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "no-zoom-in-orbit",
+    "before": {
+      "segments": [
+        {
+          "id": "o",
+          "kind": "3d",
+          "start": 1,
+          "end": 5,
+          "lane": 0,
+          "style": "orbit"
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "o",
+          "kind": "3d",
+          "start": 1,
+          "end": 5,
+          "lane": 0,
+          "style": "orbit"
+        },
+        {
+          "id": "z",
+          "kind": "zoom",
+          "start": 3,
+          "end": 6,
+          "lane": 1,
+          "level": 2
+        }
+      ],
+      "lanes": 2,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "zoom z",
+    "line1": "No zoom during an orbit.",
+    "line2": "3D orbit runs to 0:05.0. Start it at 0:05.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "move-after-move",
+    "before": {
+      "segments": [],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0,
+      "moves": [
+        {
+          "id": "a",
+          "t": 5,
+          "to": {
+            "x": 0.3,
+            "y": 0.5,
+            "scale": 0.8
+          }
+        }
+      ]
+    },
+    "after": {
+      "segments": [],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0,
+      "moves": [
+        {
+          "id": "a",
+          "t": 5,
+          "to": {
+            "x": 0.3,
+            "y": 0.5,
+            "scale": 0.8
+          }
+        },
+        {
+          "id": "b",
+          "t": 5.5,
+          "to": {
+            "x": 0.7,
+            "y": 0.5,
+            "scale": 0.8
+          },
+          "duration": 0.8
+        }
+      ]
+    },
+    "item": "move b",
+    "line1": "One move at a time.",
+    "line2": "The move before lands at 0:05.0. Land this one at 0:05.8 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "lane-taken",
+    "app": "relanes",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "spotlight",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "spotlight",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        },
+        {
+          "id": "b",
+          "kind": "highlight",
+          "start": 2,
+          "end": 4,
+          "lane": 0
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "highlight b",
+    "line1": "That lane is taken.",
+    "line2": "Spotlight is on this lane then. Put it on another lane."
+  },
+  {
+    "rule": "image-one-each",
+    "before": {
+      "segments": [
+        {
+          "id": "i",
+          "kind": "image",
+          "start": 2,
+          "end": 6,
+          "lane": 0,
+          "file": "images/logo.png",
+          "size": 0.25,
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "pulse",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 1,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "i",
+          "kind": "image",
+          "start": 2,
+          "end": 6,
+          "lane": 0,
+          "file": "images/logo.png",
+          "size": 0.25,
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "pulse",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            },
+            {
+              "id": "e2",
+              "kind": "pulse",
+              "start": 3,
+              "end": 5,
+              "lane": 1
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 1,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "image i (0:02.00–0:06.00): its pulse effect e2",
+    "line1": "One of each per image.",
+    "line2": "Its pulse runs to 0:04.0. Start it at 0:04.0 or later.",
+    "app": "refuses"
+  },
+  {
+    "rule": "image-inside",
+    "before": {
+      "segments": [
+        {
+          "id": "i",
+          "kind": "image",
+          "start": 2,
+          "end": 6,
+          "lane": 0,
+          "file": "images/logo.png",
+          "size": 0.25,
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "blur",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 1,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "i",
+          "kind": "image",
+          "start": 2,
+          "end": 6,
+          "lane": 0,
+          "file": "images/logo.png",
+          "size": 0.25,
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "blur",
+              "start": 5,
+              "end": 7,
+              "lane": 0
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 1,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "image i (0:02.00–0:06.00): its blur effect e1",
+    "line1": "Keep it inside the image.",
+    "line2": "logo.png shows 0:02.0–0:06.0. Start and end it there.",
+    "app": "refuses"
+  },
+  {
+    "rule": "image-effect-kind",
+    "before": {
+      "segments": [
+        {
+          "id": "i",
+          "kind": "image",
+          "start": 2,
+          "end": 6,
+          "lane": 0,
+          "file": "images/logo.png",
+          "size": 0.25,
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "blur",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 1,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "i",
+          "kind": "image",
+          "start": 2,
+          "end": 6,
+          "lane": 0,
+          "file": "images/logo.png",
+          "size": 0.25,
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "sparkle",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 1,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "image i (0:02.00–0:06.00): its sparkle effect e1",
+    "line1": "No such image effect.",
+    "line2": "An image takes blur, mono, fade, pulse, float or wiggle.",
+    "app": "refuses"
+  },
+  {
+    "rule": "min-length",
+    "app": "setTimes",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "spotlight",
+          "start": 1,
+          "end": 3,
+          "lane": 0
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "spotlight",
+          "start": 1,
+          "end": 1.05,
+          "lane": 0
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "spotlight a",
+    "line1": "Too short.",
+    "line2": "An item lasts at least 0.1 s, inside 0:00–0:10.0."
+  },
+  {
+    "rule": "keep-a-part",
+    "app": "toggleRemoved",
+    "before": {
+      "segments": [],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0,
+      "splits": [
+        5
+      ],
+      "removed": [
+        0
+      ]
+    },
+    "after": {
+      "segments": [],
+      "lanes": 1,
+      "textLanes": 0,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0,
+      "splits": [
+        5
+      ],
+      "removed": [
+        0,
+        5
+      ]
+    },
+    "item": "edit",
+    "line1": "Keep one clip part.",
+    "line2": "The video needs at least one kept part."
+  },
+  {
+    "rule": "text-one-each",
+    "app": "refuses",
+    "before": {
+      "segments": [
+        {
+          "id": "t",
+          "kind": "text",
+          "start": 1,
+          "end": 6,
+          "lane": 0,
+          "text": "Hi",
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "blur",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 1,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "t",
+          "kind": "text",
+          "start": 1,
+          "end": 6,
+          "lane": 0,
+          "text": "Hi",
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "blur",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            },
+            {
+              "id": "e2",
+              "kind": "blur",
+              "start": 3,
+              "end": 5,
+              "lane": 1
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 1,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "text t (0:01.00–0:06.00): its blur effect e2",
+    "line1": "One of each per text.",
+    "line2": "Its blur runs to 0:04.0. Start it at 0:04.0 or later."
+  },
+  {
+    "rule": "text-inside",
+    "app": "refuses",
+    "before": {
+      "segments": [
+        {
+          "id": "t",
+          "kind": "text",
+          "start": 1,
+          "end": 6,
+          "lane": 0,
+          "text": "Hi",
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "fade",
+              "start": 2,
+              "end": 4,
+              "lane": 0,
+              "level": 0.5
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 1,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "t",
+          "kind": "text",
+          "start": 1,
+          "end": 6,
+          "lane": 0,
+          "text": "Hi",
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "fade",
+              "start": 5,
+              "end": 7,
+              "lane": 0,
+              "level": 0.5
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 1,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "text t (0:01.00–0:06.00): its fade effect e1",
+    "line1": "Keep it inside the text.",
+    "line2": "“Hi” shows 0:01.0–0:06.0. Start and end it there."
+  },
+  {
+    "rule": "text-effect-kind",
+    "app": "refuses",
+    "before": {
+      "segments": [
+        {
+          "id": "t",
+          "kind": "text",
+          "start": 1,
+          "end": 6,
+          "lane": 0,
+          "text": "Hi",
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "blur",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 1,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "t",
+          "kind": "text",
+          "start": 1,
+          "end": 6,
+          "lane": 0,
+          "text": "Hi",
+          "effects": [
+            {
+              "id": "e1",
+              "kind": "pulse",
+              "start": 2,
+              "end": 4,
+              "lane": 0
+            }
+          ]
+        }
+      ],
+      "lanes": 1,
+      "textLanes": 1,
+      "imageLanes": 0,
+      "frameLanes": 0,
+      "soundLanes": 0
+    },
+    "item": "text t (0:01.00–0:06.00): its pulse effect e1",
+    "line1": "No such text effect.",
+    "line2": "A text takes blur, mono or fade."
+  }
+]

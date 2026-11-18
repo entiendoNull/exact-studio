@@ -53,6 +53,16 @@ enum TimelineMenus {
             .item("3D Turn") { editor.add("3d") },
         ]
         let frame: [MenuEntry] = [.item("Blur") { editor.add("blur-frame") }, .item("Black & White") { editor.add("mono-frame") }]
+        // @ref LLP 0005#refusals — the + checks the playhead first: an item that would be refused is off, with its reason
+        func checked(_ entries: [MenuEntry]) -> [MenuEntry] {
+            entries.map { entry in
+                switch entry {
+                case let .item(title, run) where !title.hasSuffix("…"): return editor.probe(run).map { .off(title, $0.menuText) } ?? entry
+                case let .sub(title, inner): return .sub(title, checked(inner))
+                default: return entry
+                }
+            }
+        }
         func on(_ lane: Int, _ entries: [MenuEntry]) -> [MenuEntry] {
             entries.map { entry in
                 switch entry {
@@ -64,21 +74,21 @@ enum TimelineMenus {
         }
         switch row {
         case .position:
-            return .menu([.title("Move the video at \(at)"), .title("Then drag the video where it should go."), .line,
+            return .menu(checked([.title("Move the video at \(at)"), .title("Then drag the video where it should go."), .line,
                           .item("Add Move Here") { editor.addMove() },
                           .sub("Motion Patterns", [.item("Side to Side") { editor.pattern("side") }, .item("Zoom Tour") { editor.pattern("tour") },
                                                    .item("Entrance") { editor.pattern("entrance") }, .item("Bounce") { editor.pattern("bounce") },
                                                    .item("Slow Push In") { editor.pattern("drift") }]),
                           .sub("3D Patterns", [.item("Turntable") { editor.pattern("turntable") }, .item("Orbit") { editor.pattern("orbit") },
                                                .item("Hero Reveal") { editor.pattern("reveal") }, .item("Flip In") { editor.pattern("flip") },
-                                               .item("Float") { editor.pattern("float") }])])
+                                               .item("Float") { editor.pattern("float") }])]))
         case .header("top"):
             return .menu([.title("Add on top of the video at \(at)"), .title("It goes on the first free lane of its kind."), .line,
                           .item("Text") { editor.add("text") }, .item("Image…") { Pictures.pick { editor.addImage($0) } }])
         case .header("sound"):
             return .direct { Sounds.pick { editor.addSound($0) } }
         case .header("frame"):
-            return .menu([.title("Add over the whole frame at \(at)"), .title("It goes on the first free lane."), .line] + frame)
+            return .menu(checked([.title("Add over the whole frame at \(at)"), .title("It goes on the first free lane."), .line] + frame))
         case .header:
             return nil
         case let .lane(space, lane):
@@ -88,7 +98,7 @@ enum TimelineMenus {
             case 2: return .direct { Pictures.pick { url in editor.onLane(lane) { editor.addImage(url) } } }
             case Edits.soundSpace: return .direct { Sounds.pick { url in editor.onLane(lane) { editor.addSound(url) } } }
             default:
-                return .menu([.title("Add to \(laneName(space, lane)) at \(at) · \(scope(space))"), .line] + on(lane, space == 3 ? frame : effects))
+                return .menu(checked([.title("Add to \(laneName(space, lane)) at \(at) · \(scope(space))"), .line] + on(lane, space == 3 ? frame : effects)))
             }
         case let .imagePosition(id):
             return .direct { editor.select(id); editor.addImageMove() }
@@ -96,13 +106,13 @@ enum TimelineMenus {
             guard lane == 0, let item = editor.edits.segments.first(where: { $0.id == id && $0.isOverlay }) else { return nil }
             let add = { (kind: String) in { editor.select(id); editor.addItemEffect(kind) } }
             if item.kind == "text" {
-                return .menu([.title("Add to “\(item.text ?? "")” at \(at) · Changes this text only"), .line,
-                              .item("Blur", add("blur")), .item("Black & White", add("mono")), .item("Fade", add("fade"))])
+                return .menu(checked([.title("Add to “\(item.text ?? "")” at \(at) · Changes this text only"), .line,
+                              .item("Blur", add("blur")), .item("Black & White", add("mono")), .item("Fade", add("fade"))]))
             }
             let name = URL(fileURLWithPath: item.file ?? "").lastPathComponent
-            return .menu([.title("Add to \(name) at \(at) · Changes this image only"), .line,
+            return .menu(checked([.title("Add to \(name) at \(at) · Changes this image only"), .line,
                           .item("Blur", add("blur")), .item("Black & White", add("mono")), .item("Fade", add("fade")), .line,
-                          .item("Pulse", add("pulse")), .item("Float", add("float")), .item("Wiggle", add("wiggle"))])
+                          .item("Pulse", add("pulse")), .item("Float", add("float")), .item("Wiggle", add("wiggle"))]))
         }
     }
 }
@@ -125,7 +135,7 @@ extension TimelineMenus {
         out.append(lane < count - 1 ? .item("Move Lane Down") { editor.moveLane(lane, space: space, by: 1) } : .dim("Move Lane Down"))
         out.append(.line)
         if space == 0 && count == 1 {
-            out.append(.off("Delete Lane", "One Effects lane always stays."))
+            out.append(.off("Delete Lane", Conflict(rule: "last-effects-lane", item: nil, Rules.line1("last-effects-lane"), "It is the last one.").menuText))
         } else if items == 0 {
             out.append(.item("Delete Lane") { editor.deleteLane(lane, space: space) })
         } else {

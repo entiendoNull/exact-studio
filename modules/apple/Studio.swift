@@ -6,7 +6,7 @@
 //   call   {op: "status"}                       → {recording, name, kind, sound, error, finished}  error: the last start's, from here or the menu bar;
 //                                                   finished: the id of the last recording that stopped, from either
 //          {op: "selection", id}                → {id, kind ("clip" for a part of the clip), level, rate, start, end,
-//                                                   startText, endText, removed, first, last, problem}
+//                                                   startText, endText, removed, first, last, problem, startWhy, endWhy}
 //          {op: "summary", id}                  → {parts, removed, effects, lanes, length, source}
 //   later  {op: "sources"}                      → {items: [{id, name, app, kind}], allowed}
 //          {op: "start", source}                → {ok, error}   source "pick-display", "pick-window", "area" or
@@ -17,7 +17,7 @@
 //          {op: "edit", id, do, track?, number?, kind?}  → {ok}
 //                 do: add (track: a kind, or zoom-in, zoom-out, slow, fast), set (number | kind),
 //                     delete, split (the selection, else the clip), split-all, auto, clear, play, split-clip, remove, join-prev, join-next,
-//                     add-lane, start / end (kind: the typed time)
+//                     add-lane, start / end (kind: the typed time), type-time (track: start or end, kind: the text so far)
 //          {op: "export", id, quality, to}      → {ok, error, path, copied}  quality best|1080p|720p|small; to movies|choose|clipboard
 //          {op: "delete", id}                   → {ok, error}
 //          {op: "reveal", path}                 → {ok}
@@ -129,7 +129,7 @@ final class Studio: ExactModule {
     private static let emptySelection: [String: Any] = [
         "id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "", "removed": false, "first": false,
         "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
-        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": "",
+        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": "", "startWhy": "", "endWhy": "",
         "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "", "volume": 100, "fadeIn": 0, "fadeOut": 0,
         "layer": "", "canForward": false, "canBackward": false, "canFront": false, "canBack": false,
     ]
@@ -309,6 +309,7 @@ final class Studio: ExactModule {
         case "pattern": e.pattern(r["kind"] as? String ?? "")
         case "find-device": e.findDevice()
         case "forget-device": e.forgetDevice()
+        case "type-time": e.checkTime(r["track"] as? String ?? "", Self.seconds(r["kind"] as? String))
         case "start": e.setTimes(start: Self.seconds(r["kind"] as? String), end: nil)
         case "end": e.setTimes(start: nil, end: Self.seconds(r["kind"] as? String))
         case "timeline":
