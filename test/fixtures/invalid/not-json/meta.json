@@ -1,0 +1,28 @@
+{
+  "clicks": [
+    {
+      "t": 2.0,
+      "x": 0.5,
+      "y": 0.5
+    },
+    {
+      "t": 6.5,
+      "x": 0.3,
+      "y": 0.6
+    }
+  ],
+  "created": 1700001016,
+  "crop": {
+    "h": 1,
+    "w": 1,
+    "x": 0,
+    "y": 0
+  },
+  "cursorBaked": false,
+  "duration": 10,
+  "height": 180,
+  "id": "not-json",
+  "kind": "window",
+  "name": "not-json",
+  "width": 320
+}

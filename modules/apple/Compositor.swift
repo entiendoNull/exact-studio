@@ -168,6 +168,95 @@ struct Angles: Codable, Equatable {
     var tilt = 0.0, turn = 0.0, roll = 0.0
 }
 
+// @ref LLP 0004#reading-the-files — a key the format calls optional takes its documented default
+extension Segment {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        kind = try c.decode(String.self, forKey: .kind)
+        start = try c.decode(Double.self, forKey: .start)
+        end = try c.decode(Double.self, forKey: .end)
+        lane = try c.decodeIfPresent(Int.self, forKey: .lane) ?? 0
+        level = try c.decodeIfPresent(Double.self, forKey: .level)
+        rate = try c.decodeIfPresent(Double.self, forKey: .rate)
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+        x = try c.decodeIfPresent(Double.self, forKey: .x)
+        y = try c.decodeIfPresent(Double.self, forKey: .y)
+        size = try c.decodeIfPresent(Double.self, forKey: .size)
+        color = try c.decodeIfPresent(String.self, forKey: .color)
+        weight = try c.decodeIfPresent(String.self, forKey: .weight)
+        style = try c.decodeIfPresent(String.self, forKey: .style)
+        animIn = try c.decodeIfPresent(String.self, forKey: .animIn)
+        animOut = try c.decodeIfPresent(String.self, forKey: .animOut)
+        loop = try c.decodeIfPresent(String.self, forKey: .loop)
+        rotation = try c.decodeIfPresent(Double.self, forKey: .rotation)
+        scope = try c.decodeIfPresent(String.self, forKey: .scope)
+        tilt = try c.decodeIfPresent(Double.self, forKey: .tilt)
+        turn = try c.decodeIfPresent(Double.self, forKey: .turn)
+        roll = try c.decodeIfPresent(Double.self, forKey: .roll)
+        file = try c.decodeIfPresent(String.self, forKey: .file)
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity)
+        radius = try c.decodeIfPresent(Double.self, forKey: .radius)
+        shadow = try c.decodeIfPresent(Bool.self, forKey: .shadow)
+        moves = try c.decodeIfPresent([Move].self, forKey: .moves)
+        effects = try c.decodeIfPresent([Segment].self, forKey: .effects)
+        rect = try c.decodeIfPresent(UnitRect.self, forKey: .rect)
+    }
+}
+
+extension Placement {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Placement()
+        x = try c.decodeIfPresent(Double.self, forKey: .x) ?? d.x
+        y = try c.decodeIfPresent(Double.self, forKey: .y) ?? d.y
+        scale = try c.decodeIfPresent(Double.self, forKey: .scale) ?? d.scale
+    }
+}
+
+extension Move {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        t = try c.decode(Double.self, forKey: .t)
+        to = try c.decode(Placement.self, forKey: .to)
+        style = try c.decodeIfPresent(String.self, forKey: .style) ?? "smooth"
+        duration = try c.decodeIfPresent(Double.self, forKey: .duration) ?? 0.8
+        angles = try c.decodeIfPresent(Angles.self, forKey: .angles)
+    }
+}
+
+extension Angles {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tilt = try c.decodeIfPresent(Double.self, forKey: .tilt) ?? 0
+        turn = try c.decodeIfPresent(Double.self, forKey: .turn) ?? 0
+        roll = try c.decodeIfPresent(Double.self, forKey: .roll) ?? 0
+    }
+}
+
+// @ref LLP 0004#a-file-that-cannot-be-read — a file that exists but can't be read is never replaced
+enum EditFile {
+    static func read<T: Decodable>(_ type: T.Type, _ url: URL) throws -> T? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try JSONDecoder().decode(T.self, from: Data(contentsOf: url))
+    }
+
+    static func problem(_ error: Error) -> String {
+        func at(_ c: DecodingError.Context) -> String { c.codingPath.map(\.stringValue).joined(separator: ".") }
+        let path: String, what: String
+        switch error {
+        case let DecodingError.typeMismatch(_, c), let DecodingError.valueNotFound(_, c): (path, what) = (at(c), c.debugDescription)
+        case let DecodingError.keyNotFound(k, c): (path, what) = (at(c), "missing \(k.stringValue)")
+        case let DecodingError.dataCorrupted(c):
+            let detail = (c.underlyingError as NSError?)?.userInfo[NSDebugDescriptionErrorKey] as? String
+            (path, what) = (at(c), detail.map { "\(c.debugDescription) \($0)" } ?? c.debugDescription)
+        default: return error.localizedDescription
+        }
+        return path.isEmpty ? what : "\(path): \(what)"
+    }
+}
+
 /// A sound you add: music or an effect, from a file in the recording's `sounds/` folder.
 /// Only its start is in recording time; from there it plays straight through for `length`
 /// seconds, whatever the video's cuts and speed changes do.

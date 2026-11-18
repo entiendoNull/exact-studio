@@ -27,6 +27,8 @@ final class Editor {
     private(set) var selected = ""
     /// Why the last edit was refused; cleared by the next one that lands.
     private(set) var problem = ""
+    // @ref LLP 0004#a-file-that-cannot-be-read
+    private(set) var unreadable: [String: String] = [:]
     private var listeners: [ObjectIdentifier: () -> Void] = [:]
     private var playing: NSKeyValueObservation?
     /// Said when the selection, an edit or the play state changes: the module turns it into a watched topic.
@@ -45,19 +47,24 @@ final class Editor {
         cursor = Library.cursor(id)
         asset = AVURLAsset(url: Library.recordings.appendingPathComponent(id).appendingPathComponent("capture.mov"))
         let file = Library.recordings.appendingPathComponent(id).appendingPathComponent("edits.json")
-        if let data = try? Data(contentsOf: file), let saved = try? JSONDecoder().decode(Edits.self, from: data) {
-            edits = saved
-        } else {
+        do {
             // A first open starts clean; Zoom on Clicks adds zooms where the clicks are.
+            edits = try EditFile.read(Edits.self, file) ?? Edits()
+        } catch {
             edits = Edits()
+            unreadable["edits.json"] = Editor.unreadableText("edits.json", error)
         }
         map = TimeMap(duration: meta.duration, edits: edits)
         let folder = Library.recordings.appendingPathComponent(id)
         // The recording's own look; a recording without one starts from the last look used.
-        if let data = try? Data(contentsOf: folder.appendingPathComponent("look.json")), let saved = try? JSONDecoder().decode(Look.self, from: data) {
-            look = saved
-        } else if let last = UserDefaults.standard.data(forKey: "ExactStudio.lastLook"), let saved = try? JSONDecoder().decode(Look.self, from: last) {
-            look = saved
+        do {
+            if let saved = try EditFile.read(Look.self, folder.appendingPathComponent("look.json")) {
+                look = saved
+            } else if let last = UserDefaults.standard.data(forKey: "ExactStudio.lastLook"), let saved = try? JSONDecoder().decode(Look.self, from: last) {
+                look = saved
+            }
+        } catch {
+            unreadable["look.json"] = Editor.unreadableText("look.json", error)
         }
         state = RenderState(Framing(meta: meta, look: look, edits: edits, cursor: cursor, folder: folder))
         player.actionAtItemEnd = .pause
@@ -100,16 +107,18 @@ final class Editor {
         stamps = now
         let read = { (name: String) in try? Data(contentsOf: self.folder.appendingPathComponent(name)) }
         var timing = false, drawn = false
-        if let data = read("edits.json"), let disk = try? JSONDecoder().decode(Edits.self, from: data), disk != edits {
+        let wasUnreadable = unreadable
+        if let disk = reread("edits.json", Edits.self), disk != edits {
             timing = Editor.timing(disk) != Editor.timing(edits)
             edits = disk
             drawn = true
             dropGoneSelection()
         }
-        if let data = read("look.json"), let disk = try? JSONDecoder().decode(Look.self, from: data), disk != look {
+        if let disk = reread("look.json", Look.self), disk != look {
             look = disk
             drawn = true
         }
+        if unreadable != wasUnreadable { drawn = true }
         if let data = read("meta.json"), let disk = try? JSONDecoder().decode(RecordingMeta.self, from: data),
            (try? JSONEncoder().encode(disk)) != (try? JSONEncoder().encode(meta)) {
             meta = disk
@@ -122,9 +131,27 @@ final class Editor {
         notify()
     }
 
+    private func reread<T: Decodable>(_ name: String, _ type: T.Type) -> T? {
+        do {
+            let value = try EditFile.read(type, folder.appendingPathComponent(name))
+            unreadable[name] = nil
+            return value
+        } catch {
+            unreadable[name] = Editor.unreadableText(name, error)
+            return nil
+        }
+    }
+
+    static func unreadableText(_ name: String, _ error: Error) -> String {
+        "\(name) can’t be read (\(EditFile.problem(error))). Nothing is saved over it until it is fixed: run exact-studio validate, fix the file, and the change shows here."
+    }
+
+    private var blocked: String? { unreadable["edits.json"] ?? unreadable["look.json"] }
+
     // MARK: The look
 
     private func saveLook() {
+        guard unreadable["look.json"] == nil else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? encoder.encode(look) else { return }
@@ -156,6 +183,7 @@ final class Editor {
         default: return
         }
         guard l != look else { return }
+        if let why = unreadable["look.json"] { return refuse(why) }
         look = l
         saveLook()
         refresh()
@@ -347,6 +375,7 @@ final class Editor {
     // MARK: Editing
 
     private func save() {
+        guard unreadable["edits.json"] == nil else { return }
         // Pretty and sorted, so a person or an agent can read it and a diff stays small.
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -443,6 +472,7 @@ final class Editor {
     /// edits as they were and say why.
     @discardableResult
     private func apply(_ next: Edits) -> Bool {
+        if let why = unreadable["edits.json"] { refuse(why); return false }
         let nextMap = TimeMap(duration: duration, edits: next)
         if let why = next.segments.lazy.compactMap({ next.conflict($0) }).first ?? next.sounds.lazy.compactMap({ next.conflict($0, map: nextMap) }).first {
             refuse(why)
@@ -1584,7 +1614,7 @@ final class Editor {
         var out: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "",
                                   "removed": false, "first": false, "last": false, "transition": "cut", "text": "", "size": 0,
                                   "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "", "rotation": 0,
-                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": problem,
+                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": blocked ?? problem,
                                   "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "",
                                   "volume": 100, "fadeIn": 0, "fadeOut": 0]
         if selected == Editor.recordedSound {

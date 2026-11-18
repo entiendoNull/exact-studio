@@ -26,8 +26,15 @@ const outOf = (r: { code: number; out: string; err: string }) =>
 /** The recording's folder, from the CLI (so "latest" and unique prefixes work the same). */
 async function folder(id: string): Promise<string> {
   const r = await run(['show', id, '--json']);
-  if (r.code) throw new Error((r.err || r.out).trim() || `no recording "${id}"`);
-  return JSON.parse(r.out).folder;
+  const shown = (() => {
+    try {
+      return JSON.parse(r.out);
+    } catch {
+      return null;
+    }
+  })();
+  if (!shown?.folder) throw new Error((r.err || r.out).trim() || `no recording "${id}"`);
+  return shown.folder;
 }
 
 /** Pretty-printed with sorted keys, as the app writes them, so diffs stay readable. */
@@ -141,7 +148,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'read_edits',
-    description: 'The raw edits.json (the timeline) and look.json (the frame) of a recording. Read edit_format first to know the fields.',
+    description: 'The raw edits.json (the timeline) and look.json (the frame) of a recording. Read edit_format first to know the fields. It works when a file can\'t be read too (the other tools then refuse the recording and validate_recording says why), so you can repair it with write_edits or write_look.',
     inputSchema: { type: 'object', properties: { id }, required: ['id'] },
     call: async (a) => {
       const dir = await folder(a.id);

@@ -43,3 +43,25 @@ this folder gets them too.
 - File ▸ Open Recording… (⌘O, also "Open…" in the sidebar) picks a recording folder: the one with `meta.json`.
 - A folder already in the library is selected. A folder from somewhere else is copied into the library first, under its id.
 - If the library already has that id, the copy in the library wins. Nothing is overwritten.
+
+## Reading the files
+
+- `docs/edits.md` and `schema/` decide what a valid file is. The Swift reader accepts every file they accept.
+- A key the format calls optional takes its documented default: a segment's `lane` 0, a move's `style`
+  `smooth` and `duration` 0.8, a missing `x` or `y` of `base` or `to` 0.5 and `scale` 1, a missing angle 0.
+- Swift's synthesized `Decodable` ignores a property's default value, so each model type with one
+  decodes by hand (`Segment`, `Placement`, `Move`, `Angles`, `Sound`, `ThreeD`, `Look`, `Edits`).
+- `validate` refuses what the code refuses, and the schema says the same: a mask's `style` is an enum.
+
+## A file that cannot be read
+
+Decided 2026-11-18, after a file the reader was too strict for opened empty and the next change saved over it.
+
+- A missing `edits.json` or `look.json` is a fresh start. A file that exists and does not decode is never written over.
+- The app opens the recording empty (or with the last look), shows why in the inspector, and refuses every
+  change to that file. A change to the other file still saves.
+- When the file is fixed on disk, the app reads it within a second and saves again. No backup copy: the file
+  itself is never touched, so there is nothing to restore.
+- The CLI: every verb but `validate` stops with exit 1 and writes nothing. `validate` lists why.
+  `show --json` gives the folder and the problems under `unreadable`, so the MCP server's `read_edits` and
+  `write_edits` can still reach the file to repair it.

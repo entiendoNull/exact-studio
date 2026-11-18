@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { drop, library, root, run } from './library';
 
@@ -83,6 +83,23 @@ test('write_edits keeps a valid edit and refuses a clash, leaving the file as it
   expect(refused.isError).toBe(true);
   expect(refused.content[0].text).toContain('Two zooms can’t overlap.');
   expect(readFileSync(file, 'utf8')).toBe(kept);
+});
+
+test('a file that can\'t be read: read_edits shows it, the other tools refuse it, write_edits repairs it', async () => {
+  const file = join(lib, 'old-format/edits.json');
+  const broken = '{ "lanes": "two" }';
+  writeFileSync(file, broken);
+  const read = await tool('read_edits', { id: 'old-format' });
+  expect(read.isError).toBe(false);
+  expect(read.content[0].text).toStartWith(`edits.json:\n${broken}`);
+  const shown = await tool('show_recording', { id: 'old-format' });
+  expect(shown.isError).toBe(true);
+  expect(shown.content[0].text).toContain("old-format can't be read, so nothing was done; the file is left as it is.");
+  expect((await tool('add_mask', { id: 'old-format', rect: { x: 0.1, y: 0.1, w: 0.2, h: 0.2 } })).isError).toBe(true);
+  expect((await tool('write_edits', { id: 'old-format', edits: { lanes: 'three' } })).isError).toBe(true);
+  expect(readFileSync(file, 'utf8')).toBe(broken);
+  expect((await tool('write_edits', { id: 'old-format', edits: { textLanes: 0, segments: [{ id: 'z', kind: 'zoom', start: 1, end: 2, level: 2 }] } })).isError).toBe(false);
+  expect((await tool('validate_recording', { id: 'old-format' })).content[0].text).toBe('ok');
 });
 
 test('an unknown tool or method is an error, not a crash', async () => {
