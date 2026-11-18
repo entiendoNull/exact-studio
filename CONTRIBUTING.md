@@ -37,17 +37,46 @@ The first build takes several minutes. The first recording asks for Screen Recor
 1. Create a branch from `main` with a short name, for example `fix-crop-handles`.
 2. Read the design note for the part you change. The notes are in [`llp/`](llp), and they start at [`llp/0000-exact-studio.explainer.md`](llp/0000-exact-studio.explainer.md). An `@ref LLP NNNN#section` comment in the code names the note behind that code.
 3. Make the change. If it changes a decision, update the note in the same pull request.
-4. Run the checks:
-
-   ```sh
-   bun exact.mjs test    # the tests in app.test.contract
-   ./ref-check           # the design notes and the @ref comments
-   ```
-
-5. Run the app and try your change.
-6. Open a pull request against `main`.
+4. Add a test for the change. Every bug fix and every feature adds one (see below).
+5. Run the checks: `./check`. It must pass.
+6. Run the app and try your change.
+7. Open a pull request against `main`.
 
 Do not edit `exact.mjs` or the generated block at the top of `AGENTS.md`. `bun exact.mjs update` writes them.
+
+## Run the checks
+
+```sh
+./check           # everything, about 40 s after the first build
+./check --fast    # without the macOS UI tests, about 10 s
+```
+
+`./check` does not stop at the first failure. It runs every part, prints each part's time, and exits 1 when a part fails.
+
+| Part | What it checks | Where |
+|---|---|---|
+| `./ref-check` | The design notes and the `@ref` comments | `llp/` |
+| `contract build` | The view compiles | `app.contract` |
+| Edit model and Editor | Lane rules, cuts, the time map, templates, old files; the Editor's split, remove, join, add, drag, delete, templates and undo, on a real video | `test/model/main.swift` |
+| CLI | `validate` and `show` on the fixture recordings against goldens, the JSON Schemas, `frame`, `template`, `image`, `sound`, `mask` | `test/cli.test.ts`, `test/fixtures/`, `test/golden/` |
+| MCP server | Its tools and a `write_edits` round trip | `test/mcp.test.ts` |
+| macOS UI | The empty app; the editor on fixture recordings: the timeline, the inspector, templates | `app.test.contract`, `test/ui/*.test.contract` |
+
+### Add a test
+
+Every bug fix and every feature adds a test that fails without it. Put it at the lowest level that shows the behaviour:
+
+- A rule of the edit files (a lane rule, a cut, a field): a test in `test/model/main.swift`, or a fixture.
+- A problem `validate` must report: a folder in `test/fixtures/invalid/<name>/` with a `meta.json` and the bad `edits.json`. The first run writes `test/golden/validate/<name>.txt`. Read it, then commit it.
+- What `show` prints: a folder in `test/fixtures/valid/`. Its goldens are written the same way.
+- What an Editor action does (the timeline's buttons and menus call these): a test in `test/model/main.swift` that opens a fixture with `open(…)`.
+- What the window shows or does: a test in `test/ui/editor.test.contract`. It runs on the fixture recordings, each test from a fresh copy.
+
+When an output changes on purpose, run `./check --update` and read the diff of `test/golden/` before you commit it.
+
+Fixtures hold no video. `./check` makes a small `capture.mov` in `.exact/test/` and copies `test/fixtures/media/` into each recording.
+
+The UI tests click the timeline at fixed points (`tap "timeline" drag 0 0 from x y mouse`) in a 1440×900 window. A change to the timeline's layout can move a row; then update the points.
 
 ## Pull requests
 
