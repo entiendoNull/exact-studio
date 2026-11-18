@@ -19,7 +19,6 @@ enum Plus {
 
 enum TimelineRow: Equatable {
     case position
-    case header(String)
     case lane(Int, Int)
     case imagePosition(String)
     case imageEffects(String, Int)
@@ -31,11 +30,12 @@ enum TimelineMenus {
         return String(format: "%d:%02d.%d", m, sec, Int((s - floor(s)) * 10))
     }
 
+    // @ref LLP 0002#rows — plain names; a second row of a kind adds a number, one row has none
     static func kindName(_ space: Int) -> String {
-        space == 1 ? "Text" : space == 2 ? "Image" : space == 3 ? "Whole Frame" : space == Edits.soundSpace ? "Sound" : "Effects"
+        space == 1 ? "Text" : space == 2 ? "Images" : space == 3 ? "Whole Frame" : space == Edits.soundSpace ? "Music & Sound" : "Effects"
     }
 
-    static func laneName(_ space: Int, _ lane: Int) -> String { "\(kindName(space)) \(lane + 1)" }
+    static func laneName(_ space: Int, _ lane: Int) -> String { lane == 0 ? kindName(space) : "\(kindName(space)) \(lane + 1)" }
 
     static func scope(_ space: Int) -> String {
         space == 1 || space == 2 ? "Sits on top of the video" : space == 3 ? "Changes the whole picture"
@@ -83,15 +83,6 @@ enum TimelineMenus {
                           .sub("3D Patterns", [.item("Turntable") { editor.pattern("turntable") }, .item("Orbit") { editor.pattern("orbit") },
                                                .item("Hero Reveal") { editor.pattern("reveal") }, .item("Flip In") { editor.pattern("flip") },
                                                .item("Float") { editor.pattern("float") }])]))
-        case .header("top"):
-            return .menu([.title("Add on top of the video at \(at)"), .title("It goes on the first free lane of its kind."), .line,
-                          .item("Text") { editor.add("text") }, .item("Image…") { Pictures.pick { editor.addImage($0) } }])
-        case .header("sound"):
-            return .direct { Sounds.pick { editor.addSound($0) } }
-        case .header("frame"):
-            return .menu(checked([.title("Add over the whole frame at \(at)"), .title("It goes on the first free lane."), .line] + frame))
-        case .header:
-            return nil
         case let .lane(space, lane):
             guard lane <= editor.edits.laneCount(space: space) else { return nil }
             switch space {

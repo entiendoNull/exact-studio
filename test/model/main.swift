@@ -661,7 +661,28 @@ try FileManager.default.createDirectory(at: Library.recordings, withIntermediate
 try makeVideo(video, seconds: 10)
 var opened = 0
 
-func open(_ fixture: String, edits: String? = nil, look: String? = nil) -> Editor {
+/// The fixture video with a recorded sound: the beep, laid under it.
+func soundVideo() throws -> URL {
+    let out = scratch.appendingPathComponent("capture-sound.mov")
+    if FileManager.default.fileExists(atPath: out.path) { return out }
+    let mix = AVMutableComposition()
+    let picture = AVURLAsset(url: video), beep = AVURLAsset(url: fixtures.appendingPathComponent("media/beep.wav"))
+    let whole = CMTimeRange(start: .zero, duration: picture.duration)
+    try mix.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)!
+        .insertTimeRange(whole, of: picture.tracks(withMediaType: .video)[0], at: .zero)
+    try mix.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)!
+        .insertTimeRange(CMTimeRange(start: .zero, duration: beep.duration), of: beep.tracks(withMediaType: .audio)[0], at: .zero)
+    let export = AVAssetExportSession(asset: mix, presetName: AVAssetExportPresetPassthrough)!
+    export.outputURL = out
+    export.outputFileType = .mov
+    let done = DispatchSemaphore(value: 0)
+    export.exportAsynchronously { done.signal() }
+    done.wait()
+    guard export.status == .completed else { throw export.error ?? CocoaError(.fileWriteUnknown) }
+    return out
+}
+
+func open(_ fixture: String, edits: String? = nil, look: String? = nil, capture: URL? = nil) -> Editor {
     opened += 1
     let id = "\(fixture)-\(opened)"
     let folder = Library.recordings.appendingPathComponent(id)
@@ -670,13 +691,13 @@ func open(_ fixture: String, edits: String? = nil, look: String? = nil) -> Edito
         try! FileManager.default.createDirectory(at: folder.appendingPathComponent(dir), withIntermediateDirectories: true)
         try! FileManager.default.copyItem(at: fixtures.appendingPathComponent("media/\(file)"), to: folder.appendingPathComponent("\(dir)/\(file)"))
     }
-    try! FileManager.default.copyItem(at: video, to: folder.appendingPathComponent("capture.mov"))
+    try! FileManager.default.copyItem(at: capture ?? video, to: folder.appendingPathComponent("capture.mov"))
     var meta = try! JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("meta.json"))) as! [String: Any]
     meta["id"] = id
     try! JSONSerialization.data(withJSONObject: meta).write(to: folder.appendingPathComponent("meta.json"))
     if let edits { try! Data(edits.utf8).write(to: folder.appendingPathComponent("edits.json")) }
     if let look { try! Data(look.utf8).write(to: folder.appendingPathComponent("look.json")) }
-    Settings.store.removeObject(forKey: Settings.foldedKey)
+    Settings.showEmptyLanes = false
     let e = Editor(id: id)!
     expect(wait { e.player.currentItem?.status == .readyToPlay }, "the player never got ready")
     return e
@@ -990,17 +1011,16 @@ test("a + menu holds items only, grouped, under a line that says where they land
     let e = open("empty")
     at(e, 1)
     let effects = menu(.lane(0, 0), e)
-    eq(effects.titles, ["Add to Effects 1 at 0:01.0 · Changes the video only"])
+    eq(effects.titles, ["Add to Effects at 0:01.0 · Changes the video only"])
     eq(effects.choices, ["Zoom › Zoom In", "Zoom › Zoom Out", "Zoom › Zoom on Clicks", "Speed › Slow Down", "Speed › Speed Up",
                          "Look › Spotlight", "Look › Cursor Highlight", "Look › Blur", "Look › Black & White", "Mask", "3D Turn"])
-    eq(menu(.header("top"), e).choices, ["Text", "Image…"])
-    eq(menu(.header("frame"), e).choices, ["Blur", "Black & White"])
+    eq(menu(.lane(3, 0), e).choices, ["Blur", "Black & White"])
     eq(menu(.position, e).choices.count, 11)
     eq(menu(.position, e).titles, ["Move the video at 0:01.0", "Then drag the video where it should go."])
-    for row in [TimelineRow.lane(0, 0), .header("top"), .header("frame"), .position] {
+    for row in [TimelineRow.lane(0, 0), .lane(3, 0), .position] {
         expect(!menu(row, e).choices.contains { $0.contains("Lane") }, "\(row)'s + offers a lane")
     }
-    guard case .direct? = TimelineMenus.plus(.header("sound"), e) else { return problems.append("the Sound +, with one choice, should add at once") }
+    guard case .direct? = TimelineMenus.plus(.lane(Edits.soundSpace, 0), e) else { return problems.append("the Sound +, with one choice, should add at once") }
     expect(TimelineMenus.plus(.lane(1, 1), e) == nil, "a lane past the one that may open has no +")
 }
 
@@ -1013,7 +1033,7 @@ test("a lane's + adds on that lane; with no room there, on the first free lane o
     menu(.lane(0, 1), e).run("Look › Blur")
     eq(e.edits.segments.first { $0.kind == "blur" }?.lane, 0, "no room on lane 2, so the first free lane")
     eq(e.edits.lanes, 2)
-    menu(.header("top"), e).run("Text")
+    e.add("text")
     eq(e.edits.textLanes, 1)
     guard case let .direct(add)? = TimelineMenus.plus(.lane(1, 0), e) else { return problems.append("a text lane's + adds a text at once") }
     add()
@@ -1025,11 +1045,12 @@ test("a lane's + adds on that lane; with no room there, on the first free lane o
 test("a lane's ⋯ moves it up and down and deletes it; it makes no empty lane; each is one undo step") {
     let e = open("empty")
     at(e, 1)
-    menu(.header("top"), e).run("Text")
-    menu(.header("top"), e).run("Text")
+    e.add("text")
+    e.add("text")
     let first = e.edits.texts[0].id
     let lanes = { TimelineMenus.lane(1, $0, e) { _, _, run in run() } }
-    eq(lanes(0).titles, ["Text 1 · Sits on top of the video"])
+    eq(lanes(0).titles, ["Text · Sits on top of the video"])
+    eq(lanes(1).titles, ["Text 2 · Sits on top of the video"])
     eq(lanes(0).choices, ["Move Lane Up", "Move Lane Down", "Delete Lane and Its 1 Text…", "Show Empty Lanes"])
     expect(!lanes(0).choices.contains { $0.hasPrefix("New") }, "a lane is never made empty")
     expect(!lanes(0).run("Move Lane Up"), "the top lane can't move up")
@@ -1052,7 +1073,7 @@ test("Delete Lane says what goes with it and asks when it holds items; the last 
     expect(first.choices.contains("Delete Lane and Its 1 Effect…"), "\(first.choices)")
     eq(first.reason("Delete Lane"), nil, "no lane has to stay")
     first.run("Delete Lane and Its 1 Effect…")
-    eq(question, "Delete Effects 1 and its 1 effect?")
+    eq(question, "Delete Effects and its 1 effect?")
     eq(e.edits.lanes, 0); eq(e.edits.zooms.count, 0)
     eq(e.undoName, "Delete Lane")
     e.undo()
@@ -1658,34 +1679,18 @@ test("a half dragged away from the other is no longer joined") {
     eq(e.edits.segments.first { $0.id == "z1" }?.joinEnd, nil); eq(e.selectedSegment?.joinStart, nil)
 }
 
-test("the old folds move to the new key once: the old Clip fold is dropped, the others stay folded") {
+test("the old folds go once: with no groups, nothing stays folded") {
     expect(Settings.store != UserDefaults.standard, "the tests keep their settings apart from the person's")
-    Settings.store.set(["video", "top", "sound"], forKey: "ExactStudio.folded")
+    Settings.store.set(["top", "sound"], forKey: "ExactStudio.foldedGroups")
+    Settings.store.set(["video", "top"], forKey: "ExactStudio.folded")
     Settings.store.set(true, forKey: "ExactStudio.videoClosed")
     let e = open("full")
-    eq(e.folded, ["top", "sound"])
-    expect(e.videoOpen, "VIDEO starts open")
-    expect(Settings.store.object(forKey: "ExactStudio.folded") == nil, "the old key is gone")
-    expect(Settings.store.object(forKey: "ExactStudio.videoClosed") == nil, "the old Clip key is gone")
-    e.toggle(group: "video")
-    Settings.store.set(["frame"], forKey: "ExactStudio.folded")
-    eq(Settings.folded, ["top", "sound", "video"], "the new key wins over a later old one")
-}
-
-test("folding VIDEO hides the Clip too; selecting a clip part, a move, the sound or an effect opens it again") {
-    let e = open("full")
-    let text = e.edits.segments.first { $0.space == 1 }!.id, zoom = e.edits.segments.first { $0.space == 0 }!.id
-    for id in [e.pieces[0].id, "m:" + e.edits.moves[0].id, Editor.recordedSound, zoom] {
-        e.select("")
-        e.toggle(group: "video")
-        expect(!e.videoOpen, "folded before selecting \(id)")
-        e.select(id)
-        expect(e.videoOpen, "selecting \(id) opens VIDEO")
-    }
-    e.select("")
-    e.toggle(group: "top")
-    e.select(text)
-    expect(!e.folded.contains("top"), "selecting a text opens ON TOP")
+    for key in Settings.oldFoldKeys { expect(Settings.store.object(forKey: key) == nil, "\(key) is gone") }
+    let view = timeline(e, height: 2000)
+    let kinds = view.rows.map(\.kind)
+    expect(kinds.contains(.position) && kinds.contains(.lane(0, 0)) && kinds.contains(.lane(1, 0)) && kinds.contains(.lane(Edits.soundSpace, 0)),
+           "every row shows: \(kinds)")
+    view.detach()
 }
 
 func timeline(_ e: Editor, height: CGFloat) -> TimelineView {
@@ -1694,46 +1699,55 @@ func timeline(_ e: Editor, height: CGFloat) -> TimelineView {
     return view
 }
 
-test("VIDEO folded is one summary line: the Clip and its rows go, ON TOP moves up under it") {
+test("the rows keep a fixed kind order under the Clip, with plain names; a second row of a kind adds a number") {
     let e = open("full")
     let view = timeline(e, height: 2000)
-    let open = view.rows
-    eq(open.first?.kind, .header("video"))
-    let clipEnd = open.first { $0.kind == .position }!.y
-    expect(clipEnd > open[0].maxY + 40, "open, the Clip sits between VIDEO and its rows")
-    e.toggle(group: "video")
-    let folded = view.rows
-    eq(folded.map(\.kind).filter { [.position, .lane(0, 0), .sound].contains($0) }, [], "folded, no row of the video's")
-    eq(folded[1].kind, .header("top"))
-    near(Double(folded[1].y - folded[0].maxY), 8, "ON TOP sits right under the VIDEO line")
-    e.toggle(group: "video")
-    eq(view.rows.map(\.y), open.map(\.y), "unfolded, every row is back where it was")
+    let order = view.rows.map { r -> String in
+        switch r.kind {
+        case .position: return "Moves"
+        case let .lane(space, lane): return TimelineMenus.laneName(space, lane)
+        case .imagePosition: return "image Moves"
+        case .imageEffects: return "image Effects"
+        }
+    }
+    eq(order, ["Moves", "Effects", "Effects 2", "Effects 3", "Whole Frame", "Text", "Images", "Music & Sound"])
+    expect(view.rows[0].y > 48 + 58, "the first row sits under the Clip")
+    e.select(e.edits.images[0].id)
+    expect(view.rows.contains { $0.kind == .imagePosition(e.edits.images[0].id) }, "selecting an image opens its own rows under its lane")
     view.detach()
 }
 
-test("a fold or unfold keeps the header clicked where it was, however far the rows are scrolled") {
+test("the recorded sound is a band inside the Clip: a click on it selects the sound, a click above it the clip part") {
+    let e = open("full", capture: try soundVideo())
+    expect(e.hasSound, "the capture has a recorded sound")
+    let view = timeline(e, height: 600)
+    let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: true)
+    window.contentView = view
+    func click(_ x: CGFloat, _ y: CGFloat) {
+        let at = CGPoint(x: x, y: window.frame.height - y)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let event = NSEvent.mouseEvent(with: type, location: at, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                           context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+            type == .leftMouseDown ? view.mouseDown(with: event) : view.mouseUp(with: event)
+        }
+    }
+    eq(view.rows.first?.y, 48 + 58 + 8, "no Sound row: the first row sits right under the Clip")
+    click(300, 48 + 58 - 6)
+    eq(e.selected, Editor.recordedSound, "the band selects the recorded sound")
+    eq(e.selection["kind"] as? String, "recorded")
+    click(300, 48 + 12)
+    eq(e.selected, e.pieces[0].id, "above the band, the clip part")
+    view.detach()
+}
+
+test("an image lane opened out of sight leaves the rows in sight where they were") {
     let e = open("full")
     let view = timeline(e, height: 150)
     func screen(_ kind: TimelineView.Kind) -> CGFloat? { view.rows.first { $0.kind == kind }.map { $0.y - view.scrollY } }
-    func scroll(to kind: TimelineView.Kind) {
-        view.scrollY = view.rows.first { $0.kind == kind }!.y - 60
-        expect(view.scrollY + view.bounds.height < view.rows.last!.maxY, "the rows scroll as far as \(kind)")
-    }
-    for group in ["top", "sound"] {
-        scroll(to: .header(group))
-        let before = screen(.header(group))
-        e.toggle(group: group)
-        eq(screen(.header(group)), before, "folding \(group)")
-        e.toggle(group: group)
-        eq(screen(.header(group)), before, "unfolding \(group)")
-    }
-    scroll(to: .header("sound"))
-    let sound = screen(.header("sound"))
-    e.toggle(group: "video")
-    eq(screen(.header("sound")), sound, "VIDEO folded out of sight leaves the rows in sight where they were")
-    e.select(e.pieces[0].id)
-    expect(e.videoOpen, "selecting a clip part opens VIDEO")
-    eq(screen(.header("sound")), sound, "VIDEO opened out of sight leaves the rows in sight where they were")
+    view.scrollY = view.rows.first { $0.kind == .lane(2, 0) }!.y - 60
+    let before = screen(.lane(2, 0))
+    e.toggleLane(space: 2, 0)
+    eq(screen(.lane(2, 0)), before, "opening the lane keeps its header where it was")
     view.detach()
 }
 

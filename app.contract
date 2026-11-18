@@ -1276,7 +1276,7 @@ component SettingsCard
             option "Blur out" value="blur"
             option "None" value="none"
         text "Drag the image in the preview to place it; scroll over it to resize." font="-exact-caption1" color="-exact-tertiary-label"
-        text "To animate it or add an effect to it, use the + on its Position and Effects rows in the timeline." font="-exact-caption1" color="-exact-tertiary-label"
+        text "To animate it or add an effect to it, use the + on its Moves and Effects rows in the timeline." font="-exact-caption1" color="-exact-tertiary-label"
       // @ref LLP 0005#depth — the Applies-to stack again, with this item as the line
       if sel.layer != ""
         column gap=10 testId="depth"

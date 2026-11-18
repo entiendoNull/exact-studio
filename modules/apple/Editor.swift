@@ -42,6 +42,7 @@ final class Editor {
 
     init?(id: String) {
         guard let meta = Library.meta(id) else { return nil }
+        Settings.dropOldFolds()
         CursorArt.prepare()
         self.id = id
         self.meta = meta
@@ -631,9 +632,6 @@ final class Editor {
             recentImages.removeAll { $0 == item.id }
             recentImages.insert(item.id, at: 0)
         }
-        if let s = selectedSegment ?? selectedItem { reveal(space: s.space) }
-        else if selectedSound != nil { reveal(space: Edits.soundSpace) }
-        else if selectedPiece != nil || selectedMove != nil || id == Editor.recordedSound { reveal(space: 0) }
         notify()
     }
 
@@ -758,19 +756,15 @@ final class Editor {
         }
         next.segments.append(s)
         next.fitLanes()
-        reveal(space: s.space)
         if apply(next) { select(s.id) }
     }
 
     // MARK: Images
     // @ref LLP 0002#images — images share lanes; each has its own moves and effects
 
-    /// The image lanes and the text lanes open in the timeline, and the groups folded away: "video" (the Clip and every
-    /// row under it), "top" (texts and images), "sound" and "frame". How the timeline looks, not part of the edit.
+    /// The image lanes and the text lanes open in the timeline. How the timeline looks, not part of the edit.
     private(set) var openImageLanes: Set<Int> = []
     private(set) var openTextLanes: Set<Int> = []
-    private(set) var folded = Settings.folded
-    var videoOpen: Bool { !folded.contains("video") }
     /// The images and texts selected so far, the last one first.
     private var recentImages: [String] = []
 
@@ -803,19 +797,6 @@ final class Editor {
         if let s = selectedItem, let hit = on.first(where: { $0.id == s.id }) { return hit }
         if let id = recentImages.first(where: { id in on.contains { $0.id == id } }) { return on.first { $0.id == id } }
         return on.first { playhead >= $0.start && playhead < $0.end } ?? on.first
-    }
-
-    func toggle(group: String) {
-        if folded.contains(group) { folded.remove(group) } else { folded.insert(group) }
-        Settings.store.set(folded.sorted(), forKey: Settings.foldedKey)
-        redrawViews()
-    }
-
-    /// The group a selection or a new segment shows in opens, so it is never out of sight.
-    private func reveal(space: Int) {
-        guard !probing else { return }
-        let group = space == 0 ? "video" : space == 3 ? "frame" : space == Edits.soundSpace ? "sound" : "top"
-        if folded.contains(group) { toggle(group: group) }
     }
 
     // MARK: Timeline zoom
@@ -1139,7 +1120,6 @@ final class Editor {
             }
             next.sounds.append(s)
             next.fitLanes()
-            reveal(space: Edits.soundSpace)
             if apply(next) { select(Editor.soundID(s.id)) }
         } catch { refuse((error as? Sounds.Refused)?.why ?? "Couldn’t add that sound.") }
     }
@@ -1679,7 +1659,6 @@ final class Editor {
         let m = Move(id: Editor.newID("m"), t: playhead, to: placementNow, style: lastStyle, duration: lastDuration)
         var next = edits
         next.moves.append(m)
-        reveal(space: 0)
         apply(next)
         select("m:" + m.id)
     }
