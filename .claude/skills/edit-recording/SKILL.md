@@ -9,6 +9,12 @@ A recording is a folder under `~/Movies/Exact Studio/Recordings/<id>/`. Its edit
 `edits.json` (the timeline) and `look.json` (the frame). Read `docs/edits.md` first: it has every
 field, its units and the overlap rules; `schema/*.schema.json` are the JSON Schemas.
 
+This skill is the mechanics. To make a recording into promotional material (a launch video, a demo,
+an ad, a social clip), also follow the `direct-recording` skill: it decides what to cut, where to
+zoom, what the texts say and how long they stay. When Exact Studio itself gets in the way (a bug, a
+confusing verb or doc, a missing feature), follow the `send-feedback` skill: note it, and ask the
+owner before anything is sent.
+
 ## Recording
 
 An agent can make the recording too. The app records, so it must be built; `sources` and `record start`

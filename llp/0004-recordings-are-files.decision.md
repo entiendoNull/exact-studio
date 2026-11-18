@@ -32,7 +32,11 @@ guide, the schema and the editing skill have it too.
 `./exact-studio` (list, show, validate, frame, export, template, image, sound, mask, schema) builds from the app's own
 renderer sources (LLP 0003), so a frame from the CLI is the frame the app exports.
 `sources` and `record start|status|stop` ask the running app to record (LLP 0007).
-The `edit-recording` skill in `.claude/skills/` is the workflow for agents.
+The `edit-recording` skill in `.claude/skills/` is the workflow for agents. Beside it, `direct-recording`
+is the craft (what to cut, emphasise and say in a promo) and `send-feedback` how an agent reports a
+problem with Exact Studio, only after the owner agrees. The MCP server returns both
+(`directing_guide`, `feedback_guide`), as `edit_format` returns the format, so an agent outside
+this folder gets them too.
 
 ## Opening
 
