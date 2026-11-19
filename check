@@ -26,6 +26,7 @@ step() {
 }
 
 begin=$SECONDS
+step "Exact is at the pinned commit (./exact-pin)" ./exact-pin
 step "design notes (./ref-check)" ./ref-check
 step "the view compiles (contract build)" bun exact.mjs contract build app.contract --json --errors-only
 step "the CLI builds (./exact-studio)" ./exact-studio schema

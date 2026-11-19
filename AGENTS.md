@@ -3,7 +3,8 @@
 
 `app.contract` is the view, `app.ts` its data module, `app.test.contract` its tests, `app.json`
 the manifest: set its `app.name` and `app.id` before the first build. The app uses the exact2
-checkout at `../exact` by path (`EXACT2` overrides it).
+checkout at `../exact` by path (`EXACT2` overrides it), at the commit in `exact-commit`; `./exact-pin`
+checks it. Never pull Exact for this app; moving the pin is its own change (`./exact-pin --set`).
 
 This file is already in your instructions. Start from the nearest pattern: `bun exact.mjs
 pattern` lists them and `pattern <name>` writes one, tested. ../exact/docs/start-here-site.md (a site) or

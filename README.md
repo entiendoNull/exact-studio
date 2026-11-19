@@ -23,6 +23,7 @@ Clone this repository and [expo/exact](https://github.com/expo/exact) into the s
 ```sh
 git clone https://github.com/entiendoNull/exact-studio.git
 git clone https://github.com/expo/exact.git
+git -C exact checkout "$(cat exact-studio/exact-commit)"   # the Exact commit this app is built and tested with
 cd exact-studio
 bun ../exact/scripts/exact.mjs setup    # once: installs Rust and the other tools that Exact pins
 bun exact.mjs mac --run                 # builds the app and opens it
@@ -30,7 +31,7 @@ bun exact.mjs mac --run                 # builds the app and opens it
 
 The first build takes several minutes. The first recording asks for Screen Recording permission. Allow it in System Settings › Privacy & Security, then reopen the app.
 
-To update, run `git pull` in both folders and run the last command again.
+To update, run `git pull` in `exact-studio`, check out the commit in `exact-commit` in `exact`, and run the last command again. `./exact-pin` says whether the Exact checkout is at that commit. Exact changes often, so a newer Exact commit may not build this app.
 
 ## Features
 
