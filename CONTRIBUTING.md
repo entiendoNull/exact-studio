@@ -16,6 +16,7 @@ Fork this repository on GitHub, then clone your fork and Exact into the same fol
 ```sh
 git clone git@github.com:<you>/exact-studio.git
 git clone git@github.com:expo/exact.git
+git -C exact checkout "$(cat exact-studio/exact-commit)"
 cd exact-studio
 bun ../exact/scripts/exact.mjs setup
 ```
@@ -23,6 +24,8 @@ bun ../exact/scripts/exact.mjs setup
 `setup` installs the Rust toolchain and the other tools that Exact pins. `bun ../exact/scripts/exact.mjs setup --check` lists what is missing without installing anything.
 
 If your Exact checkout is somewhere else, set `EXACT2` to its path.
+
+`exact-commit` names the Exact commit this app is built and tested with, and `./check` fails when the Exact checkout is at another commit. To move to a newer Exact, check it out, build and run `./check`, then run `./exact-pin --set` and commit `exact-commit` with the fixes the new Exact needs.
 
 ## Run the app
 

@@ -1,0 +1,41 @@
+#!/bin/bash
+set -uo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+usage="./exact-pin [--set]
+  Compares the Exact checkout with the commit in exact-commit; exit 1 when they differ.
+  --set  writes the Exact checkout's current commit to exact-commit"
+
+set_pin=0
+for a in "$@"; do
+  case "$a" in
+    --set) set_pin=1 ;;
+    -h|--help) echo "$usage"; exit 0 ;;
+    *) echo "$usage" >&2; exit 2 ;;
+  esac
+done
+
+if [ -n "${EXACT2:-}" ]; then
+  exact=$EXACT2
+elif [ -e ../exact/scripts/app-cli.mjs ]; then
+  exact=../exact
+else
+  common=$(git rev-parse --path-format=absolute --git-common-dir)
+  exact=$(dirname "$common")/../exact
+fi
+
+head=$(git -C "$exact" rev-parse HEAD 2>/dev/null) || { echo "no Exact checkout at $exact" >&2; exit 1; }
+if [ "$set_pin" = 1 ]; then
+  echo "$head" > exact-commit
+  echo "exact-commit is now $head"
+  exit 0
+fi
+
+pin=$(tr -d '[:space:]' < exact-commit)
+if [ "$head" != "$pin" ]; then
+  echo "Exact at $exact is at $head, but exact-commit names $pin." >&2
+  echo "Run: git -C $exact checkout $pin" >&2
+  echo "Or, to move the pin after testing with the newer Exact: ./exact-pin --set" >&2
+  exit 1
+fi
+echo "Exact is at the pinned commit $pin"
