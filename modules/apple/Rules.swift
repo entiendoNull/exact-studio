@@ -39,6 +39,7 @@ enum Rules {
         ("one-spotlight", "One spotlight at a time."), ("one-highlight", "One highlight at a time."),
         ("one-blur", "One blur at a time."), ("one-mono", "One black & white at once."),
         ("no-zoom-in-orbit", "No zoom during an orbit."), ("move-after-move", "One move at a time."),
+        ("move-in-crossfade", "No move during a crossfade."),
         ("lane-taken", "That lane is taken."), ("image-one-each", "One of each per image."),
         ("image-inside", "Keep it inside the image."), ("image-effect-kind", "No such image effect."),
         ("text-one-each", "One of each per text."), ("text-inside", "Keep it inside the text."), ("text-effect-kind", "No such text effect."),
@@ -90,6 +91,19 @@ enum Rules {
                                 "The next move starts at \(t). Land this one by \(t)."))
         }
         return out
+    }
+
+    // @ref LLP 0002#what-may-overlap — each side of a crossfade draws the video at its own time, so a move in it shows the video twice
+    static func crossfades(_ m: Move, map: TimeMap) -> [Conflict] {
+        let from = m.t - m.duration
+        for (a, b) in zip(map.pieces, map.pieces.dropFirst()) where b.overlap > 0 {
+            for side in [(a.src1 - b.overlap * a.rate, a.src1), (b.src0, b.src0 + b.overlap * b.rate)] where from < side.1 - 0.001 && side.0 < m.t - 0.001 {
+                let blends = "The crossfade blends \(clock(side.0, up: false))–\(clock(side.1, up: true))."
+                let out = from >= side.0 - 0.0001 ? "Start this move at \(clock(side.1, up: true)) or later." : "Land this move by \(clock(side.0, up: false))."
+                return [Conflict(rule: "move-in-crossfade", item: .move(m), line1("move-in-crossfade"), blends + " " + out)]
+            }
+        }
+        return []
     }
 
     static func minLength(_ item: ItemRef?, duration: Double) -> Conflict {
@@ -203,10 +217,11 @@ extension Edits {
     static func conflict(in image: Segment) -> Conflict? { conflicts(in: image).first }
 
     func conflicts(ofMove m: Move) -> [Conflict] { Rules.moves(m, in: moves) }
+    func conflicts(ofMove m: Move, map: TimeMap) -> [Conflict] { conflicts(ofMove: m) + Rules.crossfades(m, map: map) }
 
     func conflicts(of ref: ItemRef, map: TimeMap) -> [Conflict] {
         switch ref.kind {
-        case "move": return moves.first { $0.id == ref.id }.map(conflicts(ofMove:)) ?? []
+        case "move": return moves.first { $0.id == ref.id }.map { conflicts(ofMove: $0, map: map) } ?? []
         case "sound": return sounds.first { $0.id == ref.id }.flatMap { conflict($0, map: map) }.map { [$0] } ?? []
         case "image-move", "image-effect":
             return segments.first { $0.id == ref.image && $0.kind == "image" }.map { Edits.conflicts(in: $0).filter { $0.item == ref } } ?? []
@@ -218,7 +233,7 @@ extension Edits {
         var out: [Conflict] = [], seen = Set<String>()
         func add(_ c: Conflict) { if seen.insert(c.key).inserted { out.append(c) } }
         for s in segments.sorted(by: { $0.start > $1.start }) { conflicts(of: s).forEach(add) }
-        for m in moves.sorted(by: { $0.t > $1.t }) { conflicts(ofMove: m).forEach(add) }
+        for m in moves.sorted(by: { $0.t > $1.t }) { conflicts(ofMove: m, map: map).forEach(add) }
         for s in sounds.sorted(by: { $0.start > $1.start }) { conflict(s, map: map).map(add) }
         return out
     }

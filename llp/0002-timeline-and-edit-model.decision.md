@@ -75,6 +75,8 @@ Decided by Jacob on 2026-11-18, with the rules table (docs/edits.md, "What may o
 - **P1, `move-after-move`.** A move starts travelling only after the move before it lands, for the
   video and for each image. Why: `Framing.movedPose` let a later move that started early jump to its
   own progress the moment the earlier one landed.
+- **`move-in-crossfade`.** A video move does not travel while a crossfade blends. Each side of the blend
+  draws the video at its own time, so a move there showed it twice; a dissolve showing both shots stays.
 - **P2, `one-blur` and `one-mono`.** One blur at a time and one black and white at a time, whatever
   each covers. Why: a video blur under a whole-frame blur blurred the video twice. The clash group
   no longer counts `scope`; the lanes still do.

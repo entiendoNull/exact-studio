@@ -78,7 +78,7 @@
     },
     "moves": {
       "type": "array",
-      "description": "The video's moves. Each starts travelling (t - duration) only after the one before it lands (rule move-after-move)",
+      "description": "The video's moves. Each starts travelling (t - duration) only after the one before it lands (rule move-after-move), and does not travel while a crossfade blends (rule move-in-crossfade)",
       "items": {
         "type": "object",
         "properties": {

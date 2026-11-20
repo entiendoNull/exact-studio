@@ -409,6 +409,7 @@ way: "start at" later, "end by" earlier.
 | `one-mono` | One `mono` at a time, whatever its `scope`. | One black & white at once. | Black & white runs to 0:12.0. Start it at 0:12.0 or later. |
 | `no-zoom-in-orbit` | No `zoom` during a `3d` with `style` `"orbit"`: half way the screen faces away. | No zoom during an orbit. | 3D orbit runs to 0:05.0. Start it at 0:05.0 or later. |
 | `move-after-move` | A move starts travelling (`t - duration`) only after the move before it lands: for `moves` and for each image's own. | One move at a time. | The move before lands at 0:09.0. Land this one at 0:09.8 or later. |
+| `move-in-crossfade` | A move in `moves` does not travel (`t - duration` to `t`) while a `crossfade` blends: the end of the part before the cut and the start of the part after, each as much of the recording as the blend shows (more in a fast part). Each side draws the video at its own time, so a move there shows the video twice. A `fade` and an image's moves are fine. | No move during a crossfade. | The crossfade blends 0:14.0–0:14.6. Land this move by 0:14.0. |
 | `lane-taken` | Two items on one lane never overlap; sounds by when they play in the video. | That lane is taken. | Spotlight is on this lane then. Put it on another lane. |
 | `image-one-each` | On one image, one of each effect kind at a time. | One of each per image. | Its pulse runs to 0:06.0. Start it at 0:06.0 or later. |
 | `image-inside` | An image's own effects and moves stay inside its time. | Keep it inside the image. | logo.png shows 0:30.0–0:36.0. Start and end it there. |
@@ -445,7 +446,8 @@ default), `linear`, `spring`, `zoom` (through full screen), `swipe`, `fade`, `sp
 ([how each looks](effects.md#move-styles)). `to` is
 where it lands (`x`, `y`, `scale`, with the same defaults as `base`), and `angles` (`tilt`, `turn`,
 `roll` in degrees, each default 0) the 3D angle it lands at, used while `three.on`; without `angles`
-it keeps the angle it had. A move starts travelling only after the one before it lands (`move-after-move`).
+it keeps the angle it had. A move starts travelling only after the one before it lands (`move-after-move`), and does not travel
+while a crossfade blends (`move-in-crossfade`): land it before the blend, or start it after.
 
 ### 3D: `three`
 
