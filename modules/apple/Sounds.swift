@@ -65,6 +65,13 @@ enum Sounds {
         guard length >= 0.1 else { return nil }
         return Sound(id: id, file: file, start: start, length: (length * 1000).rounded(.down) / 1000, fadeOut: length > 2 ? 0.5 : 0)
     }
+
+    static func asRecorded(_ url: URL, offset: Double, into recording: URL, duration: Double) throws -> RecordedSound {
+        guard offset.isFinite else { throw Refused(why: "The offset must be a number of seconds.") }
+        let made = RecordedSound(file: try bring(url, into: recording), offset: offset)
+        if let why = made.problems(in: recording, duration: duration).first { throw Refused(why: why) }
+        return made
+    }
 }
 
 /// A sound's loudness over time, for drawing: the loudest sample in each hundredth of a second, 0–1
@@ -77,7 +84,7 @@ final class Waveform {
     /// The loudest peak from `a` to `b` seconds of the file.
     func level(_ a: Double, _ b: Double) -> Float {
         let i = max(0, Int(a * Self.perSecond)), j = min(peaks.count, max(i + 1, Int(b * Self.perSecond)))
-        guard i < j else { return 0 }
+        guard b > 0, i < j else { return 0 }
         return peaks[i..<j].max() ?? 0
     }
 

@@ -466,7 +466,14 @@ final class Editor {
     }
 
     /// Whether the recording has sound.
-    private(set) lazy var hasSound = !asset.tracks(withMediaType: .audio).isEmpty
+    var hasSound: Bool { edits.recordedSound != nil || capturedSound }
+    private(set) lazy var capturedSound = !asset.tracks(withMediaType: .audio).isEmpty
+
+    // @ref LLP 0002#sound
+    var recordedSoundFile: (url: URL, offset: Double) {
+        guard let r = edits.recordedSound else { return (asset.url, 0) }
+        return (folder.appendingPathComponent(r.file), r.offset)
+    }
 
     func setVolume(_ v: Double) {
         var next = edits
@@ -570,6 +577,7 @@ final class Editor {
     private static func timing(_ e: Edits) -> String {
         "\(e.splits)|\(e.removed)|\(e.transitions.sorted { $0.key < $1.key })|\(e.speeds.map { "\($0.start),\($0.end),\($0.rate ?? 1)" })"
             + "|\(e.sounds.map { "\($0.file),\($0.start),\($0.length),\($0.offset)" })"
+            + "|\(e.recordedSound.map { "\($0.file),\($0.offset)" } ?? "")"
     }
 
     /// Land `next` unless it breaks a rule the edit did not break before; else keep the
@@ -1227,13 +1235,17 @@ final class Editor {
     }
 
     /// Set one field of the selected sound ("volume" in percent, "fadeIn" or "fadeOut" in seconds),
-    /// or of the recorded sound ("volume" in percent, "mute").
+    /// or of the recorded sound ("volume" in percent, "mute", "captured" to play capture.mov's own again).
     func setSound(_ field: String, _ value: String) {
         let n = Double(value)
         if selected == Editor.recordedSound {
             switch field {
             case "volume": if let n { setVolume(n / 100) }
             case "mute": setVolume(value == "true" ? 0 : 1)
+            case "captured":
+                var next = edits
+                next.recordedSound = nil
+                apply(next)
             default: break
             }
             return
@@ -2032,7 +2044,8 @@ final class Editor {
                                   "volume": 100, "fadeIn": 0, "fadeOut": 0,
                                   "layer": "", "canForward": false, "canBackward": false, "canFront": false, "canBack": false]
         if selected == Editor.recordedSound {
-            out.merge(["id": selected, "kind": "recorded", "volume": (edits.volume * 100).rounded()]) { $1 }
+            out.merge(["id": selected, "kind": "recorded", "volume": (edits.volume * 100).rounded(),
+                       "file": edits.recordedSound.map { URL(fileURLWithPath: $0.file).lastPathComponent } ?? ""]) { $1 }
         } else if let s = selectedSound {
             let end = s.end(map)
             out.merge(["id": selected, "kind": "sound", "start": s.start, "end": end, "startText": Editor.stamp(s.start), "endText": Editor.stamp(end),
@@ -2266,6 +2279,7 @@ enum History {
         if e == ["base"] { return "Placement" }
         if e == ["three"] { return "3D" }
         if e == ["volume"] { return "Volume" }
+        if e == ["recordedSound"] { return b.edits.recordedSound == nil ? "Use Captured Sound" : "Recorded Sound" }
         if e.isSubset(of: ["sounds", "soundLanes"]) {
             let c = changed(a.edits.sounds, b.edits.sounds, id: \.id)
             if c.added.count == 1, c.removed.isEmpty { return "Add Sound" }

@@ -1,0 +1,1 @@
+recorded sound (images/logo.png, offset 0.0s): images/logo.png is not a readable sound file in recorded-sound-format/ (m4a, mp3, wav, aiff, aif, aac, caf)

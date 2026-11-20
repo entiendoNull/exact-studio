@@ -20,5 +20,6 @@
       "start" : 3.5
     }
   ],
-  "recorded" : 10
+  "recorded" : 10,
+  "recordedSound" : null
 }

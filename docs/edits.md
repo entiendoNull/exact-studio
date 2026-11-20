@@ -29,6 +29,7 @@ read an entry before you use a thing for the first time.
 ./exact-studio show latest               # parts, segments, moves and look, in readable form
 ./exact-studio image latest logo.png --at 2 --for 6   # a picture on top of the video; prints the new segment
 ./exact-studio sound latest music.m4a --at 0          # music over the video; prints the new sound
+./exact-studio sound latest app-audio.wav --as-recorded   # the app's own sound, lined up with the video: it follows the cuts
 ./exact-studio frame latest 2 --raw                   # .exact/frame.png: the full recorded frame, to measure a mask on
 ./exact-studio mask latest --rect 0.1,0.2,0.3,0.05 --at 2 --for 6   # hide that part; prints the new segment
 # …edit edits.json / look.json…
@@ -99,8 +100,30 @@ it the video keeps everything from 53 s to the end. `validate` adds a note when 
 removed and the last part is kept after a gap, and `show` lists every part.
 
 The recorded sound, if any, follows the picture: it is cut, sped up and faded at the same places.
-`volume` (0–1, default 1) sets how loud it is; 0 mutes it. Sounds you add are different: see
-[Sounds](#sounds).
+`volume` (0–1, default 1) sets how loud it is; 0 mutes it. Sounds you add are different: they never
+follow the cuts (see [Sounds](#sounds)).
+
+The recorded sound is `capture.mov`'s own, unless `recordedSound` names a file in the recording's
+folder to play in its place. Use it when a file is the app's own sound, recorded outside Exact
+Studio and lined up with the video: it is then cut, sped up, crossfaded and faded with the picture,
+at `volume`, and the Clip's band draws it. `capture.mov` is never changed.
+
+```sh
+./exact-studio sound <id> app-audio.wav --as-recorded --offset 0.2   # copies it to sounds/ and sets recordedSound
+./exact-studio sound <id> --as-recorded off                          # capture.mov's sound again
+```
+
+```json
+"recordedSound": { "file": "sounds/app-audio.wav", "offset": 0.2 }
+```
+
+**recordedSound fields:** `file` (required; a path inside the recording's folder, in `sounds/`: M4A,
+MP3, WAV, AIFF, AAC or CAF); `offset` (seconds, default 0): recording time t plays file time
+t + `offset`. So 0.2 skips the file's first 0.2 s, and -1 starts the file 1 s into the recording.
+Where t + `offset` is before the file starts or after it ends, the recorded sound is silent. Leave
+`recordedSound` out (or delete it) to play `capture.mov`'s sound; a recording made with sound off
+then has none. `validate` refuses a file that is missing or not a sound, and an offset that leaves
+none of the file inside the recording. `show` says where the recorded sound comes from.
 
 ### Segments
 
@@ -371,7 +394,9 @@ file (without `--for`: all of it, or what fits before the video ends), and print
 when you cut earlier parts. From there it plays straight through, in video time, for `length`
 seconds or until the video ends. A `start` inside a removed part begins at the next kept moment.
 Music that jumps at every cut sounds wrong; the recorded sound (`volume`) is the one that follows the
-cuts. `show` prints when each sound plays in video time.
+cuts. `show` prints when each sound plays in video time. When the file is the app's own sound,
+lined up with the video, do not add it as a sound: make it the recorded sound with
+`sound <id> <file> --as-recorded` (see [Cutting](#cutting-splits-removed-transitions)), and it follows the cuts.
 
 **Sound fields:** `id` (unique among the sounds, no colon); `file` (a path inside the recording's
 folder, in `sounds/`: M4A, MP3, WAV, AIFF, AAC or CAF); `lane` (0 up); `start`

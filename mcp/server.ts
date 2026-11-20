@@ -175,7 +175,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   },
   {
     name: 'show_recording',
-    description: 'One recording in readable form: its length, clip parts, segments (texts with their own effects, images with their own moves and effects, effects with their reach, masks with their rect, zooms, speed, 3D; a text or image behind the video says so; the rows of texts and images front to back), sounds added over it, moves and look.',
+    description: 'One recording in readable form: its length, clip parts, segments (texts with their own effects, images with their own moves and effects, effects with their reach, masks with their rect, zooms, speed, 3D; a text or image behind the video says so; the rows of texts and images front to back), where the recorded sound comes from (capture.mov or a file), sounds added over it, moves and look.',
     inputSchema: { type: 'object', properties: { id }, required: ['id'] },
     call: async (a) => outOf(await run(['show', a.id])),
   },
@@ -278,7 +278,8 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
   {
     name: 'add_sound',
     description:
-      'Adds music or another sound over the video: copies the audio file into the recording and adds a sound, which it returns. An added sound plays straight through from its start: the video\'s cuts and speed changes do not cut it (the recorded sound, set by "volume", is the one that follows the cuts). Then use read_edits and write_edits to set its volume, fadeIn and fadeOut, or trim it with offset and length. This is the only way to bring a sound file into a recording.',
+      'Adds music or another sound over the video: copies the audio file into the recording and adds a sound, which it returns. An added sound plays straight through from its start: the video\'s cuts and speed changes do not cut it (the recorded sound, set by "volume", is the one that follows the cuts). Then use read_edits and write_edits to set its volume, fadeIn and fadeOut, or trim it with offset and length. ' +
+      'With as_recorded, the file is the app\'s own sound lined up with the video: it becomes the recorded sound in place of capture.mov\'s (edits.json "recordedSound"), so it follows the cuts, speed changes and fades, at "volume"; recording time t plays file time t + offset, silent outside the file. Delete "recordedSound" with write_edits to go back to capture.mov\'s sound. This is the only way to bring a sound file into a recording.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -286,11 +287,15 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
         path: { type: 'string', description: 'The sound file (an absolute path): M4A, MP3, WAV, AIFF, AAC or CAF.' },
         at: { type: 'number', description: 'When it starts, in seconds of the recording. Default 0.' },
         for: { type: 'number', description: 'How many seconds of the file play. Default: all of it, or what fits before the video ends.' },
+        as_recorded: { type: 'boolean', description: 'Make the file the recorded sound, which follows the cuts, instead of adding a sound. Leave out at and for.' },
+        offset: { type: 'number', description: 'With as_recorded: recording time t plays file time t + offset, in seconds. Default 0; below 0 when the file starts after the recording.' },
       },
       required: ['id', 'path'],
     },
     call: async (a) =>
-      outOf(await run(['sound', a.id, a.path, ...(a.at !== undefined ? ['--at', String(a.at)] : []), ...(a.for !== undefined ? ['--for', String(a.for)] : [])])),
+      outOf(await run(a.as_recorded
+        ? ['sound', a.id, a.path, '--as-recorded', ...(a.offset !== undefined ? ['--offset', String(a.offset)] : [])]
+        : ['sound', a.id, a.path, ...(a.at !== undefined ? ['--at', String(a.at)] : []), ...(a.for !== undefined ? ['--for', String(a.for)] : [])])),
   },
   {
     name: 'add_mask',
@@ -392,7 +397,7 @@ async function handle(msg: any): Promise<unknown> {
         capabilities: { tools: {} },
         serverInfo: { name: 'exact-studio', version: '0.1.0' },
         instructions:
-          'Record and edit Exact Studio screen recordings. To record without a person: list_sources → start_recording (with max_seconds) → drive the app you record with your other tools → stop_recording, which returns the new id → edit it as below. Everything on the source is recorded, so prefer a Simulator or one window, and hide any secret with add_mask. Never stop a recording you did not start. To edit, loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing, and effects_guide with a name before you use an effect, move style, animation or transition for the first time: it says what the viewer sees, its timing and its limits. To put a picture on the video, call add_image first, then edit the segment it returns. A text or an image sits in front of the video, or behind it with layer "behind" (a logo or title revealed when the video moves away); the text and image rows are one stack, front to back in layers ("text:0", "image:0", "video"), and that is the draw order. Leave the lane counts out: put each item on lane 0 of its kind, lane 1 only when it overlaps another of its kind. A blur or mono reaches as far down the stack (background, behind the video, video, images, texts) as its scope says; to blur one text or one image alone, give it its own effects. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end. To make a recording into a promo, demo or ad for an audience, read directing_guide first: it decides what to cut, where to zoom, what the texts say and how long they stay. When Exact Studio gets in the way (a bug, a confusing tool, a missing feature), read feedback_guide: note it and ask the person before anything is sent.',
+          'Record and edit Exact Studio screen recordings. To record without a person: list_sources → start_recording (with max_seconds) → drive the app you record with your other tools → stop_recording, which returns the new id → edit it as below. Everything on the source is recorded, so prefer a Simulator or one window, and hide any secret with add_mask. Never stop a recording you did not start. To edit, loop: list_recordings → show_recording → read_edits → write_edits/write_look → render_frame to look → export_video. Read edit_format before writing, and effects_guide with a name before you use an effect, move style, animation or transition for the first time: it says what the viewer sees, its timing and its limits. To put a picture on the video, call add_image first, then edit the segment it returns. A text or an image sits in front of the video, or behind it with layer "behind" (a logo or title revealed when the video moves away); the text and image rows are one stack, front to back in layers ("text:0", "image:0", "video"), and that is the draw order. Leave the lane counts out: put each item on lane 0 of its kind, lane 1 only when it overlaps another of its kind. A blur or mono reaches as far down the stack (background, behind the video, video, images, texts) as its scope says; to blur one text or one image alone, give it its own effects. To add music or a sound, call add_sound; it plays straight through, not cut by the video\'s cuts. When a file is the app\'s own sound lined up with the video, call add_sound with as_recorded: it becomes the recorded sound and follows the cuts. To hide a secret (an API key, an email, a name), find it with render_frame raw, then call add_mask with its rect in 0–1 of that raw picture (the full recorded frame, before the crop), and check render_frame at the mask\'s start, middle and end. To make a recording into a promo, demo or ad for an audience, read directing_guide first: it decides what to cut, where to zoom, what the texts say and how long they stay. When Exact Studio gets in the way (a bug, a confusing tool, a missing feature), read feedback_guide: note it and ask the person before anything is sent.',
       };
     case 'ping':
       return {};

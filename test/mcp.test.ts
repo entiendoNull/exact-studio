@@ -158,6 +158,13 @@ test('a file that can\'t be read: read_edits shows it, the other tools refuse it
   expect((await tool('validate_recording', { id: 'old-format' })).content[0].text).toBe('ok');
 });
 
+test('add_sound with as_recorded makes the file the recorded sound, which show_recording names', async () => {
+  const made = await tool('add_sound', { id: 'joined', path: join(root, 'test/fixtures/media/beep.wav'), as_recorded: true, offset: 0.5 });
+  expect(made.isError).toBe(false);
+  expect(JSON.parse(readFileSync(join(lib, 'joined/edits.json'), 'utf8')).recordedSound).toEqual({ file: 'sounds/beep.wav', offset: 0.5 });
+  expect((await tool('show_recording', { id: 'joined' })).content[0].text).toContain('recorded sound: sounds/beep.wav in place of capture.mov\'s');
+});
+
 test('an unknown tool or method is an error, not a crash', async () => {
   expect((await call('tools/call', { name: 'nope' })).error.code).toBe(-32602);
   expect((await call('nope')).error.code).toBe(-32601);

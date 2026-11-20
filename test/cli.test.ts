@@ -446,6 +446,35 @@ describe('verbs that change a recording leave it valid', () => {
     expect(run(lib, 'validate', 'empty').out).toBe('ok\n');
   });
 
+  test('sound --as-recorded makes a file the recorded sound; show says so; --as-recorded off goes back', () => {
+    const dir = library('valid', true);
+    try {
+      writeFileSync(join(dir, 'joined/edits.json'), JSON.stringify({ splits: [1, 2, 5, 6], removed: [1, 5], volume: 0.5 }));
+      const set = run(dir, 'sound', 'joined', join(fixtures, 'media/beep.wav'), '--as-recorded', '--offset', '-0.5');
+      expect(set.err).toBe('');
+      expect(set.code).toBe(0);
+      matches('sound/as-recorded.txt', set.out);
+      const edits = JSON.parse(readFileSync(join(dir, 'joined/edits.json'), 'utf8'));
+      expect(edits.recordedSound).toEqual({ file: 'sounds/beep.wav', offset: -0.5 });
+      expect(check(editsSchema, edits)).toEqual([]);
+      expect(run(dir, 'validate', 'joined').out).toBe('ok\n');
+      matches('show/as-recorded.txt', run(dir, 'show', 'joined').out);
+      expect(JSON.parse(run(dir, 'show', 'joined', '--json').out).recordedSound).toEqual({ file: 'sounds/beep.wav', offset: -0.5 });
+      const late = run(dir, 'sound', 'joined', join(fixtures, 'media/beep.wav'), '--as-recorded', '--offset', '3');
+      expect(late.code).toBe(1);
+      expect(late.err).toBe('offset 3.0s is past the file\'s end (it holds 2.000s), so none of it plays\n');
+      expect(run(dir, 'sound', 'joined', join(fixtures, 'media/beep.wav'), '--as-recorded', '--at', '1').code).toBe(2);
+      const off = run(dir, 'sound', 'joined', '--as-recorded', 'off');
+      expect(off.code).toBe(0);
+      expect(off.out).toBe('joined (edits.json): the recorded sound is none; capture.mov has no sound\n');
+      expect(JSON.parse(readFileSync(join(dir, 'joined/edits.json'), 'utf8')).recordedSound).toBeUndefined();
+      expect(check(editsSchema, { recordedSound: { file: 'sounds/a.wav', offset: -1 } })).toEqual([]);
+      expect(check(editsSchema, { recordedSound: { offset: 1 } })).toEqual(['/recordedSound: missing file']);
+    } finally {
+      drop(dir);
+    }
+  });
+
   test('bad arguments are refused with exit 2 and a reason', () => {
     const outside = run(lib, 'mask', 'empty', '--rect', '0.9,0.2,0.3,0.05');
     expect(outside.code).toBe(2);
