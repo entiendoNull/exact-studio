@@ -1058,7 +1058,7 @@ test("a + menu holds items only, grouped, under a line that says where they land
     let effects = menu(.lane(0, 0), e)
     eq(effects.titles, ["Add to Effects at 0:01.0 · Changes the video only"])
     eq(effects.choices, ["Zoom › Zoom In", "Zoom › Zoom Out", "Zoom › Zoom on Clicks", "Speed › Slow Down", "Speed › Speed Up",
-                         "Look › Spotlight", "Look › Cursor Highlight", "Look › Blur", "Look › Black & White", "Mask", "3D Turn"])
+                         "Look › Spotlight", "Look › Cursor Highlight", "Look › Blur", "Look › Black & White", "Mask", "3D Turn", "Shake"])
     eq(menu(.position, e).choices.count, 11)
     eq(menu(.position, e).titles, ["Move the video at 0:01.0", "Then drag the video where it should go."])
     for row in [TimelineRow.lane(0, 0), .position] {
@@ -1080,7 +1080,7 @@ test("+ Add holds every kind of thing, each with a second line that says what it
     eq(menu.line("Effect"), "The video, or the whole frame"); eq(menu.line("Move"), "Where the video goes")
     eq(menu.line("Music & Sound…"), "Plays over the video")
     eq(menu.choices.filter { $0.hasPrefix("Effect › ") }, ["Effect › Speed › Slow Down", "Effect › Speed › Speed Up", "Effect › Spotlight",
-        "Effect › Cursor Highlight", "Effect › Blur", "Effect › Black & White", "Effect › Mask", "Effect › 3D Turn"])
+        "Effect › Cursor Highlight", "Effect › Blur", "Effect › Black & White", "Effect › Mask", "Effect › 3D Turn", "Effect › Shake"])
     eq(menu.choices.filter { $0.hasPrefix("Move › ") }.first, "Move › Add Move Here")
     expect(!menu.choices.contains { $0.contains("Lane") }, "+ Add adds items, never lanes")
     expect(menu.run("Zoom › Zoom In"), "Zoom In is in the Zoom submenu")
@@ -1680,9 +1680,10 @@ test("every split keeps the rendered video the same: zooms, texts with loops, ef
     turn.style = "hold"; turn.tilt = 20; turn.turn = -30
     var blur = seg("vb", "blur", 5.6, 7.4, lane: 2)
     blur.scope = nil
+    let shake = seg("sh", "shake", 6.1, 7.3, lane: 1)
     var rounded = base.segments.first { $0.id == "mask1" }!
     rounded.id = "mask3"; rounded.radius = 0.4; rounded.start = 5; rounded.end = 9; rounded.lane = 0; rounded.rect = UnitRect(x: 0.4, y: 0.5, w: 0.3, h: 0.2)
-    base.segments += [wave, turn, blur, rounded]
+    base.segments += [wave, turn, blur, rounded, shake]
     base.textLanes = 2
     base.three.on = false
     let cuts = [1.3, 2.7, 3.4, 4.5, 6.5, 6.9, 8.7]
@@ -2228,6 +2229,58 @@ test("P1 fixes the jump: a move that waits for the last landing moves smoothly; 
     var e = Edits()
     e.moves = try decode("{ \"moves\": [\(a), { \"id\": \"b\", \"t\": 3.6, \"to\": { \"x\": 0.8 }, \"duration\": 1.2 }] }").moves
     eq(e.conflicts(map: TimeMap(duration: 10, edits: e)).map(\.rule), ["move-after-move"], "and the rule refuses it")
+}
+
+test("a shake jitters the video on top of where it is, during a move too: still at its ends, the same on every call, settling with decay") {
+    let move = "\"moves\": [{ \"id\": \"m\", \"t\": 3, \"to\": { \"x\": 0.3, \"y\": 0.6, \"scale\": 0.6 }, \"duration\": 2 }]"
+    func framing(_ segments: String) throws -> Framing { try pathFraming("{ \(move), \"segments\": [\(segments)] }") }
+    func shake(_ id: String, _ more: String = "") -> String {
+        "{ \"id\": \"\(id)\", \"kind\": \"shake\", \"start\": 1.5, \"end\": 2.5, \"strength\": 3\(more) }"
+    }
+    let steady = try framing("")
+    let one = try framing(shake("boom")), two = try framing(shake("boom"))
+    let canvas = one.canvas, short = Double(min(canvas.width, canvas.height))
+    func offset(_ f: Framing, _ t: Double) -> (x: Double, y: Double) {
+        let a = f.pose(at: t), b = steady.pose(at: t)
+        return ((a.x - b.x) * Double(canvas.width), (a.y - b.y) * Double(canvas.height))
+    }
+    func size(_ f: Framing, _ t: Double) -> Double { let o = offset(f, t); return hypot(o.x, o.y) }
+    for t in [1.0, 1.5, 2.5, 3.0] { near(size(one, t), 0, "still at \(t)", within: 1e-9) }
+    expect(size(one, 1.5 + 1.0 / 600) < 0.02 * short, "it starts from where the video is, with no jump")
+    expect(size(one, 2.5 - 1.0 / 600) < 0.01 * short, "it lands where the video is, with no jump")
+    let times = Array(stride(from: 1.52, to: 2.49, by: 0.01))
+    expect(times.map { size(one, $0) }.max()! > 0.01 * short, "it shakes in the middle")
+    expect(times.allSatisfy { abs(offset(one, $0).x) <= 0.03 * short + 0.001 && abs(offset(one, $0).y) <= 0.03 * short + 0.001 },
+           "it never shakes further than its strength, 3% of the frame's shorter side")
+    for t in times {
+        eq(one.pose(at: t).x, two.pose(at: t).x, "the same at \(t), from another Framing"); eq(one.pose(at: t).y, two.pose(at: t).y)
+        eq(one.pose(at: t).x, one.pose(at: t).x, "the same at \(t), asked twice"); eq(one.pose(at: t).rotation, two.pose(at: t).rotation)
+    }
+    let other = try framing(shake("bang"))
+    expect(times.contains { abs(other.pose(at: $0).x - one.pose(at: $0).x) > 0.001 }, "another id shakes another way")
+    func most(_ f: Framing, _ from: Double, _ to: Double) -> Double { stride(from: from, to: to, by: 0.005).map { size(f, $0) }.max()! }
+    expect(most(one, 2.2, 2.45) < most(one, 1.55, 1.8) * 0.5, "with decay it settles: late \(most(one, 2.2, 2.45)), early \(most(one, 1.55, 1.8))")
+    let even = try framing(shake("boom", ", \"decay\": false"))
+    expect(most(even, 2.2, 2.45) > most(even, 1.55, 1.8) * 0.5, "without decay it keeps on: late \(most(even, 2.2, 2.45)), early \(most(even, 1.55, 1.8))")
+    let e = open("empty", edits: "{ \"segments\": [\(shake("boom"))] }")
+    at(e, 2)
+    eq(e.placementNow, e.edits.base, "the inspector places the video where it is, not where the shake throws it")
+}
+
+test("a shake is added from + Add › Effect, short; its inspector sets strength and decay; a second one there is off") {
+    let e = open("empty")
+    at(e, 2)
+    expect(TimelineMenus.add(e).run("Effect › Shake"), "Shake is in + Add › Effect")
+    let s = e.selectedSegment
+    eq(s?.kind, "shake"); eq(s?.strength, 2); eq(s?.decay, true); near((s?.end ?? 0) - (s?.start ?? 0), 0.6)
+    eq(e.undoName, "Add Shake")
+    eq(e.selection["strength"] as? Double, 2); eq(e.selection["decay"] as? Bool, true)
+    e.setSegment("strength", "5"); eq(e.selectedSegment?.strength, 5)
+    e.setSegment("strength", "40"); eq(e.selectedSegment?.strength, 8, "kept inside 1–8")
+    e.setSegment("decay", "false"); eq(e.selectedSegment?.decay, false); eq(e.selection["decay"] as? Bool, false)
+    eq(TimelineMenus.add(e).reason("Shake"), "One shake at a time.\nShake runs here until 0:02.6. Move the playhead past it.")
+    e.setValue(number: nil, kind: "blur")
+    eq(e.selectedSegment?.kind, "blur"); eq(e.selectedSegment?.strength, nil); eq(e.selectedSegment?.decay, nil)
 }
 
 if let shots = ProcessInfo.processInfo.environment["EXACT_STUDIO_SHOTS"] {

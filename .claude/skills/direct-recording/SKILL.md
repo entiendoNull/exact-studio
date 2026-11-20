@@ -177,6 +177,9 @@ Use the smallest tool that makes the point. In order of preference:
 7. **Behind the video** (`"layer": "behind"`): a logo or a title the video uncovers as it moves aside or
    shrinks, in the open or the close, with one calm move (`smooth`, ~1.5 s). It reads as a reveal, so
    once per video at most. Never behind a key point or a line that must be read: the video hides part of it.
+8. **A shake** (`shake`, 0.3–0.8 s, `strength` 2–4): only on an impact the viewer feels, such as an
+   explosion in a game, a hard hit or an error. Start it on the frame of the impact. Never on a screen
+   that must be read, and never as decoration: twice in a row it reads as a glitch.
 
 Never: effects on dead time, an effect for its own sake, two emphasis tools fighting for the same
 moment (a zoom plus a spotlight plus a moving text), `mono` or `blur` on a key point, a `loop`

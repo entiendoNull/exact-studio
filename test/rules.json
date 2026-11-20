@@ -189,6 +189,43 @@
     "app": "refuses"
   },
   {
+    "rule": "one-shake",
+    "before": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "shake",
+          "start": 1,
+          "end": 1.6,
+          "lane": 0
+        }
+      ]
+    },
+    "after": {
+      "segments": [
+        {
+          "id": "a",
+          "kind": "shake",
+          "start": 1,
+          "end": 1.6,
+          "lane": 0
+        },
+        {
+          "id": "b",
+          "kind": "shake",
+          "start": 1.4,
+          "end": 2,
+          "lane": 1,
+          "strength": 4
+        }
+      ]
+    },
+    "item": "shake b",
+    "line1": "One shake at a time.",
+    "line2": "Shake runs to 0:01.6. Start it at 0:01.6 or later.",
+    "app": "refuses"
+  },
+  {
     "rule": "one-blur",
     "before": {
       "segments": [

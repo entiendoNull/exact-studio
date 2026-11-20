@@ -86,6 +86,10 @@ Rules that keep an edit looking good:
   than the video, give a `blur` or `mono` segment a `scope`: the cut in the stack background, video, images, texts. `"background"`
   covers the background only, `"scene"` the background and the video, `"frame"` the images too (texts stay sharp), `"all"`
   everything. To blur one image or one text alone, use its own `effects`. `docs/edits.md` has the table of which lanes each kind uses.
+- A `shake` segment jolts the video where it is, on top of its place and any move, with no moves of its
+  own: use it on an impact, an explosion or an error, and keep it short (0.3–0.8 s). `strength` is how far
+  it throws the video, 1–8 % of the frame's shorter side (default 2; 4 for an explosion); `decay` (default
+  true) makes it settle. One shake at a time (`one-shake`). Check it with `strip <id> <start> <end> --source`.
 - A text or an image can sit behind the video: `"layer": "behind"`. It is drawn on the background and
   shows only where the video is not, so it needs a move (`moves`, or a smaller `base`) that uncovers it;
   check `frame` before and after that move. The text and image rows are one stack, front to back in

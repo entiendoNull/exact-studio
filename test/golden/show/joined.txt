@@ -8,6 +8,8 @@ layers, front to back: t0, i0, video
 segments (row: kind, recording time; e is an effect lane, t a text lane, i an image lane; t0 and i0 the front ones):
   e0: 0:01.00–0:03.50  zoom 1.8×  [z]  joined before z-2
   e0: 0:03.50–0:04.00  zoom 1.8×  [z-2]  joined after z
+  e0: 0:05.00–0:05.30  shake strength 4.0%, decays  [boom]  joined before boom-2
+  e0: 0:05.30–0:05.60  shake strength 4.0%, decays  [boom-2]  joined after boom
   t0: 0:01.00–0:03.50  text “Keep going” pill in:letters out:fade  [t]  joined before t-2
   t0: 0:03.50–0:06.00  text “Keep going” pill in:letters out:fade  [t-2]  joined after t
   i0: 0:02.00–0:03.50  image images/logo.png at x 0.2 y 0.8 size 0.2 in:fade out:fade  [i]  joined before i-2

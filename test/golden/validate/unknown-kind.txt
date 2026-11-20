@@ -1,1 +1,1 @@
-sparkle a (0:01.00–0:03.00): unknown kind; one of zoom, speed, text, image, 3d, mask, spotlight, highlight, blur, mono
+sparkle a (0:01.00–0:03.00): unknown kind; one of zoom, speed, text, image, 3d, mask, spotlight, highlight, blur, mono, shake

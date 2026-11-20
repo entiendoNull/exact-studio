@@ -71,7 +71,7 @@ struct Look: Codable, Equatable {
 }
 
 /// One span on an effect lane. `kind` is "zoom", "speed", a visual effect
-/// ("spotlight", "highlight", "blur", "mono"), "mask", "text" or "image". `level` is a zoom's
+/// ("spotlight", "highlight", "blur", "mono", "shake"), "mask", "text" or "image". `level` is a zoom's
 /// (below 1 zooms out), `rate` a speed's; the rest are a text's, an image's or a mask's.
 struct Segment: Codable, Equatable {
     var id: String
@@ -129,8 +129,10 @@ struct Segment: Codable, Equatable {
     // @ref LLP 0002#depth
     var layer: String?
     var order: Int?
+    var strength: Double?
+    var decay: Bool?
 
-    static let visual = ["spotlight", "highlight", "blur", "mono"]
+    static let visual = ["spotlight", "highlight", "blur", "mono", "shake"]
     static let kinds = ["zoom", "speed", "text", "image", "3d", "mask"] + visual
     /// How a mask hides what is under it; the first is the default.
     static let maskStyles = ["blur", "pixels", "solid"]
@@ -223,6 +225,8 @@ extension Segment {
         joinEnd = try c.decodeIfPresent(Bool.self, forKey: .joinEnd)
         layer = try c.decodeIfPresent(String.self, forKey: .layer)
         order = try c.decodeIfPresent(Int.self, forKey: .order)
+        strength = try c.decodeIfPresent(Double.self, forKey: .strength)
+        decay = try c.decodeIfPresent(Bool.self, forKey: .decay)
     }
 }
 
@@ -509,6 +513,7 @@ struct Edits: Codable, Equatable {
     var images: [Segment] { segments.filter { $0.kind == "image" } }
     var masks: [Segment] { segments.filter { $0.kind == "mask" } }
     var turns: [Segment] { segments.filter { $0.kind == "3d" } }
+    var shakes: [Segment] { segments.filter { $0.kind == "shake" } }
 
     /// The first sound lane where `s` plays alone; one past the last when none has room.
     func freeLane(for s: Sound, map: TimeMap) -> Int {
@@ -557,9 +562,11 @@ extension Segment {
         }
     }
 
+    static func shakeStrength(_ strength: Double?) -> Double { min(max(strength ?? 2, 0), 8) }
+
     static func noun(_ kind: String) -> String {
         ["zoom": "zooms", "speed": "speed changes", "spotlight": "spotlights", "highlight": "cursor highlights",
-         "blur": "blurs", "mono": "black-and-white effects", "text": "texts", "image": "images", "3d": "3D turns", "mask": "masks"][kind] ?? "effects"
+         "blur": "blurs", "mono": "black-and-white effects", "text": "texts", "image": "images", "3d": "3D turns", "mask": "masks", "shake": "shakes"][kind] ?? "effects"
     }
 }
 
@@ -937,6 +944,47 @@ struct Framing {
     private var fill: Double { Double(max(canvas.width / subject.width, canvas.height / subject.height)) * 1.04 }
 
     func pose(at t: Double) -> Pose {
+        var p = steadyPose(at: t)
+        for seg in edits.shakes {
+            let j = shake(seg, at: t)
+            p.x += j.x; p.y += j.y; p.rotation += j.rotation
+        }
+        return p
+    }
+
+    // @ref LLP 0003#shake
+    func shake(_ seg: Segment, at t: Double) -> (x: Double, y: Double, rotation: Double) {
+        let w = whole(seg), span = w.end - w.start
+        guard t >= seg.start, t < seg.end, span > 0 else { return (0, 0, 0) }
+        let u = (t - w.start) / span
+        let attack = Ease.smooth(u * span / min(0.06, span / 4))
+        let envelope = seg.decay ?? true ? attack * (1 - u) * (1 - u) : attack * Ease.smooth((1 - u) * span / min(0.12, span / 4))
+        guard envelope > 0 else { return (0, 0, 0) }
+        let seed = Framing.seed(runs[seg.id]?.first?.id ?? seg.id)
+        let k = (t - w.start) * 16
+        let reach = Segment.shakeStrength(seg.strength) / 100 * Double(min(canvas.width, canvas.height)) * envelope
+        return (reach * Framing.noise(seed, 0, k) / Double(canvas.width), reach * Framing.noise(seed, 1, k) / Double(canvas.height),
+                Segment.shakeStrength(seg.strength) * 0.3 * envelope * Framing.noise(seed, 2, k * 0.7))
+    }
+
+    static func seed(_ id: String) -> UInt64 {
+        id.utf8.reduce(14_695_981_039_346_656_037 as UInt64) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+    }
+
+    static func noise(_ seed: UInt64, _ channel: UInt64, _ k: Double) -> Double {
+        func knot(_ i: Int) -> Double {
+            var z = seed &+ channel &* 0x9E37_79B9_7F4A_7C15 &+ UInt64(bitPattern: Int64(i)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            z ^= z >> 31
+            return Double(z >> 11) / Double(1 << 53) * 2 - 1
+        }
+        let i = Int(floor(k)), f = k - floor(k)
+        let a = knot(i), b = knot(i + 1)
+        return a + (b - a) * Ease.smooth(f)
+    }
+
+    func steadyPose(at t: Double) -> Pose {
         var p = movedPose(at: t)
         // A 3D turn: the angle eases to the turn's pose and back over its span.
         for seg in edits.turns {
@@ -1243,7 +1291,7 @@ struct Framing {
         if inDepth(at: t), abs(p.angles.tilt) + abs(p.angles.turn.truncatingRemainder(dividingBy: 360)) + abs(p.angles.roll) > 0.01 { return nil }
         let place = placement(p)
         var m = CGAffineTransform(a: subject.width, b: 0, c: 0, d: -subject.height, tx: subject.minX, ty: subject.maxY).concatenating(place)
-        let (s, c) = camera(at: t, place: place)
+        let (s, c) = camera(at: t)
         if abs(s - 1) > 0.0005 {
             m = m.concatenating(CGAffineTransform(translationX: -c.x, y: -c.y))
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
@@ -1332,7 +1380,7 @@ struct Framing {
         let place = placement(pose)
         layer = layer.transformed(by: place).opacity(pose.opacity * opacity)
 
-        let (s, c) = camera(at: t, place: place)
+        let (s, c) = camera(at: t)
         if abs(s - 1) > 0.0005 {
             let mid = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
             layer = layer.transformed(by: CGAffineTransform(translationX: -c.x, y: -c.y)
@@ -1377,7 +1425,7 @@ struct Framing {
         let pose = pose(at: t)
         let placed = placement(pose)
         layer = layer.transformed(by: placed).opacity(pose.opacity * opacity)
-        let (s, c) = camera(at: t, place: placed)
+        let (s, c) = camera(at: t)
         if abs(s - 1) > 0.0005 {
             let mid = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
             layer = layer.transformed(by: CGAffineTransform(translationX: -c.x, y: -c.y)
@@ -1460,7 +1508,8 @@ struct Framing {
     }
 
     /// The zoom at `t`: its scale, and the canvas point it centres.
-    func camera(at t: Double, place: CGAffineTransform) -> (CGFloat, CGPoint) {
+    // @ref LLP 0003#shake
+    func camera(at t: Double) -> (CGFloat, CGPoint) {
         let mid = CGPoint(x: canvas.width / 2, y: canvas.height / 2)
         var s = 1.0, amount = 0.0
         for z in edits.zooms {
@@ -1470,7 +1519,7 @@ struct Framing {
         guard amount > 0.0005 else { return (1, mid) }
         guard s > 1 else { return (CGFloat(s), mid) }
         let f = cursor.smoothed(at: t) ?? CGPoint(x: 0.5, y: 0.5)
-        let target = onSubject(f).applying(place)
+        let target = onSubject(f).applying(placement(steadyPose(at: t)))
         var c = CGPoint(x: mid.x + (target.x - mid.x) * amount, y: mid.y + (target.y - mid.y) * amount)
         let half = CGSize(width: canvas.width / s / 2, height: canvas.height / s / 2)
         c.x = min(max(c.x, half.width), canvas.width - half.width)

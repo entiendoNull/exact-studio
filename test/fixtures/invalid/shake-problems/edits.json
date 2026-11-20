@@ -1,0 +1,7 @@
+{
+  "segments": [
+    { "id": "big", "kind": "shake", "start": 1, "end": 1.5, "lane": 0, "strength": 12 },
+    { "id": "small", "kind": "shake", "start": 2, "end": 2.5, "lane": 0, "strength": 0.2, "decay": false },
+    { "id": "z", "kind": "zoom", "start": 5, "end": 6, "lane": 0, "level": 2, "strength": 3, "decay": true }
+  ]
+}

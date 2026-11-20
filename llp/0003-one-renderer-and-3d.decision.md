@@ -29,6 +29,14 @@ Each reach of a blur or black and white is a cut after one layer (`Framing.cover
 - It is drawn at the time the items in front are, so both frames of a crossfade show it alike.
 - With nothing behind, `underlay` returns the ground as it was: old files render byte for byte the same.
 
+## Shake
+
+Asked for in issue #29 (2026-11-20): a game recording needed a short jolt on each explosion, built by hand from seven moves.
+
+- A shake is an offset and a small turn added to the pose (`Framing.pose` = `steadyPose` + shake), so it works at any place and during a move.
+- Its jitter comes from a seed made of its run's first id, never a global random source: preview, export and the CLI draw the same frames, and a split keeps it.
+- The zoom's camera and the inspector's Place follow `steadyPose`: a camera on the shaken pose cancelled the shake under a zoom, and a drag saved the jitter.
+
 ## Export
 
 - **Export** is a button in the header. It opens a lightbox in the middle of the window, over

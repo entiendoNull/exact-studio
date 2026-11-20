@@ -270,6 +270,11 @@ func findings(_ r: Recording) -> [Problem] {
             else if !Segment.layers.contains(layer) { say("\(at): no layer \(layer); one of \(Segment.layers.joined(separator: ", "))") }
         }
         if s.order != nil, !s.isOverlay { say("\(at): only a text or an image has an order") }
+        if s.kind == "shake" {
+            if let v = s.strength, !(1...8).contains(v) { say("\(at): a shake's strength is 1–8, a percentage of the frame's shorter side") }
+        } else if s.strength != nil || s.decay != nil {
+            say("\(at): only a shake has a strength and a decay")
+        }
         if s.kind == "mask" {
             maskProblems(s).forEach { say("\(at): \($0)") }
         } else if s.rect != nil {
@@ -467,6 +472,7 @@ case "show":
         case "text": what += " “\(s.text ?? "")” \(s.style ?? "plain") in:\(s.animIn ?? "") out:\(s.animOut ?? "")\(s.isPlaceholder ? "  UNFILLED" : "")"
         case "image": what += " \(s.file ?? "") at x \(s.x ?? 0.5) y \(s.y ?? 0.5) size \(s.size ?? 0.25) in:\(s.animIn ?? "fade") out:\(s.animOut ?? "fade")"
         case "3d": what += " \(s.style ?? "hold") tilt \(s.tilt ?? 0) turn \(s.turn ?? 0)"
+        case "shake": what += " strength \(Segment.shakeStrength(s.strength))%, \(s.decay ?? true ? "decays" : "no decay")"
         case "mask":
             let u = s.rect
             what += " \(s.style ?? "blur")\(s.style == "solid" ? " \(s.color ?? "black")" : "") rect x \(u?.x ?? 0) y \(u?.y ?? 0) w \(u?.w ?? 0) h \(u?.h ?? 0) (full frame)"

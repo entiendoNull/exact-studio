@@ -83,7 +83,7 @@ enum TimelineMenus {
                 .sub("Speed", [.item("Slow Down") { editor.add("slow") }, .item("Speed Up") { editor.add("fast") }]),
                 .item("Spotlight") { editor.add("spotlight") }, .item("Cursor Highlight") { editor.add("highlight") },
                 .item("Blur") { editor.add("blur") }, .item("Black & White") { editor.add("mono") },
-                .item("Mask") { editor.add("mask") }, .item("3D Turn") { editor.add("3d") }]),
+                .item("Mask") { editor.add("mask") }, .item("3D Turn") { editor.add("3d") }, .item("Shake") { editor.add("shake") }]),
             .sub2("Move", "Where the video goes", [.title("Then drag the video where it should go."), .line] + moves(editor)),
             .line,
             .two("Music & Sound…", "Plays over the video") { Sounds.pick { editor.addSound($0) } },
@@ -110,6 +110,7 @@ enum TimelineMenus {
                           .item("Blur") { editor.add("blur") }, .item("Black & White") { editor.add("mono") }]),
             .item("Mask") { editor.add("mask") },
             .item("3D Turn") { editor.add("3d") },
+            .item("Shake") { editor.add("shake") },
         ]
         func checked(_ entries: [MenuEntry]) -> [MenuEntry] { TimelineMenus.checked(entries, editor) }
         func on(_ lane: Int, _ entries: [MenuEntry]) -> [MenuEntry] {

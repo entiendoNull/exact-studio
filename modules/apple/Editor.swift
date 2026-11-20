@@ -785,6 +785,7 @@ final class Editor {
         case "blur-frame": s.kind = "blur"; s.scope = "frame"
         case "mono-frame": s.kind = "mono"; s.scope = "frame"
         case "3d": s.style = "hold"; s.tilt = 12; s.turn = -28; s.roll = 0
+        case "shake": s.strength = 2; s.decay = true
         case "mask":
             // A third of the visible video's width and a fifth of its height, in its middle: drag it onto what
             // it hides. The rect is in the full frame's units, so it goes through the crop.
@@ -796,7 +797,7 @@ final class Editor {
         default: break
         }
         guard Segment.kinds.contains(s.kind) else { return }
-        let length: Double = s.kind == "zoom" || s.kind == "text" || s.kind == "3d" ? 3 : 2
+        let length: Double = s.kind == "zoom" || s.kind == "text" || s.kind == "3d" ? 3 : s.kind == "shake" ? 0.6 : 2
         let t = min(playhead, max(0, duration - 0.3))
         if s.isOverlay {
             s.start = t
@@ -1336,6 +1337,7 @@ final class Editor {
             s.kind = k
             // Spotlight and cursor highlight follow the cursor on the video: they have no reach.
             if k != "blur" && k != "mono" { s.scope = nil }
+            if k != "shake" { s.strength = nil; s.decay = nil }
         }
         replace(s)
         sampleSegment(s, part: "in")
@@ -1554,7 +1556,7 @@ final class Editor {
 
     /// Set one field of the selected segment: a blur's or black and white's "scope", a 3D
     /// turn's "pose" (a named pose), "tilt", "turn", "roll" or "style" ("hold" or "orbit"), or a
-    /// mask's "style" ("blur", "pixels" or "solid") or "color" ("#RRGGBB").
+    /// mask's "style" ("blur", "pixels" or "solid") or "color" ("#RRGGBB"), or a shake's "strength" (1 to 8) or "decay".
     func setSegment(_ field: String, _ value: String) {
         guard var s = selectedSegment else { return }
         let n = Double(value)
@@ -1574,10 +1576,13 @@ final class Editor {
         case "color":
             guard s.kind == "mask", Segment.maskHex(value) != nil else { return }
             s.color = Segment.maskHex(value)
+        case "strength": guard s.kind == "shake", let n else { return }; s.strength = min(max(n, 1), 8)
+        case "decay": guard s.kind == "shake" else { return }; s.decay = value == "true"
         default: return
         }
         replace(s)
         if s.kind == "3d", field == "pose" || field == "style" { sampleSegment(s, part: "loop") }
+        if s.kind == "shake" { sampleSegment(s, part: "in") }
     }
 
     // MARK: Templates
@@ -1678,7 +1683,7 @@ final class Editor {
 
     /// Where the subject is at the playhead.
     var placementNow: Placement {
-        let p = framing.pose(at: playhead)
+        let p = framing.steadyPose(at: playhead)
         return Placement(x: p.x, y: p.y, scale: p.scale)
     }
 
@@ -2026,7 +2031,7 @@ final class Editor {
         var out: [String: Any] = ["id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "",
                                   "removed": false, "first": false, "last": false, "transition": "cut", "text": "", "size": 0,
                                   "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "", "rotation": 0,
-                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": blocked ?? (problem.isEmpty ? standingProblem : problem),
+                                  "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "strength": 2, "decay": true, "scope": "video", "problem": blocked ?? (problem.isEmpty ? standingProblem : problem),
                                   "startWhy": typed?.field == "start" ? typed!.conflict.text : "", "endWhy": typed?.field == "end" ? typed!.conflict.text : "",
                                   "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "",
                                   "volume": 100, "fadeIn": 0, "fadeOut": 0,
@@ -2039,7 +2044,8 @@ final class Editor {
                        "file": URL(fileURLWithPath: s.file).lastPathComponent, "volume": (s.volume * 100).rounded(),
                        "fadeIn": (s.fadeIn * 10).rounded() / 10, "fadeOut": (s.fadeOut * 10).rounded() / 10]) { $1 }
         } else if let s = selectedSegment {
-            out.merge(["scope": s.scope ?? "video", "tilt": (s.tilt ?? 0).rounded(), "turn": (s.turn ?? 0).rounded(), "roll": (s.roll ?? 0).rounded()]) { $1 }
+            out.merge(["scope": s.scope ?? "video", "tilt": (s.tilt ?? 0).rounded(), "turn": (s.turn ?? 0).rounded(), "roll": (s.roll ?? 0).rounded(),
+                       "strength": Segment.shakeStrength(s.strength), "decay": s.decay ?? true]) { $1 }
             out.merge(["id": s.id, "kind": s.kind, "level": s.level ?? 0, "rate": s.rate ?? 0, "start": s.start, "end": s.end,
                        "startText": Editor.stamp(s.start), "endText": Editor.stamp(s.end), "text": s.text ?? "",
                        "size": ((s.size ?? 0) * 1000).rounded() / 10, "color": s.color ?? "", "weight": s.weight ?? "", "style": s.style ?? "",
@@ -2121,7 +2127,7 @@ extension Editor {
 extension Segment {
     static func article(_ kind: String) -> String {
         ["zoom": "a zoom", "speed": "a speed change", "spotlight": "a spotlight", "highlight": "a cursor highlight",
-         "blur": "a blur", "mono": "a black-and-white effect", "text": "a text", "image": "an image", "mask": "a mask"][kind] ?? "an effect"
+         "blur": "a blur", "mono": "a black-and-white effect", "text": "a text", "image": "an image", "mask": "a mask", "shake": "a shake"][kind] ?? "an effect"
     }
 }
 
@@ -2216,7 +2222,7 @@ enum History {
 
     static func kindName(_ kind: String) -> String {
         ["zoom": "Zoom", "speed": "Speed Change", "spotlight": "Spotlight", "highlight": "Cursor Highlight", "blur": "Blur",
-         "mono": "Black & White", "text": "Text", "image": "Image", "mask": "Mask", "3d": "3D Turn"][kind] ?? "Effect"
+         "mono": "Black & White", "text": "Text", "image": "Image", "mask": "Mask", "3d": "3D Turn", "shake": "Shake"][kind] ?? "Effect"
     }
 
     private static let lookNames = ["background": "Background", "customA": "Background", "customB": "Background", "customAngle": "Background",

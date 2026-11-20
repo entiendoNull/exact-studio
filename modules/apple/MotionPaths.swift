@@ -70,7 +70,7 @@ extension Framing {
                     CGPoint(x: subject.maxX, y: subject.minY), CGPoint(x: subject.minX, y: subject.minY)]
         let drawn = turned(p) ? face.map { projected($0, angles: p.angles) } : face
         var placed = drawn.map { $0.applying(place) }
-        let (s, c) = camera(at: t, place: place)
+        let (s, c) = camera(at: t)
         if abs(s - 1) > 0.0005 {
             let zoom = CGAffineTransform(translationX: -c.x, y: -c.y)
                 .concatenating(CGAffineTransform(scaleX: s, y: s))
@@ -87,7 +87,7 @@ extension Framing {
         if meta.isDevice { r = CGFloat(meta.cornerRadius ?? 0.16) * subject.width }
         else if meta.isWindow, let w = meta.cornerRadius { r = CGFloat(w) * subject.width }
         else { r = CGFloat(look.radius) }
-        let (s, _) = camera(at: t, place: placement(p))
+        let (s, _) = camera(at: t)
         return Double(max(0, min(r, min(subject.width, subject.height) / 2))) * p.scale * Double(s)
     }
 
