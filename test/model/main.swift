@@ -228,6 +228,39 @@ test("P1: a move starts travelling only after the move before it lands, for the 
     eq(Edits.conflict(in: image)?.item, ItemRef(kind: "image-move", id: "b", image: "i"))
 }
 
+test("move-in-crossfade: a video move may not travel while a crossfade blends either side of its cut") {
+    var e = try decode("""
+    { "splits": [14.6, 16], "removed": [14.6], "transitions": { "14600": "crossfade" },
+      "moves": [{ "id": "m1", "t": 14.5, "duration": 0.6, "style": "smooth", "to": { "x": 0.5, "y": 0.5, "scale": 1 } }] }
+    """)
+    func found(_ e: Edits) -> [Conflict] { e.conflicts(map: TimeMap(duration: 20, edits: e)) }
+    eq(found(e).map(\.rule), ["move-in-crossfade"], "the issue's example")
+    eq(found(e).first?.item, ItemRef(kind: "move", id: "m1"))
+    eq(found(e).first?.text, "No move during a crossfade. The crossfade blends 0:14.0–0:14.6. Land this move by 0:14.0.")
+    e.moves[0].t = 16.7
+    eq(found(e).first?.line2, "The crossfade blends 0:16.0–0:16.6. Start this move at 0:16.6 or later.", "the part after the cut blends too")
+    e.moves[0].t = 14
+    eq(found(e), [], "landing before the blend")
+    e.moves[0].t = 15.5
+    eq(found(e), [], "travelling in the removed part")
+    e.moves[0].t = 17.2
+    eq(found(e), [], "starting after the blend")
+    e.moves[0].t = 14.5
+    e.transitions["14600"] = "fade"
+    eq(found(e), [], "a fade shows one video at a time")
+    e.transitions["14600"] = "crossfade"
+    e.moves[0].t = 13.6; e.moves[0].duration = 0.4
+    eq(found(e), [], "before a blend at normal speed")
+    var fast = seg("s", "speed", 12, 14.6)
+    fast.rate = 2
+    e.segments = [fast]
+    eq(found(e).first?.line2, "The crossfade blends 0:13.4–0:14.6. Land this move by 0:13.4.", "a fast part blends more of the recording")
+    var image = seg("i", "image", 10, 20)
+    image.moves = [Move(id: "a", t: 14.5, to: Placement(), duration: 0.6)]
+    e.moves = []; e.segments = [image]
+    eq(found(e), [], "an image is drawn once over the blend")
+}
+
 test("one lane holds one thing at a time; texts, images and masks overlap on separate lanes") {
     let e = Edits(segments: [seg("a", "spotlight", 1, 3), seg("b", "highlight", 2, 4)])
     eq(e.conflict(e.segments[1])?.text, "That lane is taken. Spotlight is on this lane then. Put it on another lane.")
@@ -753,6 +786,17 @@ test("a transition is kept by the kept part's end") {
     eq(e.edits.transitions, ["3000": "crossfade"]); eq(e.selection["transition"] as? String, "crossfade")
     e.setTransition("cut")
     eq(e.edits.transitions, [:])
+}
+
+test("move-in-crossfade in the app: a crossfade that would blend over a move is refused; a fade lands") {
+    let e = open("empty", edits: """
+    { "splits": [5, 6], "removed": [5], "moves": [{ "id": "m1", "t": 4.9, "duration": 0.6, "to": { "x": 0.3 } }] }
+    """)
+    e.select("p:0"); e.setTransition("crossfade")
+    eq(e.refusal?.text, "No move during a crossfade. The crossfade blends 0:04.4–0:05.0. Land this move by 0:04.4.")
+    eq(e.edits.transitions, [:], "nothing changed")
+    e.setTransition("fade")
+    eq(e.edits.transitions, ["5000": "fade"])
 }
 
 test("add a zoom at the playhead; a second zoom there is refused; one before it fills the gap") {

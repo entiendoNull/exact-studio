@@ -24,4 +24,4 @@ segments (row: kind, recording time; e is an effect lane, t a text lane, i an im
 sounds (added over the video; each plays straight through from its start, not cut by the cuts):
   s0: from 0:01.00 for 1.5s (video 0:01.00–0:02.50)  sounds/beep.wav from 0.25s  volume 0.4 fade in 0.2s out 0.5s  [sound1]
 moves:
-  lands 0:05.00 after 1.0s spring: x 0.4 y 0.5 scale 1.1  [m1]
+  lands 0:06.10 after 1.0s spring: x 0.4 y 0.5 scale 1.1  [m1]

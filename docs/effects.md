@@ -268,7 +268,9 @@ No key is a plain cut.
 - **Sees:** the frame before the cut dissolves into the frame after it, the background too.
 - **Timing:** 0.6 s, eased, ending where the earlier part ends; shorter when either part lasts under
   1.2 s of video (half of it). The video gets that much shorter. The recorded sound crossfades too.
-- **Limits:** texts and images are drawn once over the blend, at the later part's time.
+- **Limits:** texts and images are drawn once over the blend, at the later part's time. Each side
+  draws the video at its own time, so a video move that travels during the blend would show the
+  video twice; the app and `validate` refuse it (`move-in-crossfade`).
 - **Use:** where time jumps and the screen changes a lot. **Avoid:** a different transition on every cut.
 
 ### `fade`
@@ -288,7 +290,8 @@ No key is a plain cut.
 A move lands the video (or, in an image's `moves`, the image) at `to` at `t`, travelling over the
 `duration` before it (default 0.8 s). Before the first move the video is at `base`. A move starts
 travelling only after the one before it lands (`move-after-move`): one that started earlier jumped
-to its own progress when the earlier one landed, so the app and `validate` refuse it. Each strip: `base` → x 0.3, y 0.55, scale 0.55 landing at 3 s after 1.5 s,
+to its own progress when the earlier one landed, so the app and `validate` refuse it. A video move
+does not travel during a crossfade either (`move-in-crossfade`). Each strip: `base` → x 0.3, y 0.55, scale 0.55 landing at 3 s after 1.5 s,
 frames 1.4–3.2 s.
 
 With 3D on, a move's `angles` turn the video as it travels, eased as its style says. With 3D off
