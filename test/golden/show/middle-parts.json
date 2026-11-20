@@ -1,0 +1,39 @@
+{
+  "clicks" : [
+    2,
+    6.5
+  ],
+  "folder" : "<library>/middle-parts",
+  "id" : "middle-parts",
+  "kind" : "window",
+  "length" : 6,
+  "name" : "Middle parts, tail kept",
+  "parts" : [
+    {
+      "end" : 2,
+      "removed" : true,
+      "start" : 0
+    },
+    {
+      "end" : 4,
+      "removed" : false,
+      "start" : 2
+    },
+    {
+      "end" : 6,
+      "removed" : true,
+      "start" : 4
+    },
+    {
+      "end" : 7.5,
+      "removed" : false,
+      "start" : 6
+    },
+    {
+      "end" : 10,
+      "removed" : false,
+      "start" : 7.5
+    }
+  ],
+  "recorded" : 10
+}

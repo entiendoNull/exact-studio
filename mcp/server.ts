@@ -61,8 +61,10 @@ async function writeChecked(id: string, file: string, value: unknown): Promise<R
     return text(`Not saved; ${file} is unchanged. Problems:\n${(r.out + r.err).trim()}`, true);
   }
   const notes = r.out.split('\n').filter((l, i, all) => l.startsWith('note: ') || (l.startsWith('  ') && all[i - 1]?.startsWith('note: ')));
-  const still = notes.length ? `\nStill in the file from before (not refused; fix them when you can):\n${notes.join('\n')}` : '';
-  return text(`Saved ${file}. The app's open preview updates within a second.${still}`);
+  const earlier = notes.map((l, i) => l.startsWith('note: before this change: ') || (l.startsWith('  ') && notes[i - 1]?.startsWith('note: before this change: ')));
+  const before = notes.filter((_, i) => earlier[i]), others = notes.filter((_, i) => !earlier[i]);
+  const still = before.length ? `\nStill in the file from before (not refused; fix them when you can):\n${before.join('\n')}` : '';
+  return text(`Saved ${file}. The app's open preview updates within a second.${others.map((l) => `\n${l}`).join('')}${still}`);
 }
 
 /** The entries of docs/effects.md named `name` (a heading `name`, or a table row of it), each under its section's title. */

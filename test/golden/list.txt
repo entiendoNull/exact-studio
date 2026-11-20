@@ -2,3 +2,5 @@ empty  window     0:10.00  Empty window
 full  simulator  0:10.00  Everything
 old-format  window     0:10.00  Before text lanes
 joined  display    0:10.00  Joined halves
+middle-parts  window     0:10.00  Middle parts, tail kept
+middle-parts-cut  window     0:10.00  Middle parts, tail cut

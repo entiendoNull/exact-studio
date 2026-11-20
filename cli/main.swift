@@ -326,6 +326,15 @@ func laneNotes(_ r: Recording) -> [String] {
     }
 }
 
+func cutNotes(_ r: Recording) -> [String] {
+    let parts = r.edits.pieces(r.meta.duration)
+    guard let first = parts.first, let last = parts.last, first.removed, !last.removed,
+          let kept = parts.firstIndex(where: { !$0.removed }), parts[kept...].contains(where: \.removed) else { return [] }
+    let start = last.start == last.start.rounded() ? String(Int(last.start)) : String(last.start)
+    let span = "\(Rules.clock(last.start, up: false))–\(Rules.clock(last.end, up: true))"
+    return ["the last part, \(span) (\(String(format: "%.1f", last.end - last.start)) s), is kept. To leave it out, add \(start) to removed."]
+}
+
 // MARK: Recording, through the app
 
 // @ref LLP 0007#the-channel — the CLI asks the running app, which records; it never records by itself
@@ -507,7 +516,7 @@ case "validate":
     let standing = found.filter { $0.key.map(before.contains) ?? false }, fresh = found.filter { !($0.key.map(before.contains) ?? false) }
     if fresh.isEmpty { print("ok") } else { fresh.forEach { print($0.text) } }
     standing.forEach { print("note: before this change: \($0.text)") }
-    laneNotes(r).forEach { print("note: \($0)") }
+    (cutNotes(r) + laneNotes(r)).forEach { print("note: \($0)") }
     if !fresh.isEmpty { exit(1) }
 
 case "frame":

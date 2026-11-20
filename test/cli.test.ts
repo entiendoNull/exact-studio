@@ -45,10 +45,12 @@ describe('valid recordings', () => {
   });
 
   for (const id of valid) {
-    test(`${id}: validate says ok`, () => {
+    test(`${id}: validate says ok, with the notes in test/golden/validate/${id}.txt`, () => {
       const r = run(good, 'validate', id);
-      expect(r.out + r.err).toBe('ok\n');
+      expect(r.err).toBe('');
+      expect(r.out).toStartWith('ok\n');
       expect(r.code).toBe(0);
+      matches(`validate/${id}.txt`, r.out);
     });
     test(`${id}: show matches test/golden/show/${id}.txt`, () => {
       const r = run(good, 'show', id);
