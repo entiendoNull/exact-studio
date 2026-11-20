@@ -149,6 +149,15 @@ video time and convert back, so nothing lands in a removed part.
 - It is drawn inside the Clip, as a waveform band along its bottom, so you see that it is cut with the
   clip. A click on the band selects it: Mute and Volume. A recording with no sound has no band. `volume` (0–1) in `edits.json` sets it; 0 mutes.
 
+Decided by Jacob on 2026-11-20 (issue #25):
+
+- The recorded sound comes from `capture.mov`, or from a file named in `edits.json` (`recordedSound`:
+  a file in `sounds/` and an `offset`; recording time t plays file time t + offset, silence outside the file).
+- Why: a sound recorded outside the app, and the Simulator app's sound (issue #26), must follow the cuts.
+- One recorded sound keeps the timeline to one kind of sound that follows the cuts. A sound you add never does.
+- `capture.mov` is never rewritten: putting sound into it broke seeking in its HEVC video.
+- The band draws the file's sound; its inspector names the file, and Use Captured Sound goes back.
+
 Decided by Jacob on 2026-11-13, when added sounds came:
 
 - You can add music and other sounds from files. A sound file is kept in the recording's folder

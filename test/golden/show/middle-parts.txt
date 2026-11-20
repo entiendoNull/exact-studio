@@ -1,6 +1,7 @@
 Middle parts, tail kept  (window, middle-parts)
 recorded 0:10.00, plays as 0:06.00; 2 clicks; folder <library>/middle-parts
 look: ocean background, 16:9, padding 8%, 3D off
+recorded sound: none; capture.mov has no sound
 clip parts:
   0:00.00–0:02.00  removed
   0:02.00–0:04.00

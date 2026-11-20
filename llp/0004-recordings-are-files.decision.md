@@ -25,7 +25,8 @@ guide, the schema and the editing skill have it too.
 - The format is in [`docs/edits.md`](../docs/edits.md). The schemas are in `schema/`.
 - A picture an edit uses is copied into the recording's `images/` folder, and `edits.json` names it
   by its path inside the recording. `./exact-studio image` (and the MCP tool `add_image`) do the copy.
-- A sound file goes into `sounds/` the same way. `./exact-studio sound` (and `add_sound`) do the copy.
+- A sound file goes into `sounds/` the same way. `./exact-studio sound` (and `add_sound`) do the copy,
+  for an added sound or for the recorded sound (`--as-recorded`, LLP 0002#sound).
 
 ## The CLI
 

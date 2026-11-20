@@ -1510,6 +1510,78 @@ test("sounds that never play together share one audio track, each at its own vol
     }
 }
 
+func recordedSegments(_ e: Editor) throws -> (map: TimeMap, parts: [(url: URL?, source: CMTimeRange, target: CMTimeRange)], volume: [Float]) {
+    let (mix, _, map, sounds) = try Composition.make(asset: e.asset, meta: e.meta, edits: e.edits, state: e.state)
+    let tracks = (mix as! AVMutableComposition).tracks(withMediaType: .audio).filter { sounds[$0.trackID] == nil }
+    let parts = tracks.flatMap { $0.segments.filter { !$0.isEmpty }.map { ($0.sourceURL, $0.timeMapping.source, $0.timeMapping.target) } }
+        .sorted { $0.2.start < $1.2.start }
+    let audio = Composition.audioMix(mix, map: map, edits: e.edits, sounds: sounds)
+    let volume = parts.map { p -> Float in
+        guard let ear = audio?.inputParameters.first(where: { ear in tracks.contains { $0.trackID == ear.trackID && $0.segments.contains { $0.timeMapping.target == p.2 } } }) else { return -1 }
+        var from: Float = -1, to: Float = -1, range = CMTimeRange.zero
+        _ = ear.getVolumeRamp(for: CMTime(seconds: (p.2.start.seconds + p.2.end.seconds) / 2, preferredTimescale: 6000), startVolume: &from, endVolume: &to, timeRange: &range)
+        return from
+    }
+    return (map, parts, volume)
+}
+
+func expectFollows(_ e: Editor, file: URL, offset: Double, length: Double, line: Int = #line) throws {
+    let (map, parts, volume) = try recordedSegments(e)
+    var want: [(src: Double, dur: Double, at: Double)] = []
+    for p in map.pieces {
+        let a = max(p.src0 + offset, 0), b = min(p.src1 + offset, length)
+        if b - a > 0.001 { want.append((a, b - a, p.out0 + (a - p.src0 - offset) / p.rate)) }
+    }
+    eq(map.pieces.count, 3, "two cuts make three kept pieces", line: line)
+    eq(parts.count, want.count, "one stretch of the sound per kept piece it covers", line: line)
+    for (part, w) in zip(parts, want) {
+        eq(part.url?.resolvingSymlinksInPath().path, file.resolvingSymlinksInPath().path, "the sound comes from \(file.lastPathComponent)", line: line)
+        near(part.source.start.seconds, w.src, "it starts at the piece's moment of the file", within: 0.002, line: line)
+        near(part.source.duration.seconds, w.dur, "it lasts the piece's moment of the file", within: 0.002, line: line)
+        near(part.target.start.seconds, w.at, "it plays where the piece plays", within: 0.002, line: line)
+    }
+    for v in volume { near(Double(v), e.edits.volume, "at the recorded sound's volume", within: 0.001, line: line) }
+}
+
+test("a file as the recorded sound follows the cuts from its offset; a capture with no sound works too") {
+    let cuts = #""splits": [0.5, 1.0, 1.4, 1.6], "removed": [0.5, 1.4], "volume": 0.6"#
+    let e = open("empty", edits: #"{ \#(cuts), "recordedSound": { "file": "sounds/beep.wav", "offset": 0.3 } }"#)
+    expect(e.hasSound, "the file gives a recording without sound a recorded sound")
+    let beep = e.folder.appendingPathComponent("sounds/beep.wav")
+    try expectFollows(e, file: beep, offset: 0.3, length: 2)
+    let late = open("empty", edits: #"{ \#(cuts), "recordedSound": { "file": "sounds/beep.wav", "offset": -1.2 } }"#)
+    try expectFollows(late, file: late.folder.appendingPathComponent("sounds/beep.wav"), offset: -1.2, length: 2)
+    eq(try recordedSegments(late).parts.count, 2, "silence before the file starts: the first kept piece has none")
+}
+
+test("a file as the recorded sound replaces capture.mov's; without it the capture's plays as before") {
+    let cuts = #""splits": [0.5, 1.0, 1.4, 1.6], "removed": [0.5, 1.4]"#
+    let replaced = open("empty", edits: #"{ \#(cuts), "recordedSound": { "file": "sounds/beep.wav", "offset": 0.25 } }"#, capture: try soundVideo())
+    try expectFollows(replaced, file: replaced.folder.appendingPathComponent("sounds/beep.wav"), offset: 0.25, length: 2)
+    let plain = open("empty", edits: "{ \(cuts) }", capture: try soundVideo())
+    try expectFollows(plain, file: plain.folder.appendingPathComponent("capture.mov"), offset: 0, length: 2)
+    eq(plain.recordedSoundFile.url.lastPathComponent, "capture.mov", "the band draws capture.mov's sound")
+    eq(replaced.recordedSoundFile.url.lastPathComponent, "beep.wav", "the band draws the file's sound")
+    eq(replaced.recordedSoundFile.offset, 0.25)
+}
+
+test("the recorded sound's inspector names its file and goes back to the captured sound in one undo step") {
+    let e = open("empty", edits: #"{ "recordedSound": { "file": "sounds/beep.wav", "offset": 0 } }"#)
+    e.select(Editor.recordedSound)
+    eq(e.selection["kind"] as? String, "recorded")
+    eq(e.selection["file"] as? String, "beep.wav")
+    e.setSound("captured", "")
+    eq(e.edits.recordedSound, nil)
+    eq(onDisk(e).recordedSound, nil, "saved")
+    eq(e.undoName, "Use Captured Sound")
+    expect(!e.hasSound, "this capture has no sound of its own")
+    e.undo()
+    eq(e.edits.recordedSound?.file, "sounds/beep.wav", "undo brings the file back")
+    let plain = open("empty")
+    plain.select(Editor.recordedSound)
+    eq(plain.selection["file"] as? String, "", "no file when the sound is capture.mov's")
+}
+
 test("a row's + is known without building its menu, and agrees with the menu") {
     let e = open("full")
     var rows: [TimelineRow] = [.position, .imagePosition("none"), .imageEffects("none", 0)]

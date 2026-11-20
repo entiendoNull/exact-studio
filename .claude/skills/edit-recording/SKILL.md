@@ -96,6 +96,12 @@ Rules that keep an edit looking good:
   by the video's cuts or speed changes: it starts at recording time `start` and plays straight
   through. So add music after the cuts are set and check `show` for when it plays. Keep music
   under the recorded sound (`volume` 0.3–0.5) and give it a `fadeOut`; `volume` 0 mutes the recording.
+- When a file is the app's own sound, lined up with the video (recorded outside Exact Studio), never
+  add it as a sound and never cut it into one sound per kept part: run
+  `./exact-studio sound <id> <file> --as-recorded [--offset <s>]`. It becomes the recorded sound
+  (`recordedSound` in edits.json) in place of `capture.mov`'s, so it follows every cut, speed change
+  and fade. Recording time t plays file time t + offset; outside the file it is silent. Never change
+  `capture.mov`. `./exact-studio sound <id> --as-recorded off` goes back to its own sound; `show` says which plays.
 - Do not add a lane unless two items of its kind overlap in time. Leave the lane counts out. Images shown
   one after another share an image lane; images at the same time go on lanes 0 and 1. When validate names
   a rule, do what its second line says.

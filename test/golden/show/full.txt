@@ -1,6 +1,7 @@
 Everything  (simulator, full)
 recorded 0:10.00, plays as 0:09.40; 2 clicks; folder <library>/full
 look: custom background, 9:16, padding 10%, 3D on
+recorded sound: none; capture.mov has no sound
 clip parts:
   0:00.00–0:03.00 → crossfade
   0:03.00–0:04.50  removed

@@ -46,6 +46,12 @@ exact-studio — edit Exact Studio recordings from the command line
                                             folder and adds a sound from <t> seconds of the recording (default 0)
                                             playing <seconds> of the file (default all of it, or what fits);
                                             it plays straight through, not cut by the video's cuts; prints it
+  exact-studio sound <id> <audio file> --as-recorded [--offset <s>]
+                                            copies the file into sounds/ and makes it the recorded sound, in place of
+                                            capture.mov's: it follows the cuts, speed changes, crossfades and fades, and
+                                            volume sets it. Recording time t plays file time t + <s> (default 0; below 0
+                                            when the file starts after the recording); before or after the file, silence
+  exact-studio sound <id> --as-recorded off the recorded sound is capture.mov's own again
   exact-studio mask <id> --rect x,y,w,h [--at <t>] [--for <seconds>] [--style blur|pixels|solid] [--color '#000000']
                                             hides a part of the recording (an API key, an email, a name): x, y, w, h
                                             are 0–1 of the full recorded frame (before the crop; frame --raw shows
@@ -162,6 +168,20 @@ func composition(_ r: Recording) -> (asset: AVAsset, video: AVMutableVideoCompos
     let asset = AVURLAsset(url: r.folder.appendingPathComponent("capture.mov"))
     let state = RenderState(Framing(meta: r.meta, look: r.look, edits: r.edits, cursor: r.cursor, folder: r.folder))
     do { return try Composition.make(asset: asset, meta: r.meta, edits: r.edits, state: state) } catch { fail("\(error)") }
+}
+
+// @ref LLP 0002#sound
+func recordedSound(_ r: Recording) -> RecordedSound? {
+    if let rs = r.edits.recordedSound { return rs }
+    let captured = !AVURLAsset(url: r.folder.appendingPathComponent("capture.mov")).tracks(withMediaType: .audio).isEmpty
+    return captured ? RecordedSound(file: "capture.mov") : nil
+}
+
+func recordedWords(_ r: Recording) -> String {
+    guard let rs = recordedSound(r) else { return "none; capture.mov has no sound" }
+    let from = r.edits.recordedSound == nil ? "capture.mov's own"
+        : "\(rs.file) in place of capture.mov's (file time = recording time \(rs.offset < 0 ? "-" : "+") \(abs(rs.offset))s)"
+    return "\(from), volume \(r.edits.volume); it follows the cuts"
 }
 
 func stamp(_ s: Double) -> String { (s < 0 ? "-" : "") + String(format: "%d:%05.2f", Int(abs(s)) / 60, abs(s).truncatingRemainder(dividingBy: 60)) }
@@ -291,6 +311,9 @@ func findings(_ r: Recording) -> [Problem] {
         if !(0...1).contains(s.volume) { say("\(at): volume must be 0–1") }
         if s.fadeIn < 0 || s.fadeOut < 0 { say("\(at): fades can't be below 0") }
         rules(.sound(s))
+    }
+    if let rs = e.recordedSound {
+        rs.problems(in: folder, duration: d).forEach { say("recorded sound (\(rs.file), offset \(rs.offset)s): \($0)") }
     }
     for m in e.moves.sorted(by: { $0.t < $1.t }) {
         if m.t < 0 || m.t > d + 0.01 { say("move \(m.id) at \(stamp(m.t)): outside the recording") }
@@ -442,13 +465,15 @@ case "show":
     if json {
         let pieces = r.edits.pieces(r.meta.duration).map { ["start": $0.start, "end": $0.end, "removed": $0.removed] as [String: Any] }
         let out: [String: Any] = ["id": r.id, "name": r.meta.name, "kind": r.meta.kind, "recorded": r.meta.duration, "length": map.outputDuration,
-                                  "folder": r.folder.path, "clicks": r.meta.clicks.map(\.t), "parts": pieces]
+                                  "folder": r.folder.path, "clicks": r.meta.clicks.map(\.t), "parts": pieces,
+                                  "recordedSound": recordedSound(r).map { ["file": $0.file, "offset": $0.offset] as [String: Any] } ?? NSNull()]
         print(String(data: try! JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), encoding: .utf8)!)
         break
     }
     print("\(r.meta.name)  (\(r.meta.kind), \(r.id))")
     print("recorded \(stamp(r.meta.duration)), plays as \(stamp(map.outputDuration)); \(r.meta.clicks.count) clicks; folder \(r.folder.path)")
     print("look: \(r.look.background) background, \(r.look.aspect), padding \(Int(r.look.padding))%, 3D \(r.edits.three.on ? "on" : "off")")
+    print("recorded sound: \(recordedWords(r))")
     print("clip parts:")
     for p in r.edits.pieces(r.meta.duration) {
         let t = r.edits.transitions[Edits.key(p.end)].map { " → \($0)" } ?? ""
@@ -666,6 +691,33 @@ case "image":
         print("added to \(r.id) (edits.json), picture copied to \(file):")
         print(String(data: try e.encode(made), encoding: .utf8)!)
     } catch let refused as Pictures.Refused { fail(refused.why) } catch { fail("\(error)") }
+
+case "sound" where args.contains("--as-recorded"):
+    let i = args.firstIndex(of: "--as-recorded")!
+    let off = i + 1 < args.count && args[i + 1] == "off"
+    args.removeSubrange(i...(off ? i + 1 : i))
+    let offsetText = option("--offset")
+    guard option("--at") == nil, option("--for") == nil else { fail("--at and --for are for an added sound; the recorded sound follows the whole recording") }
+    if off {
+        guard args.count == 1, offsetText == nil else { fail(usage) }
+        var r = open(args[0])
+        r.edits.recordedSound = nil
+        write(r.edits, r.folder.appendingPathComponent("edits.json"))
+        print("\(r.id) (edits.json): the recorded sound is \(recordedWords(r))")
+        break
+    }
+    guard args.count == 2 else { fail(usage) }
+    guard let offset = Double(offsetText ?? "0"), offset.isFinite else { fail("--offset is a number of seconds") }
+    var r = open(args[0])
+    do {
+        let made = try Sounds.asRecorded(URL(fileURLWithPath: (args[1] as NSString).expandingTildeInPath), offset: offset, into: r.folder, duration: r.meta.duration)
+        r.edits.recordedSound = made
+        write(r.edits, r.folder.appendingPathComponent("edits.json"))
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        print("\(r.id) (edits.json): sound copied to \(made.file), now the recorded sound in place of capture.mov's; it follows the cuts:")
+        print(String(data: try e.encode(made), encoding: .utf8)!)
+    } catch let refused as Sounds.Refused { fail(refused.why, code: 1) } catch { fail("\(error)") }
 
 case "sound":
     let at = option("--at").flatMap(Double.init) ?? 0, length = option("--for").flatMap(Double.init)

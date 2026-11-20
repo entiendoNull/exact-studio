@@ -15,5 +15,6 @@
       "start" : 0
     }
   ],
-  "recorded" : 10
+  "recorded" : 10,
+  "recordedSound" : null
 }

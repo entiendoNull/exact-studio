@@ -1,6 +1,7 @@
 Empty window  (window, len30-16x9)
 recorded 0:30.00, plays as 0:30.00; 7 clicks; folder <library>/len30-16x9
 look: graphite background, 16:9, padding 8%, 3D off
+recorded sound: none; capture.mov has no sound
 clip parts:
   0:00.00–0:30.00
 layers, front to back: t0, t1, video

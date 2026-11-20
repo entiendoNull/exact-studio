@@ -157,6 +157,24 @@
       "maximum": 1,
       "description": "The recorded sound's volume; 0 mutes it. It follows every cut, speed change and fade."
     },
+    "recordedSound": {
+      "type": "object",
+      "description": "A sound file that is the recorded sound in place of capture.mov's own: it follows every cut, speed change, crossfade and fade, at `volume`, and the Clip's band draws it. Leave it out to play capture.mov's sound. `exact-studio sound <id> <file> --as-recorded` sets it.",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "A path inside the recording's folder, in sounds/: M4A, MP3, WAV, AIFF, AAC or CAF"
+        },
+        "offset": {
+          "type": "number",
+          "description": "Seconds, default 0: recording time t plays file time t + offset. Above 0 skips the file's first seconds; below 0 means the file starts that many seconds into the recording. Before the file starts and after it ends, there is silence"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "additionalProperties": false
+    },
     "soundLanes": {
       "type": "integer",
       "minimum": 0,

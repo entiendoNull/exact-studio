@@ -622,7 +622,8 @@ final class TimelineView: NSView {
             // The clip: each part its own rounded block of filmstrip, a clear gap between parts,
             // a scissors pin over each split; a removed part dark and hatched.
             // @ref LLP 0002#sound — the recorded sound is cut with the clip, so it is drawn inside it: a band along its bottom
-            let wave = editor.hasSound ? Waveform.of(editor.asset.url, ready: { [weak self] in self?.needsDisplay = true }) : nil
+            let heard = editor.recordedSoundFile
+            let wave = editor.hasSound ? Waveform.of(heard.url, ready: { [weak self] in self?.needsDisplay = true }) : nil
             let soundSelected = editor.selected == Editor.recordedSound
             let gap: CGFloat = 4
             let all = editor.pieces
@@ -663,7 +664,7 @@ final class TimelineView: NSView {
                         NSColor(white: 0, alpha: 0.35).setFill()
                         CGRect(x: band.minX, y: band.minY, width: band.width, height: 1).fill()
                         if let wave {
-                            drawWave(wave, in: band.insetBy(dx: 5, dy: 3), alpha: editor.edits.volume <= 0.001 ? 0.22 : 0.7) { t in t }
+                            drawWave(wave, in: band.insetBy(dx: 5, dy: 3), alpha: editor.edits.volume <= 0.001 ? 0.22 : 0.7) { t in t + heard.offset }
                         }
                     }
                 }

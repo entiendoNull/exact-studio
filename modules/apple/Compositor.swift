@@ -332,6 +332,36 @@ struct Sound: Codable, Equatable {
     func end(_ map: TimeMap) -> Double { map.source(playing(map).end) }
 }
 
+// @ref LLP 0002#sound
+struct RecordedSound: Codable, Equatable {
+    var file: String
+    var offset = 0.0
+
+    init(file: String, offset: Double = 0) {
+        self.file = file; self.offset = offset
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        file = try c.decode(String.self, forKey: .file)
+        offset = try c.decodeIfPresent(Double.self, forKey: .offset) ?? 0
+    }
+
+    func problems(in folder: URL, duration: Double) -> [String] {
+        guard Sounds.types.contains(URL(fileURLWithPath: file).pathExtension.lowercased()), let whole = Sounds.length(file, in: folder) else {
+            return ["\(file) is not a readable sound file in \(folder.lastPathComponent)/ (\(Sounds.types.joined(separator: ", ")))"]
+                + (offset + duration <= 0 ? [Self.late(offset, duration)] : [])
+        }
+        if offset + duration <= 0 { return [Self.late(offset, duration)] }
+        if offset >= whole { return ["offset \(offset)s is past the file's end (it holds \(String(format: "%.3f", whole))s), so none of it plays"] }
+        return []
+    }
+
+    private static func late(_ offset: Double, _ duration: Double) -> String {
+        "offset \(offset)s starts the file after the recording ends (\(String(format: "%.3f", duration))s), so none of it plays"
+    }
+}
+
 /// One part of the clip between two split points.
 struct Piece: Equatable { var start: Double, end: Double, removed: Bool
     var id: String { "p:\(Int((start * 1000).rounded()))" } }
@@ -362,6 +392,7 @@ struct Edits: Codable, Equatable {
     var three = ThreeD()
     /// The recorded sound's volume, 0 (muted) to 1.
     var volume: Double = 1
+    var recordedSound: RecordedSound?
     /// The sounds added over the video: music and effects, on their own lanes.
     var sounds: [Sound] = []
     /// Sound lanes: a sound's `lane` counts these.
@@ -375,7 +406,7 @@ struct Edits: Codable, Equatable {
         compactLanes()
     }
 
-    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, imageLanes, base, moves, three, volume, sounds, soundLanes, layers }
+    enum CodingKeys: String, CodingKey { case segments, splits, removed, transitions, lanes, textLanes, imageLanes, base, moves, three, volume, recordedSound, sounds, soundLanes, layers }
     /// Read from old files only: the whole-frame lanes, whose blurs now sit on the effect lanes.
     enum Legacy: String, CodingKey { case frameLanes }
     init(from decoder: Decoder) throws {
@@ -388,6 +419,7 @@ struct Edits: Codable, Equatable {
         base = try c.decodeIfPresent(Placement.self, forKey: .base) ?? Placement()
         moves = try c.decodeIfPresent([Move].self, forKey: .moves) ?? []
         volume = try c.decodeIfPresent(Double.self, forKey: .volume) ?? 1
+        recordedSound = try c.decodeIfPresent(RecordedSound.self, forKey: .recordedSound)
         sounds = try c.decodeIfPresent([Sound].self, forKey: .sounds) ?? []
         soundLanes = try c.decodeIfPresent(Int.self, forKey: .soundLanes) ?? 0
         three = try c.decodeIfPresent(ThreeD.self, forKey: .three) ?? ThreeD()
@@ -1840,13 +1872,20 @@ enum Composition {
             }
         }
         // @ref LLP 0002#sound — the sound is cut, sped up and crossfaded exactly like the picture
-        if let sound = asset.tracks(withMediaType: .audio).first,
+        let replaced = edits.recordedSound.flatMap { r in state.current.folder.map { AVURLAsset(url: $0.appendingPathComponent(r.file)) } }
+        let recorded: (track: AVAssetTrack, origin: CMTime)?
+        if let r = edits.recordedSound {
+            recorded = replaced?.tracks(withMediaType: .audio).first.map { ($0, $0.timeRange.start + time(r.offset)) }
+        } else {
+            recorded = asset.tracks(withMediaType: .audio).first.map { ($0, start) }
+        }
+        if let (sound, origin) = recorded,
            let sa = mix.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid),
            let sb = mix.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
             let ears = [sa, sb]
             for (i, p) in map.pieces.enumerated() {
                 let track = ears[i % 2]
-                let range = CMTimeRange(start: start + time(p.src0), end: start + time(p.src1))
+                let range = CMTimeRange(start: origin + time(p.src0), end: origin + time(p.src1))
                 // The sound may start a little after the picture or end before it.
                 let r = range.intersection(sound.timeRange)
                 guard r.duration.seconds > 0.001 else { continue }
@@ -1859,7 +1898,7 @@ enum Composition {
                 }
             }
             // An empty track makes an export fail; one part uses only the first.
-            for ear in ears where ear.segments.isEmpty { mix.removeTrack(ear) }
+            for ear in ears where ear.segments.allSatisfy(\.isEmpty) { mix.removeTrack(ear) }
         }
         // @ref LLP 0002#sound — an added sound plays straight through from where its start lands
         let videoEnd = max(a.timeRange.end, b.timeRange.end)
@@ -1912,6 +1951,7 @@ enum Composition {
         composition.instructions = instructions
         composition.renderSize = state.current.canvas
         composition.frameDuration = CMTime(value: 1, timescale: 60)
+        withExtendedLifetime(replaced) {}
         return (mix, composition, map, added)
     }
 
@@ -1948,8 +1988,13 @@ enum Composition {
         let v = Float(min(max(edits.volume, 0), 1))
         let params = ears.map { AVMutableAudioMixInputParameters(track: $0) }
         let pieces = map.pieces
-        for (i, p) in pieces.enumerated() where !params.isEmpty {
-            let ear = params[i % params.count]
+        for (i, p) in pieces.enumerated() {
+            let own = ears.count == 2 ? [i % 2] : Array(ears.indices)
+            guard let k = own.first(where: { ears[$0].segments.contains { s in
+                let r = s.timeMapping.target
+                return !s.isEmpty && r.start.seconds >= p.out0 - 0.01 && r.end.seconds <= p.out1 + 0.01
+            } }) else { continue }
+            let ear = params[k]
             let inLength = max(p.overlap, p.fadeIn)
             // Each track only plays inside its own pieces, so it needs no volume between them.
             if inLength > 0 {

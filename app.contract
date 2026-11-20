@@ -1068,6 +1068,11 @@ component SettingsCard
             text "Volume" flex=1
             text `${sel.volume}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
           input type="range" min=0 max=100 step=1 value=sel.volume input=soundNumber("volume") aria-label="Volume" testId="volume"
+        if sel.file != ""
+          row align-items="center" gap=8
+            text sel.file flex=1 line-clamp=1 color="-exact-secondary-label" testId="recorded-file"
+            button press=soundField("captured", "") buttonStyle="bordered" testId="recorded-captured"
+              text "Use Captured Sound"
         text "Cuts, speed changes and crossfades apply to the sound too." font="-exact-caption1" color="-exact-tertiary-label"
       if sel.kind == "sound"
         row align-items="center" gap=8

@@ -1,0 +1,5 @@
+joined (edits.json): sound copied to sounds/beep.wav, now the recorded sound in place of capture.mov's; it follows the cuts:
+{
+  "file" : "sounds/beep.wav",
+  "offset" : -0.5
+}
