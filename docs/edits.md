@@ -109,7 +109,7 @@ all required, and `lane` (0 up, default 0). A segment's kind decides which rows 
 
 | what | kinds | its `lane` counts |
 |---|---|---|
-| an effect | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, `mask`, `blur`, `mono` (a blur or black and white of any `scope`) | the effect lanes, the Video's Effects rows |
+| an effect | `zoom`, `speed`, `spotlight`, `highlight`, `3d`, `mask`, `shake`, `blur`, `mono` (a blur or black and white of any `scope`) | the effect lanes, the Video's Effects rows |
 | a text | `text` | the text lanes, 0 the front one |
 | an image | `image` | the image lanes, 0 the front one |
 
@@ -143,8 +143,21 @@ Files from before:
 | `mono` | `scope` | black and white, the same reaches |
 | `3d` | `tilt`, `turn`, `roll`, `style` | turns the video in 3D over its span and back, even with 3D off, easing over 0.7 s (a third of a short span); `style` `"hold"` (the default: holds `tilt`, `turn`, `roll`, default 10, −24, 0) or `"orbit"` (one full turn about the vertical across the whole span; `turn` is ignored) |
 | `mask` | `rect`, `style`, `color`, `radius` | hides a part of the recording; see [Masks](#masks) |
+| `shake` | `strength`, `decay` | jolts the video where it is, from still at `start` to still at `end`; see below |
 | `text` | see below | |
 | `image` | see below | |
+
+**Shake fields:** `strength` (how far it throws the video at most, a percentage of the frame's shorter
+side, as `look.padding` is: 1–8, default 2; 1 a tremor, 4 an explosion, 8 a quake); `decay` (`true`, the
+default: strongest at the start, settling to still by `end`; `false`: the same strength throughout,
+stopping in 0.12 s at `end`). It moves the video on top of its place, during a move too, and turns it
+by up to 0.3° per unit of `strength`; it has no moves of its own and touches no text or image. The same
+segment shakes the same way every time it is drawn, in the app, `frame` and `export`: its pattern comes
+from its `id` (the first half's, when it is split). Keep it short (0.3–0.8 s), on an impact.
+
+```json
+{ "id": "boom", "kind": "shake", "start": 4.2, "end": 4.8, "strength": 4 }
+```
 
 **Text fields:** `text` (the words); `x`, `y` (its centre, 0–1 of the frame, top-left origin);
 `size` (its font size as a share of the frame's height, default 0.08; 0.04–0.12 is usual); `color` (`white`, the default, `black`, `yellow`,
@@ -407,6 +420,7 @@ way: "start at" later, "end by" earlier.
 | `one-highlight` | One cursor highlight at a time. | One highlight at a time. | Cursor highlight runs to 0:04.0. Start it at 0:04.0 or later. |
 | `one-blur` | One `blur` at a time, whatever its `scope` (video, background, scene, frame or all). | One blur at a time. | Blur · whole frame runs to 0:35.0. Start it at 0:35.0 or later. |
 | `one-mono` | One `mono` at a time, whatever its `scope`. | One black & white at once. | Black & white runs to 0:12.0. Start it at 0:12.0 or later. |
+| `one-shake` | One `shake` at a time. | One shake at a time. | Shake runs to 0:01.6. Start it at 0:01.6 or later. |
 | `no-zoom-in-orbit` | No `zoom` during a `3d` with `style` `"orbit"`: half way the screen faces away. | No zoom during an orbit. | 3D orbit runs to 0:05.0. Start it at 0:05.0 or later. |
 | `move-after-move` | A move starts travelling (`t - duration`) only after the move before it lands: for `moves` and for each image's own. | One move at a time. | The move before lands at 0:09.0. Land this one at 0:09.8 or later. |
 | `move-in-crossfade` | A move in `moves` does not travel (`t - duration` to `t`) while a `crossfade` blends: the end of the part before the cut and the start of the part after, each as much of the recording as the blend shows (more in a fast part). Each side draws the video at its own time, so a move there shows the video twice. A `fade` and an image's moves are fine. | No move during a crossfade. | The crossfade blends 0:14.0–0:14.6. Land this move by 0:14.0. |

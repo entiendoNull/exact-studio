@@ -86,6 +86,8 @@ strip 3d-orbit 1 5 9 1152 "$(seg "$e")"
 r='"rect": { "x": 0.27, "y": 0.14, "w": 0.4, "h": 0.17 }'
 e="{ \"id\": \"m1\", \"kind\": \"mask\", \"start\": 1, \"end\": 3, $r, \"style\": \"blur\" }, { \"id\": \"m2\", \"kind\": \"mask\", \"start\": 3.5, \"end\": 5.5, $r, \"style\": \"pixels\" }, { \"id\": \"m3\", \"kind\": \"mask\", \"start\": 6, \"end\": 8, $r, \"style\": \"solid\", \"radius\": 0.3 }"
 strip mask-styles 2 7 3 768 "$(seg "$e")"
+e='{ "id": "boom", "kind": "shake", "start": 1, "end": 1.6, "strength": 4 }'
+strip shake 1 1.6 7 1120 "$room, $(seg "$e")"
 for kind in crossfade fade; do
   e="\"splits\": [3, 5], \"removed\": [3], \"transitions\": { \"3000\": \"$kind\" }, \"base\": { \"x\": 0.35, \"y\": 0.5, \"scale\": 0.6 }, \"moves\": [ { \"id\": \"m\", \"t\": 5, \"to\": { \"x\": 0.65, \"y\": 0.5, \"scale\": 0.6 }, \"style\": \"linear\", \"duration\": 0.01 } ]"
   [ "$kind" = crossfade ] && span="2.3 3.1" || span="2.5 3.5"

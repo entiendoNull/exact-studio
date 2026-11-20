@@ -32,7 +32,7 @@
     "lanes": {
       "type": "integer",
       "minimum": 0,
-      "description": "Written by the app: how many effect lanes are in use. Leave it out: lanes come from use. They hold zoom, speed, spotlight, highlight, 3d, mask, and a blur or mono of any scope"
+      "description": "Written by the app: how many effect lanes are in use. Leave it out: lanes come from use. They hold zoom, speed, spotlight, highlight, 3d, mask, shake, and a blur or mono of any scope"
     },
     "textLanes": {
       "type": "integer",
@@ -261,7 +261,7 @@
     },
     "segments": {
       "type": "array",
-      "description": "Never two zooms, speeds, 3d turns, spotlights, highlights, blurs or monos at one time, whatever their lanes or scope; no zoom during a 3d orbit; two on one lane never overlap (rules one-zoom … one-mono, no-zoom-in-orbit, lane-taken)",
+      "description": "Never two zooms, speeds, 3d turns, spotlights, highlights, blurs, monos or shakes at one time, whatever their lanes or scope; no zoom during a 3d orbit; two on one lane never overlap (rules one-zoom … one-shake, no-zoom-in-orbit, lane-taken)",
       "items": {
         "type": "object",
         "properties": {
@@ -280,7 +280,8 @@
               "spotlight",
               "highlight",
               "blur",
-              "mono"
+              "mono",
+              "shake"
             ]
           },
           "start": {
@@ -317,6 +318,16 @@
               "all"
             ],
             "description": "blur, mono: where in the stack (background, video, images, texts, back to front) it cuts; it covers every layer under the cut. video: only the video (the default); background: only the background; scene: the background and the video; frame: those and the images, under the texts, which stay sharp; all: the texts too. One blur and one mono at a time, whatever the scope (rules one-blur, one-mono)"
+          },
+          "strength": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 8,
+            "description": "shake: how far it throws the video at most, a percentage of the frame's shorter side (1 a tremor, 2 the default, 4 an explosion, 8 a quake). One shake at a time (rule one-shake)"
+          },
+          "decay": {
+            "type": "boolean",
+            "description": "shake: true (the default) starts strongest and settles to still by its end; false keeps its strength and stops quickly at its end"
           },
           "tilt": {
             "type": "number"

@@ -537,6 +537,7 @@ final class TimelineView: NSView {
         case "image": return .systemGreen
         case "3d": return .systemMint
         case "mask": return maskColor
+        case "shake": return .systemBrown
         default: return .systemPink
         }
     }

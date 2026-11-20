@@ -20,7 +20,7 @@ A row holds one kind of thing, and **a row exists only while it holds something*
   remove it; kept parts can crossfade or fade into each other. Its recorded sound is a band along the
   Clip's bottom, cut with it (see Sound). Under it, indented: its **Moves** row (where the video sits and
   how it moves, one track, because the video can only be in one place at a time) and its **Effects**
-  rows: zooms, speed, blur, mono, spotlight, highlight, 3D turns and masks (LLP 0006), and a blur or black
+  rows: zooms, speed, blur, mono, spotlight, highlight, 3D turns, shakes and masks (LLP 0006), and a blur or black
   and white of any reach (see Where an effect applies).
 - **Text** and **Images** rows, in front of the video or behind it: they are the stack (LLP 0005#layers).
 - **Music & Sound.** Rows for the sounds you add: heard, not drawn, so under the stack (see Sound).
@@ -80,6 +80,7 @@ Decided by Jacob on 2026-11-18, with the rules table (docs/edits.md, "What may o
 - **P2, `one-blur` and `one-mono`.** One blur at a time and one black and white at a time, whatever
   each covers. Why: a video blur under a whole-frame blur blurred the video twice. The clash group
   no longer counts `scope`; the lanes still do.
+- **`one-shake`.** One shake at a time (2026-11-20, issue #29): two would add their jitter.
 - **P4, `no-zoom-in-orbit`.** No zoom during a 3D orbit. Why: half way the screen faces away, and a
   zoom follows the cursor on a screen that is not there.
 - **A taken lane is not a refusal in the app.** A drop or a change that lands an item on a taken lane

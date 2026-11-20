@@ -78,6 +78,8 @@ shape SegmentInfo
   turn: number
   roll: number
   hasAngles: bool
+  strength: number
+  decay: bool
   scope: string
   problem: string
   startWhy: string
@@ -161,11 +163,11 @@ fn sourceLabel(k: string): string = k == "pick-display" ? "Display" : k == "pick
 fn sourceCaption(k: string): string = k == "pick-display" ? "A whole screen" : k == "pick-window" ? "Its real shape" : k == "area" ? "Drag a rectangle" : "Only the phone"
 fn sourceTestId(k: string): string = k == "pick-display" ? "record-display" : k == "pick-window" ? "record-pick-window" : k == "area" ? "record-area" : "record-simulator"
 fn kindLabel(kind: string): string = kind == "simulator" ? "iOS Simulator" : kind == "emulator" ? "Android Emulator" : kind == "display" ? "Display" : "Window"
-fn kindTitle(kind: string, level: number, rate: number): string = kind == "recorded" ? "Recorded Sound" : kind == "sound" ? "Sound" : kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "tfx" ? "Text Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "mask" ? "Mask" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : "Black & White"
+fn kindTitle(kind: string, level: number, rate: number): string = kind == "recorded" ? "Recorded Sound" : kind == "sound" ? "Sound" : kind == "imove" ? "Image Move" : kind == "ifx" ? "Image Effect" : kind == "tfx" ? "Text Effect" : kind == "clip" ? "Clip Part" : kind == "move" ? "Move" : kind == "text" ? "Text" : kind == "image" ? "Image" : kind == "mask" ? "Mask" : kind == "3d" ? "3D Turn" : kind == "zoom" ? (level < 1 ? "Zoom Out" : "Zoom In") : kind == "speed" ? (rate < 1 ? "Slow Down" : "Speed Up") : kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor Highlight" : kind == "blur" ? "Blur" : kind == "shake" ? "Shake" : "Black & White"
 fn effectLabel(kind: string): string = kind == "spotlight" ? "Spotlight" : kind == "highlight" ? "Cursor" : kind == "blur" ? "Blur" : "B&W"
 fn imageFxLabel(kind: string): string = kind == "blur" ? "Blur" : kind == "mono" ? "Black & White" : kind == "fade" ? "Fade" : kind == "pulse" ? "Pulse" : kind == "float" ? "Float" : "Wiggle"
 fn nth(xs: string[], i: number): string = match xs.at(i) { case some(x) => x, case none => "" }
-fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono"
+fn isVisual(kind: string): bool = kind == "spotlight" or kind == "highlight" or kind == "blur" or kind == "mono" or kind == "shake"
 fn poseLabel(p: string): string = p == "hero" ? "Hero" : p == "lean-left" ? "Lean Left" : p == "lean-right" ? "Lean Right" : p == "lay-back" ? "Lay Back" : p == "tumble" ? "Tumble" : "Face On"
 fn placeName(pl: string): string = pl == "center" ? "Center" : pl == "left" ? "Left" : pl == "right" ? "Right" : pl == "top" ? "Top" : pl == "bottom" ? "Bottom" : pl == "large" ? "Large" : "Corner"
 fn templateName(t: string): string = t == "clean" ? "Clean Demo" : t == "hero" ? "Hero Angle" : t == "before-after" ? "Before / After" : t == "spotlight" ? "Feature Spotlight" : t == "social" ? "Social Hook" : t == "steps" ? "Tutorial Steps" : "Product Launch"
@@ -488,6 +490,8 @@ component ExactStudio
     send edited = editClip(selected, "seg", field, 0, v)
   action segNumber(field: string, v: number)
     send edited = editClip(selected, "seg", field, 0, `${round(v)}`)
+  action segBool(field: string, v: bool)
+    send edited = editClip(selected, "seg", field, 0, `${v}`)
   action template(name: string)
     send edited = editClip(selected, "template", "", 0, name)
   action placeAt(name: string)
@@ -537,7 +541,7 @@ component ExactStudio
             scroll id="sidebar" width=(leftShown ? "23rem" : 0) min-height=0 overflow-x="hidden" background-color="-exact-secondary-background" -exact-layout-transition="280ms ease" testId="sidebar"
               if cardLeft
                 column padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box"
-                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
+                  SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, segBool=segBool, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
               else
                 column gap=30 padding="20px 24px 32px 20px" width="calc(23rem - 15px)" box-sizing="border-box" opacity=(leftOpen ? 1 : 0) transition="opacity 200ms ease"
                   if status.recording
@@ -707,14 +711,14 @@ component ExactStudio
                     column position="absolute" inset=0 align-items="center" justify-content="center" pointer-events="none" testId="lightbox"
                       scroll width="24rem" max-height="85%" pointer-events="auto" border-radius=16 box-shadow="0px 18px 60px #00000080" background-color="-exact-secondary-background"
                         column padding=12
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, segBool=segBool, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
                   if sel.id != "" and panelMode == "float"
                     column position="absolute" left=floatX top=floatY width="24rem" max-height=floatRoom resize=floatSized border-radius=16 box-shadow="0px 14px 44px #00000073" background-color="-exact-secondary-background" testId="float-panel"
                       row pan=dragPanel panrelease=dropPanel gap=6 align-items="center" justify-content="center" padding-top=8 padding-bottom=4 testId="float-grip"
                         column width=40 height=5 border-radius=3 background-color="-exact-tertiary-label"
                       scroll flex=1 min-height=0
                         column padding=12 padding-top=4
-                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
+                          SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, segBool=segBool, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
 
             // ── The inspector: the selected segment, the frame, export.
             if current != none
@@ -725,7 +729,7 @@ component ExactStudio
                       image "symbol:alert" color="-exact-system-orange" aria-hidden=true
                       text sel.problem font="-exact-footnote" flex=1
                   if sel.id != "" and panelMode == "dock"
-                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
+                    SettingsCard(sel=sel, mode=panelMode, setPanel=setPanel, editDo=editDo, moveField=moveField, moveNumber=moveNumber, placeAt=placeAt, segField=segField, segNumber=segNumber, segBool=segBool, setEnd=setEnd, setKind=setKind, setNumber=setNumber, setStart=setStart, setTransition=setTransition, textField=textField, textNumber=textNumber, imageField=imageField, imageNumber=imageNumber, imageBool=imageBool, soundField=soundField, soundNumber=soundNumber, soundBool=soundBool, threeField=threeField, threeNumber=threeNumber, fieldIn=fieldIn, fieldOut=fieldOut, draftField=draftField, draft=draft, typeTime=typeTime, arrange=arrange)
                   row align-items="center" gap=8 margin-bottom=-14
                     text "Frame" font="-exact-headline" flex=1 testId="inspector-title"
                     // @ref LLP 0005#calm-by-default
@@ -990,6 +994,7 @@ component SettingsCard
     placeAt: action
     segField: action
     segNumber: action
+    segBool: action
     setEnd: action
     setKind: action
     setNumber: action
@@ -1119,6 +1124,7 @@ component SettingsCard
             option "Cursor highlight" value="highlight"
             option "Blur" value="blur"
             option "Black & white" value="mono"
+            option "Shake" value="shake"
         // @ref LLP 0005#applies-to
         if sel.kind == "blur" or sel.kind == "mono"
           column gap=10 testId="applies-to"
@@ -1163,6 +1169,16 @@ component SettingsCard
             text "Turn" flex=1
             text `${sel.turn}°` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
           input type="range" min=-80 max=80 step=1 value=sel.turn change=segNumber("turn") aria-label="Turn" testId="turn-turn"
+      if sel.kind == "shake"
+        text "Shakes the video where it is, strongest at the start. Keep it short." font="-exact-caption1" color="-exact-tertiary-label"
+        column gap=4
+          row
+            text "Strength" flex=1
+            text `${sel.strength}%` color="-exact-secondary-label" font-variant-numeric="tabular-nums"
+          input type="range" min=1 max=8 step=1 value=sel.strength change=segNumber("strength") aria-label="Strength" testId="shake-strength"
+        row align-items="center" gap=8
+          text "Settles" flex=1
+          input type="checkbox" switch checked=sel.decay change=segBool("decay") aria-label="Settles" testId="shake-decay"
       if sel.kind == "text"
         column gap=4
           text "Words" font="-exact-caption1" color="-exact-secondary-label"

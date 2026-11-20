@@ -133,7 +133,7 @@ final class Studio: ExactModule {
     private static let emptySelection: [String: Any] = [
         "id": "", "kind": "", "level": 0, "rate": 0, "start": 0, "end": 0, "startText": "", "endText": "", "removed": false, "first": false,
         "last": false, "transition": "cut", "text": "", "size": 0, "color": "", "weight": "", "style": "", "animIn": "", "animOut": "", "loop": "",
-        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "scope": "video", "problem": "", "startWhy": "", "endWhy": "",
+        "rotation": 0, "moveStyle": "", "duration": 0, "scale": 0, "tilt": 0, "turn": 0, "roll": 0, "hasAngles": false, "strength": 2, "decay": true, "scope": "video", "problem": "", "startWhy": "", "endWhy": "",
         "file": "", "opacity": 100, "radius": 0, "shadow": false, "fx": "", "volume": 100, "fadeIn": 0, "fadeOut": 0,
         "layer": "", "canForward": false, "canBackward": false, "canFront": false, "canBack": false,
     ]

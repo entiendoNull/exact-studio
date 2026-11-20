@@ -37,7 +37,7 @@ enum Rules {
     static let all: [(id: String, line1: String)] = [
         ("one-zoom", "One zoom at a time."), ("one-speed", "One speed at a time."), ("one-3d", "One 3D turn at once."),
         ("one-spotlight", "One spotlight at a time."), ("one-highlight", "One highlight at a time."),
-        ("one-blur", "One blur at a time."), ("one-mono", "One black & white at once."),
+        ("one-blur", "One blur at a time."), ("one-mono", "One black & white at once."), ("one-shake", "One shake at a time."),
         ("no-zoom-in-orbit", "No zoom during an orbit."), ("move-after-move", "One move at a time."),
         ("move-in-crossfade", "No move during a crossfade."),
         ("lane-taken", "That lane is taken."), ("image-one-each", "One of each per image."),
@@ -49,7 +49,7 @@ enum Rules {
 
     static func group(_ kind: String) -> String {
         ["zoom": "one-zoom", "speed": "one-speed", "3d": "one-3d", "spotlight": "one-spotlight", "highlight": "one-highlight",
-         "blur": "one-blur", "mono": "one-mono"][kind] ?? "one-\(kind)"
+         "blur": "one-blur", "mono": "one-mono", "shake": "one-shake"][kind] ?? "one-\(kind)"
     }
 
     static func clock(_ t: Double, up: Bool) -> String {
@@ -131,6 +131,7 @@ extension Segment {
         case "blur": return "Blur · " + Segment.reachWords(scope)
         case "mono": return "Black & white · " + Segment.reachWords(scope)
         case "3d": return style == "orbit" ? "3D orbit" : "3D turn"
+        case "shake": return "Shake"
         case "mask": return style == "pixels" ? "Mask · pixels" : style == "solid" ? "Mask · solid" : "Mask · blur"
         case "text": return "“\(text ?? "")”"
         case "image": return URL(fileURLWithPath: file ?? "").lastPathComponent

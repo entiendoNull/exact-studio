@@ -174,6 +174,27 @@ Its `style`:
 
 All three take `radius` (0–0.5 of the box's short side) for rounded corners.
 
+### `shake`
+
+![shake, strength 4](effects/shake.png)
+
+*`strength` 4, 1–1.6 s, frames 1–1.6 s. The first and the last frame show where the video sits.*
+
+- **Sees:** the video jolts around where it is in small quick steps, with a slight turn, as a camera hit
+  by a blast, then settles. The background, texts and images stay still.
+- **Timing:** from still at `start` it reaches full strength in 0.06 s. With `decay` (the default) it then
+  fades to still by `end`. Without it, it keeps its strength and stops over the last 0.12 s. About 16 steps a second.
+- **Parameters:** `strength`, how far it throws the video at most, as a percentage of the frame's shorter
+  side: 1–8, default 2. 1–2 is a bump, 3–4 an explosion, 6–8 a quake. It also turns the video by up to
+  0.3° per unit. `decay`, default true.
+- **Limits:** one shake at a time (`one-shake`). It works at any place and during a move, with no moves of
+  its own. A zoom follows the steady video, so the shake shows under a zoom too. Masks, the cursor and the
+  video's effects shake with the video. Its pattern comes from its `id`, so a segment shakes the same way
+  in the app, `frame` and `export`, and a split keeps it.
+- **Use:** on an impact the viewer should feel: an explosion in a game, a hard hit, an error. Keep it to
+  0.3–0.8 s and start it on the frame of the impact. **Avoid:** on a screen that must be read, as
+  decoration, and two shakes close together.
+
 ## Whole-frame reach
 
 `blur` and `mono` take a `scope`: a cut in the stack background, video, images, texts (back to

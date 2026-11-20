@@ -33,6 +33,26 @@
       "start" : 3.5
     },
     {
+      "decay" : true,
+      "end" : 5.3,
+      "id" : "boom",
+      "joinEnd" : true,
+      "kind" : "shake",
+      "lane" : 0,
+      "start" : 5,
+      "strength" : 4
+    },
+    {
+      "decay" : true,
+      "end" : 5.6,
+      "id" : "boom-2",
+      "joinStart" : true,
+      "kind" : "shake",
+      "lane" : 0,
+      "start" : 5.3,
+      "strength" : 4
+    },
+    {
       "animIn" : "letters",
       "animOut" : "fade",
       "end" : 3.5,
