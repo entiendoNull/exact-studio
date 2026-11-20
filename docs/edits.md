@@ -122,7 +122,8 @@ MP3, WAV, AIFF, AAC or CAF); `offset` (seconds, default 0): recording time t pla
 t + `offset`. So 0.2 skips the file's first 0.2 s, and -1 starts the file 1 s into the recording.
 Where t + `offset` is before the file starts or after it ends, the recorded sound is silent. Leave
 `recordedSound` out (or delete it) to play `capture.mov`'s sound; a recording made with sound off
-then has none. `validate` refuses a file that is missing or not a sound, and an offset that leaves
+then has none. A Simulator recording made with sound comes with `recordedSound` set: the simulated
+device's own sound is in `sounds/simulator.m4a`, and `capture.mov` has none. `validate` refuses a file that is missing or not a sound, and an offset that leaves
 none of the file inside the recording. `show` says where the recorded sound comes from.
 
 ### Segments

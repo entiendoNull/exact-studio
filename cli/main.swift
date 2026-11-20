@@ -76,7 +76,9 @@ Recording, through the Exact Studio app (opened when it is not running):
                                             area:x,y,w,h[@<display>] in points from the display's top-left. Refused when a
                                             recording is running, when nothing or more than one thing matches (the
                                             candidates are listed) or without the Screen Recording permission.
-                                            --sound: the system's sound (default: the app's System Sound setting);
+                                            --sound: the system's sound (default: the app's System Sound setting); a
+                                            window's is its app's, and a Simulator's is the simulated device's own sound,
+                                            kept in sounds/simulator.m4a as the recorded sound;
                                             --max: stops by itself after that many seconds
   exact-studio record status                recording or not; the source, how long, the id; the last recording that ended
   exact-studio record stop [--any]          stops the recording an agent started and prints its id and folder, ready
@@ -435,12 +437,19 @@ func lastLines(_ reply: [String: Any]) -> String {
     guard let l = reply["last"] as? [String: Any], let id = l["id"] as? String, !id.isEmpty else { return "" }
     let by = ["menu": "from the menu bar", "app": "in the app", "agent": "by an agent", "max": "by itself at its --max limit"][l["stoppedBy"] as? String ?? ""] ?? ""
     return "last recording: \(id)  \((l["name"] as? String) ?? "") (\((l["kind"] as? String) ?? "")), \(String(format: "%.1f", (l["duration"] as? NSNumber)?.doubleValue ?? 0)) s, stopped \(by)\nfolder \((l["folder"] as? String) ?? "")"
+        + soundLine(l["sound"])
+}
+
+func soundLine(_ note: Any?) -> String {
+    guard let note = note as? String, !note.isEmpty else { return "" }
+    return "\nsound: \(note)"
 }
 
 func recordingLines(_ s: [String: Any]) -> String {
     let max = (s["max"] as? NSNumber)?.doubleValue ?? 0
     return "recording \((s["name"] as? String) ?? "") (\((s["kind"] as? String) ?? "")) for \(String(format: "%.1f", (s["elapsed"] as? NSNumber)?.doubleValue ?? 0)) s, started \(s["by"] as? String == "agent" ? "by an agent" : "in the app")"
         + (max > 0 ? ", stops by itself at \(Int(max)) s" : "") + "\nid \((s["id"] as? String) ?? "")  folder \((s["folder"] as? String) ?? "")"
+        + soundLine(s["soundFrom"])
 }
 
 guard let command = args.first else { print(usage); exit(0) }
@@ -813,7 +822,7 @@ case "record":
         let reply = ask(["op": "stop", "any": any], timeout: 60, launch: false)
         guard reply["ok"] as? Bool == true, let l = reply["last"] as? [String: Any], let id = l["id"] as? String, !id.isEmpty else { refused(reply) }
         print("stopped \(id)  \((l["name"] as? String) ?? "") (\((l["kind"] as? String) ?? "")), \(String(format: "%.1f", (l["duration"] as? NSNumber)?.doubleValue ?? 0)) s")
-        print("folder \((l["folder"] as? String) ?? "")")
+        print("folder \((l["folder"] as? String) ?? "")" + soundLine(l["sound"]))
         let folder = URL(fileURLWithPath: (l["folder"] as? String) ?? "")
         if folder.deletingLastPathComponent().standardizedFileURL.path != library.standardizedFileURL.path {
             print("note: it is in \(folder.deletingLastPathComponent().path), not in \(library.path); pass --library \(folder.deletingLastPathComponent().path)")

@@ -128,7 +128,7 @@ const tools: { name: string; description: string; inputSchema: object; call: (a:
           description:
             'A name from list_sources, such as "simulator:iPhone 17 Pro", "window:Safari — GitHub" or "display:1"; or a unique part of one, such as "iPhone 17 Pro" or "github". Or an area of a display: "area:x,y,w,h" in points from the display\'s top-left corner, optionally "@2" for display 2 (default display 1).',
         },
-        sound: { type: 'boolean', description: 'Record the system\'s sound (a window\'s: its app\'s). Default: the app\'s System Sound setting.' },
+        sound: { type: 'boolean', description: 'Record the system\'s sound (a window\'s: its app\'s; a Simulator\'s: the simulated device\'s own, kept as the recorded sound in sounds/simulator.m4a). Default: the app\'s System Sound setting.' },
         max_seconds: { type: 'number', description: 'Stops by itself after this many seconds. Recommended, so a recording never runs on when you stop early.' },
       },
       required: ['source'],

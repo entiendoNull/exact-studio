@@ -2515,5 +2515,75 @@ test("new ids never repeat, even many in one millisecond") {
     eq(Set(ids).count, ids.count)
 }
 
+let bootedJSON = """
+{
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-2" : [
+      { "udid" : "A0679B9D-D204-4AA6-BF16-C954DA370B85", "state" : "Booted", "name" : "iPhone 18 Pro", "isAvailable" : true },
+      { "udid" : "5E4F931B-8141-4DD8-A1A6-772066A5613F", "state" : "Shutdown", "name" : "iPhone 17", "isAvailable" : true }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-5" : [
+      { "udid" : "297274F9-A2B1-488B-9D4F-1BF2FACD08A4", "state" : "Booted", "name" : "iPhone 17 Pro", "isAvailable" : true },
+      { "udid" : "D8329C32-5A4C-43A1-A36B-9A143BF4C552", "state" : "Booted", "name" : "Game QA", "isAvailable" : true }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-0" : [
+      { "udid" : "0268DF7B-83C6-439A-8F22-3A2FF579DD4C", "state" : "Booted", "name" : "Game QA", "isAvailable" : true }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.watchOS-27-0" : [ ]
+  }
+}
+"""
+
+test("the booted simulated devices are read from simctl's list; a shut down one is left out, a bad list gives none") {
+    let booted = SimulatorDevices.booted(json: Data(bootedJSON.utf8))
+    eq(booted.map(\.name).sorted(), ["Game QA", "Game QA", "iPhone 17 Pro", "iPhone 18 Pro"])
+    eq(booted.first { $0.name == "iPhone 18 Pro" }?.udid, "A0679B9D-D204-4AA6-BF16-C954DA370B85")
+    eq(SimulatorDevices.booted(json: Data("not json".utf8)), [])
+}
+
+test("a Simulator window's title names its device; two booted devices with that name are never guessed between") {
+    let booted = SimulatorDevices.booted(json: Data(bootedJSON.utf8))
+    eq(SimulatorDevices.match(title: "iPhone 18 Pro", in: booted), .device("A0679B9D-D204-4AA6-BF16-C954DA370B85"))
+    eq(SimulatorDevices.match(title: "iPhone 17 Pro – iOS 26.5", in: booted), .device("297274F9-A2B1-488B-9D4F-1BF2FACD08A4"))
+    eq(SimulatorDevices.match(title: "Game QA", in: booted),
+       .ambiguous(["0268DF7B-83C6-439A-8F22-3A2FF579DD4C", "D8329C32-5A4C-43A1-A36B-9A143BF4C552"]))
+    eq(SimulatorDevices.match(title: "iPhone 17", in: booted), .none)
+    eq(SimulatorDevices.match(title: "iPhone 18", in: booted), .none)
+    eq(SimulatorDevices.match(title: "", in: booted), .none)
+}
+
+test("a device's processes are everything under its launchd_sim, found by its UDID; another device's are not") {
+    let listing = """
+        1     0 /sbin/launchd
+      737     1 /Applications/Xcode.app/Contents/Applications/DeviceHub.app/Contents/MacOS/DeviceHub
+    10984     1 launchd_sim /Users/me/Library/Developer/CoreSimulator/Devices/A0679B9D-D204-4AA6-BF16-C954DA370B85/data/var/run/launchd_bootstrap.plist
+    11000 10984 /Library/Developer/CoreSimulator/Volumes/iOS_23A/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.2.simruntime/Contents/Resources/RuntimeRoot/System/Library/CoreServices/SpringBoard.app/SpringBoard
+    11544 10984 /Users/me/Library/Developer/CoreSimulator/Devices/A0679B9D-D204-4AA6-BF16-C954DA370B85/data/Containers/Bundle/Application/2901D7A7/Game.app/Game
+    11600 11544 /Users/me/Library/Developer/CoreSimulator/Devices/A0679B9D-D204-4AA6-BF16-C954DA370B85/data/Containers/Bundle/Application/2901D7A7/Game.app/Helper
+    20000     1 launchd_sim /Users/me/Library/Developer/CoreSimulator/Devices/0268DF7B-83C6-439A-8F22-3A2FF579DD4C/data/var/run/launchd_bootstrap.plist
+    20010 20000 /Users/me/Library/Developer/CoreSimulator/Devices/0268DF7B-83C6-439A-8F22-3A2FF579DD4C/data/Containers/Bundle/Application/X/Other.app/Other
+    30000   737 /usr/bin/grep A0679B9D-D204-4AA6-BF16-C954DA370B85
+    garbage line
+    """
+    eq(SimulatorDevices.processes(of: "A0679B9D-D204-4AA6-BF16-C954DA370B85", listing: listing), [10984, 11000, 11544, 11600])
+    eq(SimulatorDevices.processes(of: "0268DF7B-83C6-439A-8F22-3A2FF579DD4C", listing: listing), [20000, 20010])
+    eq(SimulatorDevices.processes(of: "297274F9-A2B1-488B-9D4F-1BF2FACD08A4", listing: listing), [])
+}
+
+test("the device's sound file lines up by host time: a file that starts before the first frame skips that much, a later one waits") {
+    eq(SimulatorDevices.offset(fileStart: 1000.0, firstFrame: 1000.25), 0.25)
+    eq(SimulatorDevices.offset(fileStart: 1000.5, firstFrame: 1000.25), -0.25)
+    eq(SimulatorDevices.offset(fileStart: 512.123456, firstFrame: 512.123456), 0)
+    eq(SimulatorDevices.offset(fileStart: 100.0, firstFrame: 100.0004), 0)
+    eq(SimulatorDevices.offset(fileStart: 100.0, firstFrame: 100.0126), 0.013)
+}
+
+test("a pause in the device's sound becomes silence in its file, so what comes after stays in line with the video") {
+    eq(SimulatorDevices.gap(start: 10, written: 48_000, rate: 48_000, at: 11), 0)
+    eq(SimulatorDevices.gap(start: 10, written: 48_000, rate: 48_000, at: 11.015), 0)
+    eq(SimulatorDevices.gap(start: 10, written: 48_000, rate: 48_000, at: 13.5), 120_000)
+    eq(SimulatorDevices.gap(start: 10, written: 96_000, rate: 48_000, at: 11.9), 0)
+}
+
 print("\(passed) passed, \(failed.count) failed")
 if !failed.isEmpty { failed.forEach { print("  failed: \($0)") }; exit(1) }
