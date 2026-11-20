@@ -1,0 +1,2 @@
+ok
+note: the last part, 0:07.5–0:10.0 (2.5 s), is kept. To leave it out, add 7.5 to removed.

@@ -121,6 +121,14 @@ test('write_edits keeps an old file that breaks a rule: a change beside it saves
   expect(saved.content[0].text).toContain('no-zoom-in-orbit: No zoom during an orbit.');
 });
 
+test('keeping only middle parts: write_edits and validate_recording name the kept tail', async () => {
+  const tail = 'note: the last part, 0:07.5–0:10.0 (2.5 s), is kept. To leave it out, add 7.5 to removed.';
+  const saved = await tool('write_edits', { id: 'empty', edits: { splits: [2, 4, 6, 7.5], removed: [0, 4] } });
+  expect(saved).toEqual({ content: [{ type: 'text', text: `Saved edits.json. The app's open preview updates within a second.\n${tail}` }], isError: false });
+  expect((await tool('validate_recording', { id: 'middle-parts' })).content[0].text).toBe(`ok\n${tail}`);
+  expect((await tool('validate_recording', { id: 'middle-parts-cut' })).content[0].text).toBe('ok');
+});
+
 test('split cuts a zoom into joined halves, and Split All Lanes cuts every lane', async () => {
   const zoom = { id: 'z', kind: 'zoom', start: 1, end: 3, lane: 0, level: 2 };
   await tool('write_edits', { id: 'empty', edits: { segments: [zoom] } });

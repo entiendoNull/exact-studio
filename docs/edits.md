@@ -93,6 +93,11 @@ shorter) or `"fade"` (0.4 s out and 0.4 s in, through the background). No key is
 
 To cut out 10–14 s: add `10` and `14` to `splits`, `10` to `removed`.
 
+To keep only 9–14 s and 49–53 s: `splits` is `[9, 14, 49, 53]` and `removed` is `[0, 14, 53]`.
+The part after the last split is kept unless its start is in `removed`. Here that is `53`; without
+it the video keeps everything from 53 s to the end. `validate` adds a note when the first part is
+removed and the last part is kept after a gap, and `show` lists every part.
+
 The recorded sound, if any, follows the picture: it is cut, sped up and faded at the same places.
 `volume` (0–1, default 1) sets how loud it is; 0 mutes it. Sounds you add are different: see
 [Sounds](#sounds).

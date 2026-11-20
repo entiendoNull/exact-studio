@@ -77,6 +77,8 @@ Rules that keep an edit looking good:
   not over a stretch where a zoom pulls the video under the text.
 - Prefer a few strong moments over many effects; leave the first second plain or blurred under a title.
 - Speed changes read as lag on screen recordings; use cuts instead.
+- To keep only parts from the middle, also put the start of the part after the last split in `removed`,
+  or the tail stays in: docs/edits.md ("Cutting") has the example.
 - One blur and one black and white at a time, whatever each covers; no zoom during a 3D orbit; a
   move starts travelling only after the one before it lands. `validate` refuses these.
 - An effect on the video (zoom, blur, spotlight…) never touches a text or an image. To change one
