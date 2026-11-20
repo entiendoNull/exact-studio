@@ -781,9 +781,13 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
     private var releases: [(Double, CGPoint)] = []
     private var sampler: Timer?
     private var monitor: Any?
+    private let deviceSound: AnyObject?
+    private(set) var soundNote: String?
 
-    init(id: String, folder: URL, kind: SourceKind, name: String, filter: SCContentFilter, config: SCStreamConfiguration, frameOnScreen: @escaping () -> CGRect?) throws {
+    init(id: String, folder: URL, kind: SourceKind, name: String, filter: SCContentFilter, config: SCStreamConfiguration,
+         deviceSound: AnyObject? = nil, soundNote: String? = nil, frameOnScreen: @escaping () -> CGRect?) throws {
         self.id = id; self.folder = folder; self.kind = kind; self.name = name
+        self.deviceSound = deviceSound; self.soundNote = soundNote
         self.frameOnScreen = frameOnScreen
         pixelSize = CGSize(width: config.width, height: config.height)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -893,6 +897,8 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
             monitor = nil
         }
         try? await stream.stopCapture()
+        var heard: SimulatorDevices.Heard?
+        if #available(macOS 14.2, *), let tap = deviceSound as? SimulatorSound { heard = tap.stop() }
         // Let the silhouette search land first.
         await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in finding.notify(queue: queue) { k.resume() } }
         return try await withCheckedThrowingContinuation { (k: CheckedContinuation<RecordingMeta, Error>) in
@@ -915,10 +921,31 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
                 self.writer.finishWriting {
                     do {
                         try Library.write(meta, cursor: cursor, in: self.folder)
+                        if self.deviceSound != nil { self.keep(heard, first: first, duration: meta.duration) }
                         k.resume(returning: meta)
                     } catch { k.resume(throwing: error) }
                 }
             }
+        }
+    }
+
+    // @ref LLP 0001#simulator-sound
+    private func keep(_ heard: SimulatorDevices.Heard?, first: Double, duration: Double) {
+        let url = folder.appendingPathComponent(SimulatorDevices.file)
+        guard let heard, heard.problem == nil, heard.seconds > 0 else {
+            try? FileManager.default.removeItem(at: url)
+            soundNote = "The simulated device's sound was not recorded\(heard?.problem.map { ": \($0)" } ?? ": the tap gave no sound"), so this recording has none."
+            return
+        }
+        let made = RecordedSound(file: SimulatorDevices.file, offset: SimulatorDevices.offset(fileStart: heard.start, firstFrame: first))
+        if let why = made.problems(in: folder, duration: duration).first {
+            soundNote = "The simulated device's sound is in \(SimulatorDevices.file) but was not made the recorded sound: \(why)."
+            return
+        }
+        var edits = Edits()
+        edits.recordedSound = made
+        do { try Library.write(edits, in: folder) } catch {
+            soundNote = "The simulated device's sound is in \(SimulatorDevices.file) but edits.json could not be written: \(error.localizedDescription)."
         }
     }
 
@@ -952,9 +979,14 @@ final class Recorder: NSObject, SCStreamOutput, SCStreamDelegate {
             config.height = even(window.frame.height * scale)
             let kind = Sources.kind(of: window)
             let name = (window.title ?? "").isEmpty ? (window.owningApplication?.applicationName ?? "Window") : window.title!
+            // @ref LLP 0001#simulator-sound — a window's sound is its app's, and a simulated app is not the Simulator app
+            let title = window.title ?? ""
+            let device: (tap: AnyObject?, note: String?) = sound && kind == .simulator
+                ? await Task.detached { SimulatorDevices.tap(title: title, into: folder) }.value : (nil, nil)
+            config.capturesAudio = sound && device.tap == nil
             return try Recorder(id: id, folder: folder, kind: kind, name: name,
                                 filter: SCContentFilter(desktopIndependentWindow: window), config: config,
-                                frameOnScreen: { bounds(of: wid) })
+                                deviceSound: device.tap, soundNote: device.note, frameOnScreen: { bounds(of: wid) })
         }
 
         // A display, whole or an area of it.
@@ -1034,6 +1066,12 @@ enum Library {
         guard let dest = CGImageDestinationCreateWithURL(folder.appendingPathComponent(name) as CFURL, "public.png" as CFString, 1, nil) else { return nil }
         CGImageDestinationAddImage(dest, mask, nil)
         return CGImageDestinationFinalize(dest) ? name : nil
+    }
+
+    static func write(_ edits: Edits, in folder: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(edits).write(to: folder.appendingPathComponent("edits.json"))
     }
 
     static func save(_ meta: RecordingMeta) throws {

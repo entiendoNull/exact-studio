@@ -441,6 +441,7 @@ final class Studio: ExactModule {
                 let meta = try await r.stop()
                 last = ["id": meta.id, "folder": r.folder.path, "name": meta.name, "kind": meta.kind, "duration": meta.duration,
                         "by": by, "stoppedBy": stoppedBy]
+                if let note = r.soundNote { last["sound"] = note }
                 finished = meta.id
                 context.changed("recordings")
                 context.changed("status")
@@ -562,7 +563,7 @@ final class Studio: ExactModule {
         }
         return ["ok": true, "recording": true, "starting": false, "id": rec.id, "folder": rec.folder.path, "name": rec.name, "kind": rec.kind.rawValue,
                 "by": recordingBy, "elapsed": Date().timeIntervalSince(recordingSince), "max": recordingBy == "agent" ? maxSeconds : 0,
-                "sound": recordingSound, "last": last]
+                "sound": recordingSound, "soundFrom": rec.soundNote ?? "", "last": last]
     }
 
     /// What an agent can name: the displays, the other apps' windows and the Simulators, as the pickers list them.

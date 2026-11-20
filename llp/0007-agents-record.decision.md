@@ -68,6 +68,8 @@ CLI and the MCP server must all do this well.
 - A start without the Screen Recording permission is refused, and says a person must allow it.
 - `--max <seconds>` stops the recording by itself, in case the agent never calls stop.
 - `--sound on|off` overrides the app's System Sound setting for this recording only.
+- For a Simulator, sound is the simulated device's own (LLP 0001#simulator-sound). `status` and `stop` say
+  where a recording's sound comes from, and why when it falls back to the window's.
 
 ## Exit codes
 

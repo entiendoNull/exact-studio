@@ -143,7 +143,8 @@ video time and convert back, so nothing lands in a removed part.
 ## Sound
 
 - System sound is recorded by default; a switch under New Recording turns it off. A window
-  recording gets its app's sound. Exact Studio's own sound is never recorded.
+  recording gets its app's sound; a Simulator recording, the simulated device's own (LLP 0001#simulator-sound).
+  Exact Studio's own sound is never recorded.
 - The recorded sound is part of the clip. Every cut, speed change, crossfade and fade applies to
   it at exactly the same place. There is no separate sound track to keep in sync.
 - It is drawn inside the Clip, as a waveform band along its bottom, so you see that it is cut with the

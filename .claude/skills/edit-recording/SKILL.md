@@ -39,7 +39,9 @@ open it when it is not running. With the MCP server, the tools are `list_sources
 - When nothing or more than one source matches, the candidates are listed. Pick one and start again.
 - Exit 3 means a person must allow Screen Recording for Exact Studio. Tell them and wait.
 - Exit 4 means the app did not answer. Run `record status` before you try again.
-- `--sound on|off` overrides the app's System Sound setting for this recording.
+- `--sound on|off` overrides the app's System Sound setting for this recording. A Simulator's sound is
+  the simulated device's own, kept as the recorded sound (`sounds/simulator.m4a`), so it follows the cuts.
+  `record stop` says where the sound came from, and why when it could not get the device's.
 
 ## Editing
 

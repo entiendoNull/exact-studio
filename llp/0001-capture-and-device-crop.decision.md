@@ -105,6 +105,22 @@ The frame's own corner setting does not apply to a window.
 - An older window recording gets its radius measured when it is opened.
 - "Find a Device" on a window recording makes it a device recording instead.
 
+## Simulator sound
+
+Asked for by Jacob on 2026-11-20 (issue #26).
+
+- A simulated app plays its sound from its own process, so a Simulator window's capture, which carries
+  only the Simulator app's sound, holds none of it. Checked on macOS 26.7.1: a quiet tone in a simulated
+  app was in a display's capture and missing from the Device Hub window's.
+- So with sound on, a Simulator recording taps the simulated device's processes (everything under its
+  `launchd_sim`) with a CoreAudio process tap, and does not record the window's sound.
+- The tap follows apps that start later: it is updated whenever the system's list of audio processes changes.
+- The sound goes to `sounds/simulator.m4a` and becomes the recorded sound (LLP 0002#sound), lined up by host
+  time with the first frame. A pause in the tap is written as silence, so later sound stays in line.
+- The window is matched to its device by its title, against the booted devices' names. With no match, or two
+  booted devices of that name, it records the window's sound and says why. It never guesses.
+- No gain is added: the file is the device's sound as it played.
+
 ## Cursor
 
 The system cursor is not recorded in the picture. We record its path and clicks and draw it
