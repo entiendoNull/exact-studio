@@ -158,7 +158,7 @@ func write<T: Encodable>(_ value: T, _ url: URL) {
     do { try e.encode(value).write(to: url) } catch { fail("couldn't write \(url.path): \(error)") }
 }
 
-func composition(_ r: Recording) -> (asset: AVAsset, video: AVMutableVideoComposition, map: TimeMap, sounds: [CMPersistentTrackID: String]) {
+func composition(_ r: Recording) -> (asset: AVAsset, video: AVMutableVideoComposition, map: TimeMap, sounds: [CMPersistentTrackID: [Composition.SoundSlot]]) {
     let asset = AVURLAsset(url: r.folder.appendingPathComponent("capture.mov"))
     let state = RenderState(Framing(meta: r.meta, look: r.look, edits: r.edits, cursor: r.cursor, folder: r.folder))
     do { return try Composition.make(asset: asset, meta: r.meta, edits: r.edits, state: state) } catch { fail("\(error)") }

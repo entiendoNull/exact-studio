@@ -125,6 +125,8 @@ final class Studio: ExactModule {
         guard let e = Editor(id: id) else { return nil }
         e.onChange = { [weak self] in self?.context.changed("edits") }
         editors[id] = e
+        // An editor made for a question or an export, with no view on it, holds no playback.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Editor.restAfter) { [weak e] in e?.restIfUnwatched() }
         return e
     }
 
@@ -803,7 +805,7 @@ final class Preview: ExactNativeInstance {
 }
 
 final class PlayerHost: NSView {
-    let player = AVPlayerLayer()
+    private(set) var player = AVPlayerLayer()
     private let outline = CAShapeLayer()
     private let guides = CAShapeLayer()
     private weak var editor: Editor?
@@ -1096,6 +1098,20 @@ final class PlayerHost: NSView {
         self.editor?.unlisten(self)
         if let p = watched, let o = ticking { p.removeTimeObserver(o) }
         ticking = nil
+        if self.editor !== editor {
+            // A layer that showed one recording's playback goes blank when that playback is let go,
+            // even after it was given another: each recording gets a layer of its own.
+            // @ref LLP 0003#one-playback-at-a-time
+            let fresh = AVPlayerLayer()
+            fresh.videoGravity = player.videoGravity
+            fresh.backgroundColor = player.backgroundColor
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            fresh.frame = player.frame
+            layer?.replaceSublayer(player, with: fresh)
+            CATransaction.commit()
+            player.player = nil
+            player = fresh
+        }
         self.editor = editor
         player.player = editor?.player
         // An image moves as time passes, so its outline follows the playhead.

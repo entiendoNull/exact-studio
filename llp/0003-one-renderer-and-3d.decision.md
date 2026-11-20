@@ -47,6 +47,31 @@ Each reach of a blur or black and white is a cut after one layer (`Framing.cover
 Edits must not make the preview blink. A change swaps the render state and redraws in place. A
 rebuild keeps the last frame on screen until the new one is ready.
 
+## One playback at a time
+
+Only a recording that a view shows holds a playback (the player item, its decoders and frames).
+
+- Six hours of use once left 31 playbacks loaded, with 64 sound threads. The main thread waited on
+  the media system for half of a 5 s sample while it rebuilt their sound output. The app lagged.
+- A second after its last view leaves, an editor lets its playback go and stops watching its files.
+- The preview gives each recording a player layer of its own. A layer that had shown another
+  recording went blank when that recording's playback was let go.
+- The edits, the undo steps and the playhead stay. A view that comes back loads the playback there.
+- A change made on disk while it rested shows within a second of coming back.
+
+## The main thread never waits
+
+Opening a recording with many edits once held the main thread for 6 s, and each timeline draw took 0.4 to 0.8 s.
+
+- The player is never asked for its time on the main thread. Its answer waits while a playback
+  loads or moves to another layer: up to 3.6 s for each switch between two big edits.
+  The editor keeps the playhead itself: a seek sets it at once, and the player's ticks move it while it plays.
+- Added sounds that never play together share one audio track; each keeps its volume and fades.
+  A track per sound made a recording with 42 sounds take 5.7 s to show a frame, and 6.4 s on the
+  main thread to let go.
+- A draw asks only cheap questions. Whether a row has a **+** is answered without building its
+  menu: building one tries every item in it, to switch off those that would be refused.
+
 ## Real 3D
 
 3D is real 3D (SceneKit), not a 2.5D fake. A 2.5D version was tried and dropped. A device

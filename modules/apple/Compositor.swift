@@ -1817,7 +1817,7 @@ enum Composition {
     /// drawn by StudioCompositor with `state`'s framing, and the sounds added over it:
     /// `sounds` names the sound each added audio track plays, by track id.
     static func make(asset: AVAsset, meta: RecordingMeta, edits: Edits, state: RenderState) throws
-        -> (asset: AVAsset, video: AVMutableVideoComposition, map: TimeMap, sounds: [CMPersistentTrackID: String]) {
+        -> (asset: AVAsset, video: AVMutableVideoComposition, map: TimeMap, sounds: [CMPersistentTrackID: [SoundSlot]]) {
         guard let source = asset.tracks(withMediaType: .video).first else { throw CompositionError.noVideo }
         let duration = min(meta.duration, asset.duration.seconds)
         let map = TimeMap(duration: duration, edits: edits)
@@ -1863,8 +1863,10 @@ enum Composition {
         }
         // @ref LLP 0002#sound — an added sound plays straight through from where its start lands
         let videoEnd = max(a.timeRange.end, b.timeRange.end)
-        var added: [CMPersistentTrackID: String] = [:]
-        for s in edits.sounds {
+        // @ref LLP 0003#the-main-thread-never-waits — sounds that never play together share a track
+        var added: [CMPersistentTrackID: [SoundSlot]] = [:]
+        var shared: [AVMutableCompositionTrack] = []
+        for s in edits.sounds.sorted(by: { map.output($0.start) < map.output($1.start) }) {
             // The file's asset must outlive this line, or its track reads as empty.
             guard let folder = state.current.folder else { continue }
             let held = AVURLAsset(url: folder.appendingPathComponent(s.file))
@@ -1872,10 +1874,17 @@ enum Composition {
             let at = time(map.output(s.start))
             let from = file.timeRange.start + time(max(0, s.offset))
             let length = min(time(max(0, s.length)), file.timeRange.end - from, videoEnd - at)
-            guard length.seconds > 0.01, let track = mix.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-            if at > .zero { track.insertEmptyTimeRange(CMTimeRange(start: .zero, end: at)) }
-            do { try track.insertTimeRange(CMTimeRange(start: from, duration: length), of: file, at: at) } catch { mix.removeTrack(track); continue }
-            added[track.trackID] = s.id
+            guard length.seconds > 0.01 else { continue }
+            let free = shared.first { $0.timeRange.end <= at }
+            guard let track = free ?? mix.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
+            let end = free == nil ? CMTime.zero : track.timeRange.end
+            if at > end { track.insertEmptyTimeRange(CMTimeRange(start: end, end: at)) }
+            do { try track.insertTimeRange(CMTimeRange(start: from, duration: length), of: file, at: at) } catch {
+                if free == nil { mix.removeTrack(track) }
+                continue
+            }
+            if free == nil { shared.append(track) }
+            added[track.trackID, default: []].append(SoundSlot(id: s.id, start: at.seconds, end: (at + length).seconds))
         }
         // Instructions: a piece alone, then the stretch it shares with the next, end to end.
         var instructions: [StudioInstruction] = []
@@ -1908,19 +1917,19 @@ enum Composition {
 
     /// The recorded sound's volume over time: `edits.volume` throughout, ramping where the picture
     /// crossfades or fades. Each added sound (`sounds`, from `make`) at its own volume, fading in and out.
-    static func audioMix(_ mix: AVAsset, map: TimeMap, edits: Edits, sounds: [CMPersistentTrackID: String]) -> AVAudioMix? {
+    static func audioMix(_ mix: AVAsset, map: TimeMap, edits: Edits, sounds: [CMPersistentTrackID: [SoundSlot]]) -> AVAudioMix? {
         let all = mix.tracks(withMediaType: .audio)
         guard !all.isEmpty else { return nil }
         func time(_ s: Double) -> CMTime { CMTime(seconds: s, preferredTimescale: 6000) }
         var extra: [AVMutableAudioMixInputParameters] = []
         for track in all {
-            guard let id = sounds[track.trackID], let s = edits.sounds.first(where: { $0.id == id }) else { continue }
+            guard let slots = sounds[track.trackID] else { continue }
             let ear = AVMutableAudioMixInputParameters(track: track)
+            for slot in slots {
+            guard let s = edits.sounds.first(where: { $0.id == slot.id }) else { continue }
             let v = Float(min(max(s.volume, 0), 1))
-            // It plays where the track has sound; the fades stay inside that and apart.
-            let span = track.segments.filter { !$0.isEmpty }.map(\.timeMapping.target)
-            guard let first = span.first, let last = span.last else { continue }
-            let ha = first.start.seconds, hb = last.end.seconds
+            // It plays where the track has its sound; the fades stay inside that and apart.
+            let ha = slot.start, hb = slot.end
             // @ref LLP 0002#split — a joined run fades in at its first half's start and out at its last half's end
             let run = Joins.run(s, in: edits.sounds, map: map)
             let head = run[0], tail = run[run.count - 1]
@@ -1931,6 +1940,7 @@ enum Composition {
                 } else if i == 0 {
                     ear.setVolume(Float(r.from) * v, at: time(r.start))
                 }
+            }
             }
             extra.append(ear)
         }
@@ -1956,6 +1966,13 @@ enum Composition {
         let audio = AVMutableAudioMix()
         audio.inputParameters = params + extra
         return audio
+    }
+
+    /// One added sound on a shared audio track: where it plays in the output, in seconds.
+    struct SoundSlot: Equatable {
+        let id: String
+        let start: Double
+        let end: Double
     }
 
     enum CompositionError: Error, CustomStringConvertible {
