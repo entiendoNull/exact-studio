@@ -90,6 +90,16 @@ enum TimelineMenus {
         ], editor)
     }
 
+    /// Whether a row has a +, answered without building its menu: the timeline asks for every row on every draw.
+    // @ref LLP 0003#the-main-thread-never-waits
+    static func hasPlus(_ row: TimelineRow, _ editor: Editor) -> Bool {
+        switch row {
+        case .position, .imagePosition: return true
+        case let .lane(space, lane): return lane <= editor.edits.laneCount(space: space)
+        case let .imageEffects(id, lane): return lane == 0 && editor.edits.segments.contains { $0.id == id && $0.isOverlay }
+        }
+    }
+
     static func plus(_ row: TimelineRow, _ editor: Editor) -> Plus? {
         let at = clock(editor.playhead)
         let effects: [MenuEntry] = [

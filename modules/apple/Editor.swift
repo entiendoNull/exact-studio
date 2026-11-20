@@ -22,7 +22,7 @@ final class Editor {
     let state: RenderState
     private var composition: AVMutableVideoComposition?
     /// The added sounds' audio tracks in the playing composition, by track id.
-    private var soundTracks: [CMPersistentTrackID: String] = [:]
+    private var soundTracks: [CMPersistentTrackID: [Composition.SoundSlot]] = [:]
     /// The selected segment, clip part ("p:…") or move ("m:…"); empty for none.
     private(set) var selected = ""
     /// Why the last edit was refused; cleared by the next one that lands.
@@ -82,10 +82,49 @@ final class Editor {
         }
         stamps = Editor.stamps(folder)
         committed = snapshot
+        watch()
+        follow()
+    }
+
+    deinit {
+        watcher?.invalidate()
+        if let ticks { player.removeTimeObserver(ticks) }
+    }
+
+    private func watch() {
+        watcher?.invalidate()
         watcher = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkDisk() }
     }
 
-    deinit { watcher?.invalidate() }
+    // MARK: Resting while no view shows it
+    // @ref LLP 0003#one-playback-at-a-time
+
+    /// How long after its last view left an editor lets its playback go.
+    static var restAfter = 1.0
+    /// The playhead in source seconds while the playback is let go; nil while it is loaded.
+    private var parked: Double?
+    var isResting: Bool { parked != nil }
+
+    /// Let the playback go when no view shows this recording. The edits, the undo steps and the playhead stay.
+    func restIfUnwatched() {
+        guard listeners.isEmpty, parked == nil else { return }
+        endSample(returning: false)
+        let at = playhead
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        output = nil
+        seeking = nil
+        watcher?.invalidate()
+        watcher = nil
+        parked = at
+    }
+
+    private func wake() {
+        guard let at = parked else { return }
+        parked = nil
+        watch()
+        rebuild(keepTime: true, at: at)
+    }
 
     // MARK: Edits made outside the app
 
@@ -201,20 +240,60 @@ final class Editor {
          "customRadial": look.customRadial]
     }
 
-    func listen(_ owner: AnyObject, _ body: @escaping () -> Void) { listeners[ObjectIdentifier(owner)] = body }
-    func unlisten(_ owner: AnyObject) { listeners[ObjectIdentifier(owner)] = nil }
+    func listen(_ owner: AnyObject, _ body: @escaping () -> Void) {
+        listeners[ObjectIdentifier(owner)] = body
+        wake()
+    }
+
+    func unlisten(_ owner: AnyObject) {
+        listeners[ObjectIdentifier(owner)] = nil
+        guard listeners.isEmpty else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Editor.restAfter) { [weak self] in self?.restIfUnwatched() }
+    }
     private func notify() { listeners.values.forEach { $0() }; onChange() }
     private func redrawViews() { listeners.values.forEach { $0() } }
 
     // MARK: Time
 
     /// The playhead in source seconds.
-    var playhead: Double { map.source(player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0) }
+    var playhead: Double { parked ?? now }
+
+    /// The playhead, kept here. The player is never asked for its time on the main thread: its
+    /// answer waits while a playback loads or moves to another layer, for seconds on a big edit.
+    /// A seek sets it at once; while playing, the player's ticks move it.
+    // @ref LLP 0003#the-main-thread-never-waits
+    private var now = 0.0
+    private var ticks: Any?
+    /// The last seek asked for and not yet landed: until it lands, a tick still tells the old time.
+    private var seeking: Int?
+    private var seekCount = 0
+
+    private func follow() {
+        ticks = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 60), queue: .main) { [weak self] t in
+            guard let self, self.seeking == nil, self.parked == nil, self.player.currentItem != nil, t.seconds.isFinite else { return }
+            self.now = self.map.source(t.seconds)
+        }
+    }
+
+    /// Move the playback to output seconds `out`; the playhead is there from now on.
+    private func go(_ out: Double, then: @escaping (Bool) -> Void = { _ in }) {
+        now = map.source(out)
+        guard player.currentItem != nil else { return then(false) }
+        seekCount += 1
+        let mine = seekCount
+        seeking = mine
+        player.seek(to: CMTime(seconds: out, preferredTimescale: 6000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] done in
+            DispatchQueue.main.async {
+                if self?.seeking == mine { self?.seeking = nil }
+                then(done)
+            }
+        }
+    }
 
     func seek(source t: Double) {
         guard !probing else { return }
-        let out = map.output(min(max(t, 0), duration))
-        player.seek(to: CMTime(seconds: out, preferredTimescale: 6000), toleranceBefore: .zero, toleranceAfter: .zero)
+        if parked != nil { parked = min(max(t, 0), duration); return }
+        go(map.output(min(max(t, 0), duration)))
         settled?.cancel()
         let tell = DispatchWorkItem { [weak self] in self?.onChange() }
         settled = tell
@@ -225,7 +304,7 @@ final class Editor {
     func togglePlay() {
         endSample(returning: false)
         if isPlaying { player.pause(); return }
-        if let item = player.currentItem, item.currentTime().seconds >= map.outputDuration - 0.05 { player.seek(to: .zero) }
+        if map.output(now) >= map.outputDuration - 0.05 { go(0) }
         player.play()
     }
 
@@ -247,7 +326,7 @@ final class Editor {
         sampleEnd = player.addBoundaryTimeObserver(forTimes: [NSValue(time: end)], queue: .main) { [weak self] in
             self?.endSample(returning: true)
         }
-        player.seek(to: CMTime(seconds: map.output(a), preferredTimescale: 6000), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] done in
+        go(map.output(a)) { [weak self] done in
             guard done, self?.sampleReturn != nil else { return }
             self?.player.play()
         }
@@ -308,8 +387,8 @@ final class Editor {
     private static let stills = CIContext()
 
     private func still() -> CGImage? {
-        guard let item = player.currentItem, let output,
-              let buffer = output.copyPixelBuffer(forItemTime: item.currentTime(), itemTimeForDisplay: nil) else { return nil }
+        guard seeking == nil, player.currentItem?.status == .readyToPlay, let output,
+              let buffer = output.copyPixelBuffer(forItemTime: CMTime(seconds: map.output(now), preferredTimescale: 6000), itemTimeForDisplay: nil) else { return nil }
         let image = CIImage(cvPixelBuffer: buffer)
         return Editor.stills.createCGImage(image, from: image.extent)
     }
@@ -321,8 +400,8 @@ final class Editor {
     }
 
     /// The whole playback, made again: for timing changes and a new canvas.
-    private func rebuild(keepTime: Bool) {
-        let at = keepTime ? playhead : 0
+    private func rebuild(keepTime: Bool, at time: Double? = nil) {
+        let at = time ?? (keepTime ? playhead : 0)
         let wasPlaying = isPlaying
         let held = keepTime ? still() : nil
         if let held { freeze(held) }
@@ -331,6 +410,7 @@ final class Editor {
         self.map = map
         self.composition = composition
         soundTracks = sounds
+        if parked != nil { parked = min(max(at, 0), duration); return }
         let item = AVPlayerItem(asset: mix)
         item.videoComposition = composition
         item.audioMix = Composition.audioMix(mix, map: map, edits: edits, sounds: sounds)
@@ -339,8 +419,7 @@ final class Editor {
         item.add(out)
         output = out
         player.replaceCurrentItem(with: item)
-        let target = CMTime(seconds: map.output(min(max(at, 0), duration)), preferredTimescale: 6000)
-        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+        go(map.output(min(max(at, 0), duration))) { [weak self] _ in
             // The new frame takes a moment to reach the screen after the seek lands.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { if held != nil { self?.thaw() } }
         }
@@ -356,9 +435,7 @@ final class Editor {
             player.currentItem?.videoComposition = c
         }
         if let item = player.currentItem { item.audioMix = Composition.audioMix(item.asset, map: map, edits: edits, sounds: soundTracks) }
-        if !isPlaying, let item = player.currentItem {
-            item.seek(to: item.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: nil)
-        }
+        if !isPlaying { go(map.output(now)) }
         redrawViews()
     }
 

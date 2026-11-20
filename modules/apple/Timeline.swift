@@ -438,7 +438,7 @@ final class TimelineView: NSView {
     }
     private func hasPlus(_ r: Row) -> Bool {
         guard let editor, let row = menuRow(r) else { return false }
-        return TimelineMenus.plus(row, editor) != nil
+        return TimelineMenus.hasPlus(row, editor)
     }
     /// At the end of the row's label, every row's in one column just left of the track.
     private func plusRect(_ r: Row) -> CGRect {

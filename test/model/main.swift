@@ -1407,6 +1407,74 @@ test("an edit made on disk shows in the open editor") {
     eq(e.edits.zooms.map(\.id), ["z"])
 }
 
+test("a recording no view shows holds no playback, and comes back where it was") {
+    let e = open("empty")
+    let view = NSObject()
+    Editor.restAfter = 0.05
+    defer { Editor.restAfter = 1 }
+    e.listen(view) {}
+    at(e, 4); e.splitClip()
+    e.unlisten(view)
+    e.listen(view) {}
+    expect(!wait(0.3) { e.isResting }, "it rested while a view came straight back")
+    e.unlisten(view)
+    expect(wait { e.isResting }, "it never rested")
+    expect(e.player.currentItem == nil, "the playback is still loaded")
+    near(e.playhead, 4, within: 0.01)
+    e.undo()
+    eq(e.edits.splits, [], "undo works while it rests"); eq(onDisk(e).splits, [])
+    expect(e.player.currentItem == nil, "an edit loaded the playback again")
+    e.seek(source: 6)
+    var next = Edits()
+    next.splits = [5]
+    try JSONEncoder().encode(next).write(to: e.folder.appendingPathComponent("edits.json"))
+    e.listen(view) {}
+    near(e.playhead, 6, "the playhead is known while the playback loads", within: 0.01)
+    e.seek(source: 7)
+    near(e.playhead, 7, "a seek while it loads moves the playhead at once", within: 0.01)
+    e.seek(source: 6)
+    expect(wait { e.player.currentItem?.status == .readyToPlay }, "the playback never came back")
+    expect(wait { abs(e.playhead - 6) < 0.01 }, "the playhead came back at \(e.playhead)")
+    expect(wait(4) { e.edits.splits == [5] }, "a change made on disk while it rested never showed")
+    e.unlisten(view)
+}
+
+test("sounds that never play together share one audio track, each at its own volume") {
+    let e = open("empty", edits: """
+    { "soundLanes": 2, "sounds": [
+      { "id": "a", "file": "sounds/beep.wav", "start": 1, "length": 0.3, "volume": 0.2 },
+      { "id": "b", "file": "sounds/beep.wav", "start": 3, "length": 0.3, "volume": 0.4 },
+      { "id": "c", "file": "sounds/beep.wav", "start": 5, "length": 0.3, "volume": 0.6 },
+      { "id": "over", "file": "sounds/beep.wav", "start": 1.1, "length": 0.3, "volume": 0.8, "lane": 1 }] }
+    """)
+    eq(e.edits.sounds.count, 4)
+    let (mix, _, map, sounds) = try Composition.make(asset: e.asset, meta: e.meta, edits: e.edits, state: e.state)
+    let tracks = mix.tracks(withMediaType: .audio)
+    eq(tracks.count, 2, "three sounds in a row and one over the first need two tracks")
+    eq(sounds.values.map { $0.map(\.id) }.sorted { $0.count > $1.count }, [["a", "b", "c"], ["over"]])
+    let audio = Composition.audioMix(mix, map: map, edits: e.edits, sounds: sounds)
+    eq(audio?.inputParameters.count, 2)
+    for s in e.edits.sounds {
+        guard let (id, slots) = sounds.first(where: { $0.value.contains { $0.id == s.id } }), let slot = slots.first(where: { $0.id == s.id }),
+              let ear = audio?.inputParameters.first(where: { $0.trackID == id }) else { expect(false, "\(s.id) is on no track"); continue }
+        near(slot.start, map.output(s.start), "\(s.id) starts where it was put", within: 0.01)
+        expect(slot.end > slot.start, "\(s.id) has no length")
+        var from: Float = -1, to: Float = -1, range = CMTimeRange.zero
+        let at = CMTime(seconds: (slot.start + slot.end) / 2, preferredTimescale: 6000)
+        expect(ear.getVolumeRamp(for: at, startVolume: &from, endVolume: &to, timeRange: &range), "\(s.id) has no volume")
+        near(Double(from), s.volume, "\(s.id) plays at its own volume", within: 0.001)
+    }
+}
+
+test("a row's + is known without building its menu, and agrees with the menu") {
+    let e = open("full")
+    var rows: [TimelineRow] = [.position, .imagePosition("none"), .imageEffects("none", 0)]
+    for space in [0, 1, 2, Edits.soundSpace] { for lane in 0...(e.edits.laneCount(space: space) + 2) { rows.append(.lane(space, lane)) } }
+    for s in e.edits.segments { rows += [.imagePosition(s.id), .imageEffects(s.id, 0), .imageEffects(s.id, 1)] }
+    expect(rows.contains { TimelineMenus.hasPlus($0, e) } && rows.contains { !TimelineMenus.hasPlus($0, e) }, "the rows cover both answers")
+    for row in rows { eq(TimelineMenus.hasPlus(row, e), TimelineMenus.plus(row, e) != nil, "\(row)") }
+}
+
 test("a file without lanes, styles or durations opens as written, and the next change keeps it") {
     let e = open("empty", edits: """
     { "segments": [{ "id": "z", "kind": "zoom", "start": 1, "end": 2, "level": 2 }], "moves": [{ "id": "m", "t": 3, "to": { "x": 0.3 } }] }
